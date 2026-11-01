@@ -27,6 +27,8 @@ update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
 appliance_broker = api.broker
 
 def preview_broker(action, payload=None):
+    if action == 'system.restart':
+        raise HTTPException(409, 'Restart from the dashboard hosted on your AirLink PC. This is a local preview.')
     if action.startswith('updates.'):
         operation = action.split('.', 1)[1]
         if operation not in {'status', 'check'}:
@@ -36,7 +38,7 @@ def preview_broker(action, payload=None):
         except Exception as exc:
             raise HTTPException(409, str(exc)) from exc
         if operation == 'status':
-            result.update(install_supported=False, preview=True)
+            result.update(install_supported=False, restart_supported=False, preview=True)
         return result
     return appliance_broker(action, payload)
 

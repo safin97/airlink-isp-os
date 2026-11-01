@@ -31,7 +31,10 @@ class _UpdateCenterState extends State<UpdateCenter> {
   bool get configured => service['configured'] == true;
   bool get installSupported => service['install_supported'] != false;
   bool get recovering => installation['status'] == 'failed';
-  bool get installing => installation['status'] == 'installing';
+  bool get installing =>
+      const {'queued', 'installing'}.contains(installation['status']);
+  bool get restartPending => service['restart']?['pending'] == true;
+  bool get restartSupported => service['restart_supported'] == true;
   bool get autoCheckDue =>
       lastAutomaticCheck == null ||
       DateTime.now().difference(lastAutomaticCheck!) >=
@@ -42,8 +45,8 @@ class _UpdateCenterState extends State<UpdateCenter> {
     super.initState();
     refresh(check: true);
     timer = Timer.periodic(const Duration(seconds: 3), (tick) {
-      if (busy || installing || tick.tick % 10 == 0) {
-        refresh(check: !busy && !installing && autoCheckDue);
+      if (busy || installing || restartPending || tick.tick % 10 == 0) {
+        refresh(check: !busy && !installing && !restartPending && autoCheckDue);
       }
     });
   }
@@ -81,6 +84,88 @@ class _UpdateCenterState extends State<UpdateCenter> {
     } finally {
       fetching = false;
       if (mounted) setState(() => checking = false);
+    }
+  }
+
+  Future<void> restartSystem() async {
+    if (!restartSupported ||
+        busy ||
+        installing ||
+        recovering ||
+        restartPending) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restart AirLink system?'),
+        content: const Text(
+          'This restarts the entire AirLink PC. Monitoring and the dashboard will be unavailable briefly. The page will reconnect when the server returns.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restart system'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      busy = true;
+      error = null;
+      message = null;
+      phase = 'Requesting system restart…';
+    });
+    try {
+      final accepted = await widget.api.request(
+        '/system/restart',
+        method: 'POST',
+        body: {'confirm': true},
+      );
+      if (!mounted) return;
+      final previousBoot = accepted['boot_id'];
+      setState(
+        () => phase = 'Restart requested. Waiting for the server to return…',
+      );
+      final deadline = DateTime.now().add(const Duration(minutes: 5));
+      while (mounted && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(seconds: 3));
+        if (!mounted) return;
+        try {
+          final data = Map<String, dynamic>.from(
+            await widget.api.request('/updates'),
+          );
+          if (!mounted) return;
+          setState(() => snapshot = data);
+          final boot = data['state']?['restart']?['boot_id'];
+          if (previousBoot != null && boot != null && boot != previousBoot) {
+            setState(() => message = 'System restarted successfully.');
+            return;
+          }
+        } catch (_) {
+          // A disconnected API is expected during reboot, not proof of completion.
+        }
+      }
+      if (mounted) {
+        setState(
+          () => message =
+              'Restart is not yet confirmed. Check the AirLink PC before trying again.',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          phase = null;
+        });
+      }
     }
   }
 
@@ -290,7 +375,15 @@ class _UpdateCenterState extends State<UpdateCenter> {
         !checking &&
         !installing &&
         !recovering &&
+        !restartPending &&
         error == null;
+    final canRestart =
+        restartSupported &&
+        !busy &&
+        !checking &&
+        !installing &&
+        !recovering &&
+        !restartPending;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -305,7 +398,7 @@ class _UpdateCenterState extends State<UpdateCenter> {
         if (service['preview'] == true) ...[
           const SizedBox(height: 12),
           const Text(
-            'Local preview: release checks are live. Install updates from the dashboard hosted on your AirLink PC.',
+            'Local preview: release checks are live. Install updates or restart from the dashboard hosted on your AirLink PC.',
           ),
         ],
         if (snapshot != null && !configured) ...[
@@ -352,9 +445,14 @@ class _UpdateCenterState extends State<UpdateCenter> {
             'The last installation failed. Review local recovery before retrying.',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-        if (busy || installing) ...[
+        if (busy || installing || restartPending) ...[
           const SizedBox(height: 16),
-          Text(phase ?? 'Installation is running on the server…'),
+          Text(
+            phase ??
+                (restartPending
+                    ? 'System restart requested. Waiting for the server…'
+                    : 'Installation is running on the server…'),
+          ),
           const SizedBox(height: 8),
           LinearProgressIndicator(value: progress),
         ],
@@ -381,6 +479,11 @@ class _UpdateCenterState extends State<UpdateCenter> {
             OutlinedButton(
               onPressed: canInstall ? scheduleUpdate : null,
               child: const Text('Schedule update'),
+            ),
+            OutlinedButton.icon(
+              onPressed: canRestart ? restartSystem : null,
+              icon: const Icon(Icons.restart_alt),
+              label: const Text('Restart system'),
             ),
           ],
         ),

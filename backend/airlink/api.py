@@ -506,6 +506,15 @@ def system(user=Depends(owner)):
     return broker("status")
 
 
+@app.post("/api/system/restart", status_code=202)
+def restart_system(payload: dict, user=Depends(owner), db=Depends(get_db)):
+    if payload.get("confirm") is not True:
+        raise HTTPException(422, "Confirm the system restart first")
+    result = broker("system.restart", {"confirm": True})
+    commit(db, user, "system.restart")
+    return result
+
+
 @app.get("/api/network")
 def network(user=Depends(owner)):
     return broker("network.status")

@@ -173,3 +173,27 @@ def test_update_checks_and_installation_are_owner_only(client, owner, monkeypatc
     assert client.get('/api/updates', headers=headers).status_code == 403
     for action in ('check', 'download', 'verify', 'install', 'schedule'):
         assert client.post('/api/updates/' + action, headers=headers, json={}).status_code == 403
+
+@pytest.mark.parametrize('role', ['manager', 'technician', 'viewer'])
+def test_restart_is_owner_only(client, owner, monkeypatch, role):
+    _, headers = user(client, owner, role)
+    from airlink import api
+    monkeypatch.setattr(api, 'broker', lambda *args: pytest.fail('Unauthorized restart'))
+    assert client.post('/api/system/restart', json={'confirm': True}).status_code == 401
+    assert client.post('/api/system/restart', headers=headers, json={'confirm': True}).status_code == 403
+
+
+def test_owner_restart_confirmation_and_audit(client, owner, monkeypatch):
+    from airlink import api
+    calls=[]
+    def restart(action, payload):
+        calls.append((action,payload))
+        return {'status':'restart_requested','boot_id':'old-boot','delay_seconds':5}
+    monkeypatch.setattr(api, 'broker', restart)
+    for payload in ({}, {'confirm':False}, {'confirm':'true'}):
+        assert client.post('/api/system/restart',headers=owner,json=payload).status_code == 422
+    assert not calls
+    response=client.post('/api/system/restart',headers=owner,json={'confirm':True})
+    assert response.status_code == 202
+    assert calls == [('system.restart',{'confirm':True})]
+    assert any(row['action']=='system.restart' for row in client.get('/api/audit',headers=owner).json())

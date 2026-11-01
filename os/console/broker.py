@@ -11,7 +11,7 @@ from pathlib import Path
 import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from network.configure import action as network_action
-from updates.update import action as update_action
+from updates.update import action as update_action, restart_system
 
 SOCKET = Path("/run/airlink/control.sock")
 
@@ -39,6 +39,8 @@ class Handler(socketserver.StreamRequestHandler):
             name, payload = req["action"], req.get("payload", {})
             if name == "status":
                 result = status()
+            elif name == "system.restart":
+                result = restart_system(payload)
             elif name.startswith("network."):
                 result = network_action(name.split(".", 1)[1], payload)
             elif name.startswith("updates."):

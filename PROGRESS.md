@@ -1,6 +1,6 @@
 # AirLink ISP OS — delivery status
 
-Version **0.1.2-dev**, built 1 November 2026. This is a working development appliance, not completion of every production requirement in the master prompt. No existing starter files were present in the workspace.
+Application version **0.1.3-dev** (installer ISO: **0.1.2-dev**), built 1 November 2026. This is a working development appliance, not completion of every production requirement in the master prompt. No existing starter files were present in the workspace.
 
 | Phase | Implemented and verified | Remaining work |
 |---|---|---|
@@ -51,3 +51,7 @@ The rebuilt ISO passed UEFI/graphical boot and HTTPS version checks in QEMU; its
 The owner's stacked and horizontal logos now appear on login/setup, dashboard navigation/mobile headers, loading/error screens, browser/application icons, installer pages, ISO/installed GRUB menus and the repository header. Original PNG artwork is preserved. Desktop/mobile Chrome and all installer page layouts were inspected. The final ISO passed branded UEFI/graphical boot and exact served-logo checks. Offline provisioning and a signed 0.1.1-to-0.1.2 upgrade passed; the upgraded virtual disk also passed standalone UEFI boot and HTTPS/logo checks. See [branding release verification](docs/releases/0.1.2-dev-verification.md).
 
 [v0.1.2-dev](https://github.com/safin97/airlink-isp-os/releases/tag/v0.1.2-dev) is published as Latest. All 13 asset hashes and anonymous real-updater Check/Download/Verify passed; the local default ISO is updated and previous release artifacts are archived.
+
+## 0.1.3-dev — Restart system
+
+Added an owner-confirmed Restart system action beside Schedule update. It works independently of release availability, shares the update lock, rejects conflicting/duplicate requests, and waits for a new boot identity before declaring success. The Mac preview cannot restart its host. Validation: 92 Python tests (one Linux-only skip), 13 Flutter tests, clean analyzer, actual signed upgrade and owner-API reboot/reconnection in QEMU with data/audit preservation. This is an application-only GitHub release; the local ISO and preview bundle remain unchanged. See [restart verification](docs/releases/0.1.3-dev-verification.md).

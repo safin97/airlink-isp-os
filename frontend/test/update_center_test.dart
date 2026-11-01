@@ -192,4 +192,103 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets(
+    'Restart is confirmed, independent of available updates, and waits for a new boot',
+    (tester) async {
+      var requested = false;
+      var newBoot = false;
+      final api = Api(
+        client: MockClient((request) async {
+          if (request.url.path == '/api/system/restart') {
+            expect(jsonDecode(request.body), {'confirm': true});
+            requested = true;
+            return json({
+              'status': 'restart_requested',
+              'boot_id': 'before',
+              'delay_seconds': 5,
+            }, 202);
+          }
+          return json({
+            'current_version': '0.1.3-dev',
+            'state': {
+              'configured': false,
+              'restart_supported': true,
+              'restart': {
+                'pending': requested && !newBoot,
+                'boot_id': newBoot ? 'after' : 'before',
+              },
+              'state': {'status': 'idle'},
+            },
+            'history': [],
+          });
+        }),
+      );
+      await mount(tester, api);
+      final button = find.widgetWithText(OutlinedButton, 'Restart system');
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(requested, isFalse);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Restart system'));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump();
+      expect(requested, isTrue);
+      expect(find.text('System restarted successfully.'), findsNothing);
+      newBoot = true;
+      await tester.pumpAndSettle();
+      expect(find.text('System restarted successfully.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final blocked in [
+    'preview',
+    'queued',
+    'installing',
+    'failed',
+    'restart-pending',
+  ]) {
+    testWidgets('Restart is disabled for $blocked', (tester) async {
+      final api = Api(
+        client: MockClient((request) async {
+          expect(request.method, 'GET');
+          return json({
+            'state': {
+              'configured': false,
+              'restart_supported': blocked != 'preview',
+              'restart': {
+                'pending': blocked == 'restart-pending',
+                'boot_id': 'same',
+              },
+              'state': {'status': blocked},
+            },
+            'history': [],
+          });
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: UpdateCenter(api: api)),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Restart system'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 }

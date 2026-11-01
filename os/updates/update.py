@@ -120,13 +120,49 @@ def verify_package(meta):
         raise ValueError("Unexpected package identity")
 
 
+def restart_status():
+    try:
+        boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    except OSError:
+        boot_id = None
+    requested = read(ROOT / 'restart.json', {})
+    return {'boot_id': boot_id, 'pending': bool(boot_id and requested.get('boot_id') == boot_id)}
+
+
+def restart_system(payload):
+    if payload.get('confirm') is not True:
+        raise ValueError('Confirm the system restart first')
+    ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(ROOT / 'lock', 'w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('An update operation is active. Wait before restarting.') from None
+        if read(ROOT / 'state.json', {}).get('status') in {'queued', 'installing', 'failed'}:
+            raise ValueError('An active or failed installation requires review before restarting')
+        status = restart_status()
+        if not status['boot_id']:
+            raise ValueError('System restart is only available on the AirLink Linux appliance')
+        if status['pending']:
+            raise ValueError('A system restart has already been requested')
+        atomic(ROOT / 'restart.json', {'boot_id': status['boot_id'], 'requested_at': time.time()})
+        try:
+            # A fixed, delayed systemd action allows the HTTP response/audit to finish.
+            subprocess.run(['systemd-run', '--unit=airlink-system-restart', '--on-active=5s',
+                            '/usr/bin/systemctl', 'reboot'], check=True, capture_output=True, text=True)
+        except Exception:
+            (ROOT / 'restart.json').unlink(missing_ok=True)
+            raise
+        return {'status': 'restart_requested', 'boot_id': status['boot_id'], 'delay_seconds': 5}
+
+
 def status():
     installed = read(ROOT / "installed.json", {"sequence": 0})
     available = read(ROOT / "verified.json", None)
     if available and available["sequence"] <= installed["sequence"]:
         available = None
     return {"configured": CONFIG.exists() and KEY.exists(), "rollback_supported": False,
-            "install_supported": True,
+            "install_supported": True, "restart_supported": True, "restart": restart_status(),
             "state": read(ROOT / "state.json", {"status": "idle"}),
             "transfer": read(ROOT / "transfer.json", {}),
             "last_check": read(ROOT / "check.json", None),
@@ -167,6 +203,8 @@ def action(name, payload):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if name == "check":
             return check_release()
+        if restart_status()['pending']:
+            raise ValueError('A system restart is pending. Wait for the server to return.')
         meta = manifest()
         if any(field in payload and payload[field] != meta[field] for field in ("version", "sequence")):
             raise ValueError("Release changed. Check again before updating.")
@@ -186,7 +224,7 @@ def action(name, payload):
         elif name == "verify":
             verify_package(meta)
         elif name in ("install", "schedule"):
-            if read(ROOT / "state.json", {}).get("status") in {"installing", "failed"}:
+            if read(ROOT / "state.json", {}).get("status") in {"queued", "installing", "failed"}:
                 raise ValueError("An active or failed installation requires local review")
             verify_package(meta)
             approved = {field: meta[field] for field in ("version", "sequence", "sha256", "size")}
@@ -204,7 +242,13 @@ def action(name, payload):
                 subprocess.run(["systemctl", "enable", "--now", "airlink-update-job.timer"], check=True)
             else:
                 atomic(ROOT / "request.json", approved)
-                subprocess.run(["systemctl", "start", "--no-block", "airlink-update-job.service"], check=True)
+                previous = read(ROOT / "state.json", {"status": "idle"})
+                atomic(ROOT / "state.json", {"status": "queued", "version": meta["version"]})
+                try:
+                    subprocess.run(["systemctl", "start", "--no-block", "airlink-update-job.service"], check=True)
+                except Exception:
+                    atomic(ROOT / "state.json", previous)
+                    raise
         else:
             raise ValueError("Unsupported update action")
         return {"version": meta["version"], "status": name}
@@ -213,7 +257,10 @@ def action(name, payload):
 def install():
     ROOT.mkdir(parents=True, exist_ok=True)
     with open(ROOT / "lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # The queued service may start before its controller request releases this lock.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if restart_status()['pending']:
+            raise RuntimeError('A system restart is pending; installation has not started')
         previous = read(ROOT / "state.json", {})
         if previous.get("status") in {"installing", "failed"}:
             raise RuntimeError("Interrupted/failed update requires local recovery review")

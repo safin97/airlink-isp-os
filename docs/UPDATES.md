@@ -27,3 +27,9 @@ The updated dashboard checks the signed GitHub feed when the owner opens Softwar
 Checking an already installed, matching sequence reports “up to date”; installing or verifying that sequence again is still rejected. Invalid checks preserve the previously trusted manifest. A failed or active installation cannot be silently reset by checking/downloading another release.
 
 The Mac development preview performs real signed release checks but denies package installation on the server as well as disabling its controls. The `v0.1.1-dev` ISO and signed application package include this workflow. The immutable `v0.1.0-dev` release assets retain their original interface. Package upgrades restart the controller and console to activate the new code.
+
+## Restart system (0.1.3-dev)
+
+Owners can select **Restart system** beside **Schedule update**, even when no new release is available. Confirm the interruption to restart the whole AirLink PC. The dashboard polls through disconnection and reports success only after the Linux boot identity changes. If the server does not return within five minutes, it asks the owner to check the PC instead of claiming success.
+
+The privileged controller shares the updater lock, rejects restart during queued/active or failed installations, and prevents update installation while a restart is pending. Requests use a fixed delayed systemd action and are audited. The Mac preview cannot restart the host. Version 0.1.3-dev is distributed as a signed application package; the installer ISO remains 0.1.2-dev.
