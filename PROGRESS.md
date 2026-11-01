@@ -49,3 +49,5 @@ The rebuilt ISO passed UEFI/graphical boot and HTTPS version checks in QEMU; its
 ## 0.1.2-dev AirLink branding
 
 The owner's stacked and horizontal logos now appear on login/setup, dashboard navigation/mobile headers, loading/error screens, browser/application icons, installer pages, ISO/installed GRUB menus and the repository header. Original PNG artwork is preserved. Desktop/mobile Chrome and all installer page layouts were inspected. The final ISO passed branded UEFI/graphical boot and exact served-logo checks. Offline provisioning and a signed 0.1.1-to-0.1.2 upgrade passed; the upgraded virtual disk also passed standalone UEFI boot and HTTPS/logo checks. See [branding release verification](docs/releases/0.1.2-dev-verification.md).
+
+[v0.1.2-dev](https://github.com/safin97/airlink-isp-os/releases/tag/v0.1.2-dev) is published as Latest. All 13 asset hashes and anonymous real-updater Check/Download/Verify passed; the local default ISO is updated and previous release artifacts are archived.
