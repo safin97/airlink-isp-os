@@ -2,7 +2,7 @@
 
 AirLink can fetch signed application updates from a **public GitHub repository**. Its existing updater accepts a signed `stable.json` release asset and the exact `.deb` package referenced by that manifest. GitHub hosts the files; the installed Ed25519 public key determines which publisher is trusted. No GitHub token or signing private key belongs on the appliance.
 
-The configured repository is `safin97/airlink-isp-os`. The source tree includes its update URL and public publisher key in `deployment/update-source/`; provisioning seeds these on a new installation and preserves existing site configuration. A transfer bundle is in `dist/github-config/`. Source code was uploaded successfully to the repository on 1 November 2026. Earlier repository-access failures are resolved. The first signed development release is `v0.1.0-dev`; its assets include `stable.json` and the signed package. Download availability can be checked on the repository Releases page.
+The configured repository is `safin97/airlink-isp-os`. The source tree includes its update URL and public publisher key in `deployment/update-source/`; provisioning seeds these on a new installation and preserves existing site configuration. A transfer bundle is in `dist/github-config/`. Source code was uploaded successfully to the repository on 1 November 2026. Earlier repository-access failures are resolved. The first signed development release is `v0.1.0-dev`; its assets include `stable.json` and the signed package. It is published on the repository Releases page. The actual updater passed anonymous Check → Download → Verify against the public assets.
 
 Publisher public-key SHA-256: `b4ae47eb2992e80384df54d23e0b7300bc85aac7813ae21ca44b5fc2a31fda9e`.
 
