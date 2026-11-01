@@ -1,0 +1,17 @@
+.venv/
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+*.sqlite*
+.env
+frontend/.dart_tool/
+frontend/build/
+frontend/.flutter-plugins-dependencies
+os/build/work/
+dist/
+*.qcow2
+*.fd
+test-results/
+.release-secrets/
+qemu-preview/

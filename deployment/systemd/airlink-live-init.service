@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize ephemeral AirLink live environment
+After=local-fs.target postgresql.service
+Requires=postgresql.service
+Before=airlink-api.service airlink-monitor.service airlink-alerts.service nginx.service airlink-installer.service
+ConditionKernelCommandLine=boot=live
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/airlink/os/build/live-init.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target

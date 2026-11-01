@@ -1,0 +1,12 @@
+[Unit]
+Description=AirLink graphical installation environment
+After=airlink-live-init.service systemd-user-sessions.service
+ConditionKernelCommandLine=boot=live
+[Service]
+ExecStart=/usr/bin/xinit /opt/airlink/os/build/graphical-session.sh -- :0 vt7 -nolisten tcp
+Restart=on-failure
+RestartSec=3
+StandardInput=tty
+TTYPath=/dev/tty7
+[Install]
+WantedBy=multi-user.target

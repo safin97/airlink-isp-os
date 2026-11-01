@@ -1,0 +1,17 @@
+[Unit]
+Description=AirLink ISP OS management console
+After=airlink-api.service airlink-controller.service
+Conflicts=getty@tty1.service
+ConditionPathExists=/etc/airlink/installed
+[Service]
+ExecStart=/opt/airlink/venv/bin/python /opt/airlink/os/console/console.py
+EnvironmentFile=/etc/airlink/airlink.env
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target

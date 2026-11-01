@@ -1,0 +1,12 @@
+[Unit]
+Description=AirLink explicitly requested virtual-disk installation test
+After=airlink-live-init.service
+ConditionKernelCommandLine=airlink.qa=install
+[Service]
+Type=oneshot
+ExecStart=/opt/airlink/venv/bin/python /opt/airlink/tests/guest_install.py
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=1800
+[Install]
+WantedBy=multi-user.target

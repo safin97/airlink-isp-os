@@ -1,0 +1,17 @@
+{
+  "name": "AirLink ISP OS",
+  "short_name": "AirLink",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#071426",
+  "theme_color": "#071426",
+  "description": "Network Monitoring Operating System",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

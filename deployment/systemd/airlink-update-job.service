@@ -1,0 +1,9 @@
+[Unit]
+Description=Install a verified AirLink software update
+After=network-online.target
+ConditionPathExists=/etc/airlink/update-public-key.bin
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/airlink/os/updates/update.py install
+TimeoutStartSec=1800
+UMask=0077

@@ -1,0 +1,171 @@
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, JSON, Text, UniqueConstraint, CheckConstraint, Index
+from .db import Base
+
+
+def now():
+    return datetime.now(timezone.utc)
+
+
+def uid():
+    return str(uuid.uuid4())
+
+
+class Role(Base):
+    __tablename__ = "roles"
+    name = Column(String(16), primary_key=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String(36), primary_key=True, default=uid)
+    username = Column(String(64), nullable=False, unique=True)
+    password_hash = Column(Text, nullable=False)
+    role = Column(String(16), ForeignKey("roles.name"), nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class Initialization(Base):
+    __tablename__ = "initialization"
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    __table_args__ = (CheckConstraint("id = 1"),)
+
+
+class LoginSession(Base):
+    __tablename__ = "login_sessions"
+    id = Column(String(36), primary_key=True, default=uid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, default=False, nullable=False)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    digest = Column(String(64), primary_key=True)
+    session_id = Column(String(36), ForeignKey("login_sessions.id"), nullable=False)
+    consumed = Column(Boolean, default=False, nullable=False)
+
+
+class Tower(Base):
+    __tablename__ = "towers"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(120), nullable=False)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    location = Column(String(250), default="")
+    management_ip = Column(String(45))
+    manager_id = Column(String(36), ForeignKey("users.id"))
+
+
+class Sector(Base):
+    __tablename__ = "sectors"
+    id = Column(String(36), primary_key=True, default=uid)
+    tower_id = Column(String(36), ForeignKey("towers.id", ondelete="RESTRICT"), nullable=False, index=True)
+    name = Column(String(120), nullable=False)
+    ssid = Column(String(120), default="")
+    frequency_mhz = Column(Integer)
+    channel_width_mhz = Column(Integer)
+    model = Column(String(120), default="")
+    ip_address = Column(String(45))
+
+
+class SNMPProfile(Base):
+    __tablename__ = "snmp_profiles"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(120), nullable=False)
+    encrypted_credentials = Column(Text, nullable=False)
+
+
+class Device(Base):
+    __tablename__ = "devices"
+    id = Column(String(36), primary_key=True, default=uid)
+    tower_id = Column(String(36), ForeignKey("towers.id", ondelete="RESTRICT"), nullable=False, index=True)
+    sector_id = Column(String(36), ForeignKey("sectors.id", ondelete="RESTRICT"))
+    name = Column(String(120), nullable=False)
+    ip_address = Column(String(45), nullable=False, unique=True)
+    vendor = Column(String(30), nullable=False, default="generic")
+    model = Column(String(120), default="")
+    snmp_profile_id = Column(String(36), ForeignKey("snmp_profiles.id", ondelete="RESTRICT"))
+    poll_interval = Column(Integer, default=60, nullable=False)
+    retries = Column(Integer, default=2, nullable=False)
+    failure_threshold = Column(Integer, default=3, nullable=False)
+    cpu_threshold = Column(Float, default=90, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    status = Column(String(16), default="unknown", nullable=False)
+    failures = Column(Integer, default=0, nullable=False)
+    last_poll = Column(DateTime(timezone=True))
+    last_success = Column(DateTime(timezone=True))
+
+
+class DeviceAssignment(Base):
+    __tablename__ = "device_assignments"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True)
+
+
+class Interface(Base):
+    __tablename__ = "interfaces"
+    id = Column(String(36), primary_key=True, default=uid)
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    if_index = Column(Integer, nullable=False)
+    name = Column(String(250), nullable=False)
+    speed_mbps = Column(Float)
+    oper_status = Column(Integer)
+    __table_args__ = (UniqueConstraint("device_id", "if_index"),)
+
+
+class Metric(Base):
+    __tablename__ = "metrics"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    collected_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    values = Column(JSON, nullable=False)
+    __table_args__ = (Index("ix_metrics_device_time", "device_id", "collected_at"),)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id = Column(String(36), primary_key=True, default=uid)
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(40), nullable=False)
+    severity = Column(String(16), nullable=False)
+    message = Column(String(500), nullable=False)
+    opened_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    resolved_at = Column(DateTime(timezone=True))
+    acknowledged_by = Column(String(36), ForeignKey("users.id"))
+
+
+class NetworkLink(Base):
+    __tablename__ = "network_links"
+    id = Column(String(36), primary_key=True, default=uid)
+    source_id = Column(String(36), ForeignKey("towers.id", ondelete="CASCADE"), nullable=False)
+    target_id = Column(String(36), ForeignKey("towers.id", ondelete="CASCADE"), nullable=False)
+    evidence = Column(String(500), nullable=False)
+    verified_by = Column(String(36), ForeignKey("users.id"), nullable=False)
+    verified_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    __table_args__ = (CheckConstraint("source_id <> target_id"), UniqueConstraint("source_id", "target_id"))
+
+
+class UpdateHistory(Base):
+    __tablename__ = "update_history"
+    id = Column(String(36), primary_key=True, default=uid)
+    version = Column(String(40), nullable=False)
+    status = Column(String(30), nullable=False)
+    detail = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"))
+    action = Column(String(120), nullable=False)
+    target = Column(String(120))
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+def audit(db, user, action, target=None):
+    db.add(AuditLog(user_id=user.id if user else None, action=action, target=target))

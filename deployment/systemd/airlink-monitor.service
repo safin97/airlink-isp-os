@@ -1,0 +1,21 @@
+[Unit]
+Description=AirLink SNMPv3 and ICMP monitoring
+After=postgresql.service redis-server.service airlink-live-init.service
+Requires=postgresql.service redis-server.service
+ConditionPathExists=/etc/airlink/provisioned
+[Service]
+User=airlink
+Group=airlink
+WorkingDirectory=/opt/airlink
+EnvironmentFile=/etc/airlink/airlink.env
+ExecStart=/opt/airlink/venv/bin/python -m monitoring.worker
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+[Install]
+WantedBy=multi-user.target

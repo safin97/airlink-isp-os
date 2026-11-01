@@ -1,0 +1,2352 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
+import 'api.dart';
+
+const navy = Color(0xff071426);
+const panel = Color(0xff10233d);
+const blue = Color(0xff438fff);
+const muted = Color(0xff99acc6);
+const green = Color(0xff34d399);
+const red = Color(0xffff7385);
+const orange = Color(0xffffb454);
+
+void main() => runApp(const AirLinkApp());
+
+class AirLinkApp extends StatelessWidget {
+  const AirLinkApp({super.key});
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'AirLink ISP OS',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData(
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: navy,
+      colorScheme: const ColorScheme.dark(
+        primary: blue,
+        surface: panel,
+        secondary: green,
+      ),
+      useMaterial3: true,
+      fontFamily: 'sans-serif',
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: navy,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        contentPadding: const EdgeInsets.all(16),
+      ),
+      cardTheme: CardThemeData(
+        color: panel,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+        ),
+      ),
+    ),
+    home: const SessionGate(),
+  );
+}
+
+class SessionGate extends StatefulWidget {
+  const SessionGate({super.key});
+  @override
+  State<SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<SessionGate> {
+  final api = Api();
+  bool loading = true;
+  bool initialized = true;
+  String? error;
+  @override
+  void initState() {
+    super.initState();
+    restore();
+  }
+
+  Future<void> restore() async {
+    try {
+      initialized = (await api.request('/setup/status'))['initialized'];
+      if (initialized) {
+        try {
+          await api.refresh();
+        } on ApiException catch (e) {
+          if (e.status != 401) rethrow;
+        }
+      }
+    } catch (e) {
+      error = e.toString();
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (error != null) {
+      return Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.cloud_off, size: 48, color: orange),
+                const SizedBox(height: 20),
+                const Text('AirLink server is unavailable'),
+                Padding(padding: const EdgeInsets.all(20), child: Text(error!)),
+                FilledButton(
+                  onPressed: () {
+                    setState(() {
+                      error = null;
+                      loading = true;
+                    });
+                    restore();
+                  },
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    if (api.user == null) {
+      return LoginView(
+        api: api,
+        initialized: initialized,
+        done: () => setState(() => initialized = true),
+      );
+    }
+    return Operations(
+      api: api,
+      logout: () async {
+        await api.logout();
+        if (mounted) setState(() {});
+      },
+    );
+  }
+}
+
+class LoginView extends StatefulWidget {
+  final Api api;
+  final bool initialized;
+  final VoidCallback done;
+  const LoginView({
+    super.key,
+    required this.api,
+    required this.initialized,
+    required this.done,
+  });
+  @override
+  State<LoginView> createState() => _LoginViewState();
+}
+
+class _LoginViewState extends State<LoginView> {
+  final username = TextEditingController();
+  final password = TextEditingController();
+  final confirm = TextEditingController();
+  final setupToken = TextEditingController();
+  bool busy = false;
+  String? error;
+  @override
+  void dispose() {
+    for (final c in [username, password, confirm, setupToken]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      if (!widget.initialized) {
+        await widget.api.request(
+          '/setup',
+          method: 'POST',
+          body: {
+            'username': username.text.trim(),
+            'password': password.text,
+            'confirm_password': confirm.text,
+            'token': setupToken.text.trim(),
+          },
+        );
+      }
+      await widget.api.login(username.text.trim(), password.text);
+      widget.done();
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 440,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(Icons.cell_tower, color: blue, size: 64),
+              const SizedBox(height: 24),
+              const Text(
+                'AirLink ISP OS',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'NETWORK OPERATIONS',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted, letterSpacing: 3),
+              ),
+              const SizedBox(height: 40),
+              Text(
+                widget.initialized
+                    ? 'Sign in to your network'
+                    : 'Create the first owner',
+                style: const TextStyle(fontSize: 22),
+              ),
+              const SizedBox(height: 24),
+              TextField(
+                controller: username,
+                decoration: const InputDecoration(labelText: 'Username'),
+                autofillHints: const [AutofillHints.username],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: password,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Password'),
+                onSubmitted: (_) => busy ? null : submit(),
+              ),
+              if (!widget.initialized) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  controller: confirm,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Confirm password',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: setupToken,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Local setup token',
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Text(
+                    'Complete setup on the server console, or enter its local setup token. Use at least 14 password characters.',
+                    style: TextStyle(color: muted),
+                  ),
+                ),
+              ],
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text(error!, style: const TextStyle(color: red)),
+                ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: busy ? null : submit,
+                child: Text(
+                  busy
+                      ? 'Connecting…'
+                      : widget.initialized
+                      ? 'Sign in'
+                      : 'Create owner',
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Secure access • Your network, under your control',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+const pages = [
+  'Dashboard',
+  'Towers',
+  'Sectors',
+  'Devices',
+  'Clients',
+  'Managers',
+  'Monitoring',
+  'Network Map',
+  'Alerts',
+  'Reports',
+  'Software Updates',
+  'Settings',
+];
+const icons = [
+  Icons.space_dashboard_outlined,
+  Icons.cell_tower,
+  Icons.wifi_tethering,
+  Icons.router_outlined,
+  Icons.devices,
+  Icons.group_outlined,
+  Icons.monitor_heart_outlined,
+  Icons.map_outlined,
+  Icons.notifications_outlined,
+  Icons.assessment_outlined,
+  Icons.system_update_alt,
+  Icons.settings_outlined,
+];
+
+class Operations extends StatefulWidget {
+  final Api api;
+  final Future<void> Function() logout;
+  const Operations({super.key, required this.api, required this.logout});
+  @override
+  State<Operations> createState() => _OperationsState();
+}
+
+class _OperationsState extends State<Operations> {
+  int page = 0;
+  bool loading = true;
+  bool refreshing = false;
+  String? error;
+  String search = '';
+  DateTime? observed;
+  Map<String, dynamic> summary = {};
+  Map<String, List<dynamic>> rows = {};
+  Map<String, dynamic>? updateState;
+  List<dynamic> samples = [];
+  String? deviceId;
+  Timer? timer;
+  Api get api => widget.api;
+  String get role => api.user!['role'];
+  bool get owner => role == 'owner';
+  bool get writer => owner || role == 'manager';
+  @override
+  void initState() {
+    super.initState();
+    reload();
+    timer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => reload(quiet: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  void toast(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
+  }
+
+  Future<void> reload({bool quiet = false}) async {
+    if (refreshing) return;
+    refreshing = true;
+    if (!quiet) setState(() => loading = true);
+    try {
+      final data = await Future.wait([
+        api.request('/dashboard'),
+        ...[
+          'towers',
+          'sectors',
+          'devices',
+          'alerts',
+          'links',
+          if (owner) 'users',
+          if (owner) 'snmp-profiles',
+        ].map((x) => api.request('/$x')),
+      ]);
+      final names = [
+        'towers',
+        'sectors',
+        'devices',
+        'alerts',
+        'links',
+        if (owner) 'users',
+        if (owner) 'snmp-profiles',
+      ];
+      final next = <String, List<dynamic>>{};
+      for (var i = 0; i < names.length; i++) {
+        next[names[i]] = data[i + 1] as List<dynamic>;
+      }
+      if (!mounted) return;
+      setState(() {
+        summary = Map<String, dynamic>.from(data.first);
+        rows = next;
+        observed = DateTime.now();
+        error = null;
+      });
+      if (deviceId != null && list('devices').any((d) => d['id'] == deviceId)) {
+        await loadMetrics(deviceId!);
+      }
+      if (page == 10 && owner) await loadUpdates();
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      refreshing = false;
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  List<dynamic> list(String key) => rows[key] ?? [];
+  List<dynamic> filtered(String key) => list(key)
+      .where((x) => jsonEncode(x).toLowerCase().contains(search.toLowerCase()))
+      .toList();
+  String nameOf(String key, dynamic id) =>
+      list(key)
+          .where((x) => x['id'] == id)
+          .map((x) => (x['name'] ?? x['username']).toString())
+          .firstOrNull ??
+      (id?.toString() ?? '—');
+  Future<void> loadMetrics(String id) async {
+    try {
+      final data = await api.request('/devices/$id/metrics');
+      if (mounted) {
+        setState(() {
+          deviceId = id;
+          samples = data;
+        });
+      }
+    } catch (e) {
+      toast(e.toString());
+    }
+  }
+
+  Future<void> loadUpdates() async {
+    try {
+      final data = await api.request('/updates');
+      if (mounted) {
+        setState(() => updateState = Map<String, dynamic>.from(data));
+      }
+    } catch (e) {
+      toast(e.toString());
+    }
+  }
+
+  void navigate(int index) {
+    setState(() {
+      page = index;
+      search = '';
+    });
+    if (index == 10 && owner) loadUpdates();
+  }
+
+  Widget navigation() => Container(
+    width: 244,
+    color: const Color(0xff091a30),
+    child: SafeArea(
+      child: Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 28, 24, 30),
+            child: Row(
+              children: [
+                Icon(Icons.cell_tower, color: blue, size: 30),
+                SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AirLink',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'ISP OPERATING SYSTEM',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: muted,
+                        letterSpacing: 1.7,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: pages.length,
+              itemBuilder: (context, i) => Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 3,
+                ),
+                child: ListTile(
+                  dense: true,
+                  selected: i == page,
+                  selectedTileColor: blue.withValues(alpha: .15),
+                  selectedColor: blue,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  leading: Icon(icons[i], size: 22),
+                  title: Text(pages[i]),
+                  onTap: () {
+                    navigate(i);
+                    if (Scaffold.of(context).isDrawerOpen) {
+                      Navigator.pop(context);
+                    }
+                  },
+                ),
+              ),
+            ),
+          ),
+          const Divider(color: Color(0xff20334e)),
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+            title: Text(api.user!['username']),
+            subtitle: Text(role, style: const TextStyle(color: muted)),
+            trailing: IconButton(
+              tooltip: 'Sign out',
+              icon: const Icon(Icons.logout, size: 20),
+              onPressed: widget.logout,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    ),
+  );
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final wide = constraints.maxWidth >= 1050;
+      return Scaffold(
+        drawer: wide ? null : Drawer(child: navigation()),
+        body: Row(
+          children: [
+            if (wide) navigation(),
+            Expanded(
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 18,
+                    ),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Color(0xff20334e)),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        if (!wide)
+                          Builder(
+                            builder: (context) => IconButton(
+                              icon: const Icon(Icons.menu),
+                              onPressed: () =>
+                                  Scaffold.of(context).openDrawer(),
+                            ),
+                          ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                pages[page],
+                                style: const TextStyle(
+                                  fontSize: 25,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                observed == null
+                                    ? 'Connecting to your network'
+                                    : 'Updated ${TimeOfDay.fromDateTime(observed!).format(context)} • refreshes every 30 seconds',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          Icons.shield_outlined,
+                          color: green,
+                          size: 19,
+                        ),
+                        const SizedBox(width: 8),
+                        if (wide)
+                          const Text(
+                            'Authenticated session',
+                            style: TextStyle(color: muted, fontSize: 12),
+                          ),
+                        IconButton(
+                          tooltip: 'Refresh',
+                          onPressed: () => reload(),
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (error != null)
+                    Container(
+                      width: double.infinity,
+                      color: red.withValues(alpha: .15),
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        'Refresh failed — previous data may be stale. $error',
+                        style: const TextStyle(color: red),
+                      ),
+                    ),
+                  if (loading) const LinearProgressIndicator(minHeight: 2),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.all(wide ? 28 : 16),
+                      child: content(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  Widget content() {
+    switch (page) {
+      case 0:
+        return dashboard();
+      case 1:
+        return inventory('towers');
+      case 2:
+        return inventory('sectors');
+      case 3:
+        return inventory('devices');
+      case 4:
+        return clients();
+      case 5:
+        return owner
+            ? inventory('users')
+            : notice(
+                'Owner access required',
+                'Account creation and assignments are restricted to the owner.',
+              );
+      case 6:
+        return monitoring();
+      case 7:
+        return networkMap();
+      case 8:
+        return alertsView();
+      case 9:
+        return reports();
+      case 10:
+        return owner
+            ? updates()
+            : notice(
+                'Owner access required',
+                'Software updates require owner permission.',
+              );
+      default:
+        return settings();
+    }
+  }
+
+  Widget card(Widget child) => Card(
+    margin: EdgeInsets.zero,
+    child: Padding(padding: const EdgeInsets.all(22), child: child),
+  );
+  Widget notice(String title, String detail) => card(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+        Text(detail, style: const TextStyle(color: muted, height: 1.6)),
+      ],
+    ),
+  );
+  Widget section(String title, Widget child, {Widget? action}) => card(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            if (action != null) action,
+          ],
+        ),
+        const SizedBox(height: 20),
+        child,
+      ],
+    ),
+  );
+  Widget badge(dynamic status) {
+    final color = status == 'online'
+        ? green
+        : status == 'offline' || status == 'critical'
+        ? red
+        : status == 'warning'
+        ? orange
+        : muted;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.circle, size: 7, color: color),
+        const SizedBox(width: 7),
+        Text(
+          status?.toString() ?? 'unknown',
+          style: TextStyle(color: color, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
+  String value(dynamic x, {String suffix = ''}) =>
+      x == null ? 'Unavailable' : '$x$suffix';
+  Widget dashboard() {
+    final cards = [
+      ['Total towers', 'towers', Icons.cell_tower],
+      ['Total sectors', 'sectors', Icons.wifi_tethering],
+      ['Total devices', 'devices', Icons.router],
+      ['Online devices', 'online', Icons.check_circle_outline],
+      ['Offline devices', 'offline', Icons.error_outline],
+      ['Connected clients', 'connected_clients', Icons.devices],
+      ['Active alerts', 'active_alerts', Icons.notifications_outlined],
+      [
+        'ICMP availability · 24h',
+        'availability_24h',
+        Icons.monitor_heart_outlined,
+      ],
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Network overview',
+          style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Measured network health, inventory and recent events.',
+          style: TextStyle(color: muted),
+        ),
+        const SizedBox(height: 24),
+        LayoutBuilder(
+          builder: (context, c) {
+            final count = c.maxWidth > 1000
+                ? 4
+                : c.maxWidth > 580
+                ? 2
+                : 1;
+            return Wrap(
+              spacing: 16,
+              runSpacing: 16,
+              children: cards
+                  .map(
+                    (item) => SizedBox(
+                      width: (c.maxWidth - (count - 1) * 16) / count,
+                      child: card(
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item[0] as String,
+                                    style: const TextStyle(
+                                      color: muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  item[2] as IconData,
+                                  color: blue,
+                                  size: 20,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            Text(
+                              value(
+                                summary[item[1]],
+                                suffix: item[1] == 'availability_24h'
+                                    ? '%'
+                                    : '',
+                              ),
+                              style: TextStyle(
+                                fontSize: summary[item[1]] == null ? 18 : 32,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              item[1] == 'connected_clients'
+                                  ? 'Requires verified vendor telemetry'
+                                  : item[1] == 'availability_24h'
+                                  ? '${summary['sample_count'] ?? 0} observed samples'
+                                  : 'From authorized inventory',
+                              style: const TextStyle(
+                                color: muted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
+        ),
+        const SizedBox(height: 24),
+        section(
+          'Network health',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 24,
+                runSpacing: 12,
+                children: [
+                  badge('online'),
+                  Text('${summary['online'] ?? 0} devices'),
+                  badge('offline'),
+                  Text('${summary['offline'] ?? 0} devices'),
+                  badge('unknown'),
+                  Text('${summary['unknown'] ?? 0} devices'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              HealthBar(
+                online: (summary['online'] ?? 0) as int,
+                offline: (summary['offline'] ?? 0) as int,
+                unknown: (summary['unknown'] ?? 0) as int,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        monitoring(),
+        const SizedBox(height: 24),
+        alertsView(recent: true),
+      ],
+    );
+  }
+
+  Widget toolbar(String resource) => Padding(
+    padding: const EdgeInsets.only(bottom: 20),
+    child: Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      spacing: 16,
+      runSpacing: 16,
+      children: [
+        SizedBox(
+          width: 300,
+          child: TextField(
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Search inventory',
+            ),
+            onChanged: (v) => setState(() => search = v),
+          ),
+        ),
+        if ((resource == 'users' && owner) ||
+            (resource == 'towers' && owner) ||
+            (['devices', 'sectors'].contains(resource) && writer))
+          FilledButton.icon(
+            onPressed: () => edit(resource),
+            icon: const Icon(Icons.add, size: 18),
+            label: Text(
+              'Add ${resource == 'users' ? 'account' : resource.substring(0, resource.length - 1)}',
+            ),
+          ),
+      ],
+    ),
+  );
+  Widget inventory(String resource) {
+    final data = filtered(resource);
+    final columns = switch (resource) {
+      'towers' => ['Name', 'Location', 'Management IP', 'Sectors', 'Status'],
+      'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
+      'users' => ['Username', 'Role', 'Active', 'Created'],
+      _ => ['Device', 'IP address', 'Vendor', 'Tower', 'Status'],
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        toolbar(resource),
+        section(
+          '${data.length} ${resource == 'users' ? 'accounts' : resource}',
+          data.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text(
+                    'No matching records. Add your inventory to begin monitoring.',
+                    style: TextStyle(color: muted),
+                  ),
+                )
+              : SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: [
+                      ...columns.map((x) => DataColumn(label: Text(x))),
+                      const DataColumn(label: Text('Actions')),
+                    ],
+                    rows: data.map((row) {
+                      List<dynamic> values = switch (resource) {
+                        'towers' => [
+                          row['name'],
+                          row['location'],
+                          row['management_ip'],
+                          row['sector_count'],
+                          badge(row['status']),
+                        ],
+                        'sectors' => [
+                          row['name'],
+                          nameOf('towers', row['tower_id']),
+                          row['ssid'],
+                          row['frequency_mhz'],
+                          row['ip_address'],
+                        ],
+                        'users' => [
+                          row['username'],
+                          row['role'],
+                          row['active'],
+                          row['created_at']?.toString().substring(0, 10),
+                        ],
+                        _ => [
+                          row['name'],
+                          row['ip_address'],
+                          row['vendor'],
+                          nameOf('towers', row['tower_id']),
+                          badge(row['status']),
+                        ],
+                      };
+                      return DataRow(
+                        cells: [
+                          ...values.map(
+                            (v) => DataCell(
+                              v is Widget ? v : Text(v?.toString() ?? '—'),
+                            ),
+                          ),
+                          DataCell(
+                            Row(
+                              children: [
+                                if (resource == 'devices')
+                                  IconButton(
+                                    tooltip: 'Monitoring history',
+                                    onPressed: () {
+                                      navigate(6);
+                                      loadMetrics(row['id']);
+                                    },
+                                    icon: const Icon(
+                                      Icons.show_chart,
+                                      size: 19,
+                                    ),
+                                  ),
+                                if (resource != 'users' && writer)
+                                  IconButton(
+                                    tooltip: 'Edit',
+                                    onPressed: () => edit(
+                                      resource,
+                                      existing: Map<String, dynamic>.from(row),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 19,
+                                    ),
+                                  ),
+                                if (resource == 'users' &&
+                                    row['role'] == 'technician')
+                                  IconButton(
+                                    tooltip: 'Assign device',
+                                    onPressed: () => assign(row['id']),
+                                    icon: const Icon(Icons.link, size: 19),
+                                  ),
+                                if (resource == 'users' &&
+                                    row['role'] != 'owner' &&
+                                    row['active'] == true)
+                                  IconButton(
+                                    tooltip: 'Disable account',
+                                    onPressed: () => remove(resource, row),
+                                    icon: const Icon(
+                                      Icons.person_off_outlined,
+                                      size: 19,
+                                    ),
+                                  ),
+                                if (resource != 'users' &&
+                                    ((resource == 'towers' && owner) ||
+                                        (resource != 'towers' && writer)))
+                                  IconButton(
+                                    tooltip: 'Delete',
+                                    onPressed: () => remove(resource, row),
+                                    icon: const Icon(
+                                      Icons.delete_outline,
+                                      size: 19,
+                                      color: red,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> remove(String resource, Map row) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          resource == 'users' ? 'Disable account?' : 'Delete ${row['name']}?',
+        ),
+        content: const Text(
+          'This changes the saved inventory. Resources with dependents must be emptied first.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await api.request(
+        '/$resource/${row['id']}${resource == 'users' ? '/disable' : ''}',
+        method: resource == 'users' ? 'POST' : 'DELETE',
+      );
+      await reload();
+    } catch (e) {
+      toast(e.toString());
+    }
+  }
+
+  Future<void> assign(String userId) async {
+    String? id;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Assign a device'),
+        content: DropdownButtonFormField<String>(
+          items: list('devices')
+              .map(
+                (d) => DropdownMenuItem<String>(
+                  value: d['id'],
+                  child: Text(d['name']),
+                ),
+              )
+              .toList(),
+          onChanged: (v) => id = v,
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Assign'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && id != null) {
+      try {
+        await api.request('/users/$userId/devices/$id', method: 'PUT');
+        toast('Device assigned');
+      } catch (e) {
+        toast(e.toString());
+      }
+    }
+  }
+
+  Future<void> edit(String resource, {Map<String, dynamic>? existing}) async {
+    final specs = fields(resource);
+    final initial = <String, dynamic>{
+      for (final f in specs) f.key: existing?[f.key] ?? f.initial,
+    };
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => ResourceDialog(
+        title:
+            '${existing == null ? 'Add' : 'Edit'} ${resource == 'users' ? 'account' : resource}',
+        fields: specs,
+        initial: initial,
+        save: (data) async {
+          await api.request(
+            '/$resource${existing == null ? '' : '/${existing['id']}'}',
+            method: existing == null ? 'POST' : 'PUT',
+            body: data,
+          );
+        },
+      ),
+    );
+    if (result != null) await reload();
+  }
+
+  List<FieldSpec> fields(String resource) {
+    List<Option> options(String kind, {bool nullable = false}) => [
+      if (nullable) const Option('', 'None'),
+      ...list(kind).map((x) => Option(x['id'], x['name'] ?? x['username'])),
+    ];
+    final towers = options('towers');
+    switch (resource) {
+      case 'towers':
+        return [
+          FieldSpec('name', 'Tower name', required: true),
+          FieldSpec('location', 'Location', initial: ''),
+          FieldSpec('latitude', 'Latitude', kind: 'number'),
+          FieldSpec('longitude', 'Longitude', kind: 'number'),
+          FieldSpec('management_ip', 'Management IP'),
+          if (owner)
+            FieldSpec(
+              'manager_id',
+              'Assigned manager',
+              options: [
+                const Option('', 'Unassigned'),
+                ...list('users')
+                    .where((u) => u['role'] == 'manager' && u['active'] == true)
+                    .map((u) => Option(u['id'], u['username'])),
+              ],
+            )
+          else
+            FieldSpec('manager_id', 'Assigned manager ID'),
+        ];
+      case 'sectors':
+        return [
+          FieldSpec('name', 'Sector name', required: true),
+          FieldSpec(
+            'tower_id',
+            'Parent tower',
+            required: true,
+            options: towers,
+          ),
+          FieldSpec('ssid', 'SSID', initial: ''),
+          FieldSpec('frequency_mhz', 'Frequency (MHz)', kind: 'int'),
+          FieldSpec('channel_width_mhz', 'Channel width (MHz)', kind: 'int'),
+          FieldSpec('model', 'Device model', initial: ''),
+          FieldSpec('ip_address', 'IP address'),
+        ];
+      case 'users':
+        return [
+          FieldSpec('username', 'Username', required: true),
+          FieldSpec(
+            'password',
+            'Password (at least 14 characters)',
+            required: true,
+            kind: 'password',
+          ),
+          FieldSpec(
+            'role',
+            'Role',
+            initial: 'manager',
+            options: const [
+              Option('manager', 'Manager'),
+              Option('technician', 'Technician'),
+              Option('viewer', 'Viewer'),
+              Option('owner', 'Owner'),
+            ],
+          ),
+        ];
+      case 'snmp-profiles':
+        return [
+          FieldSpec('name', 'Profile name', required: true),
+          FieldSpec('username', 'SNMPv3 username', required: true),
+          FieldSpec(
+            'auth_key',
+            'SHA-256 authentication key (12+ characters)',
+            required: true,
+            kind: 'password',
+          ),
+          FieldSpec(
+            'priv_key',
+            'AES-128 privacy key (12+ characters)',
+            required: true,
+            kind: 'password',
+          ),
+        ];
+      default:
+        return [
+          FieldSpec('name', 'Device name', required: true),
+          FieldSpec('ip_address', 'Management IP', required: true),
+          FieldSpec('tower_id', 'Tower', required: true, options: towers),
+          FieldSpec(
+            'sector_id',
+            'Sector',
+            options: options('sectors', nullable: true),
+          ),
+          FieldSpec(
+            'vendor',
+            'Vendor',
+            initial: 'generic',
+            options: const [
+              Option('generic', 'Generic SNMP'),
+              Option('mikrotik', 'MikroTik'),
+              Option('ubiquiti', 'Ubiquiti'),
+              Option('mimosa', 'Mimosa'),
+            ],
+          ),
+          FieldSpec('model', 'Model', initial: ''),
+          FieldSpec(
+            'snmp_profile_id',
+            'SNMPv3 profile',
+            options: owner ? options('snmp-profiles', nullable: true) : null,
+          ),
+          FieldSpec(
+            'poll_interval',
+            'Poll interval (seconds)',
+            kind: 'int',
+            initial: 60,
+          ),
+          FieldSpec('retries', 'Retry limit', kind: 'int', initial: 2),
+          FieldSpec(
+            'failure_threshold',
+            'Failure threshold',
+            kind: 'int',
+            initial: 3,
+          ),
+          FieldSpec(
+            'cpu_threshold',
+            'CPU warning (%)',
+            kind: 'number',
+            initial: 90,
+          ),
+          FieldSpec(
+            'enabled',
+            'Monitoring enabled',
+            kind: 'bool',
+            initial: true,
+          ),
+        ];
+    }
+  }
+
+  Widget monitoring() {
+    final points = samples.map((m) {
+      final interfaces = (m['values']['interfaces'] as Map?) ?? {};
+      final rates = interfaces.values
+          .where((v) => v['rx_bps'] != null)
+          .map((v) => (v['rx_bps'] as num).toDouble() / 1000000)
+          .toList();
+      return rates.isEmpty ? null : rates.reduce((a, b) => a + b);
+    }).toList();
+    return section(
+      'Bandwidth & monitoring history',
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 420,
+            child: DropdownButtonFormField<String>(
+              initialValue: list('devices').any((d) => d['id'] == deviceId)
+                  ? deviceId
+                  : null,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Select monitored device',
+              ),
+              items: list('devices')
+                  .map(
+                    (d) => DropdownMenuItem<String>(
+                      value: d['id'],
+                      child: Text('${d['name']} · ${d['ip_address']}'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) loadMetrics(v);
+              },
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (samples.isEmpty)
+            const SizedBox(
+              height: 160,
+              child: Center(
+                child: Text(
+                  'Select a device with collected samples to view real telemetry.',
+                  style: TextStyle(color: muted),
+                ),
+              ),
+            )
+          else ...[
+            SizedBox(
+              height: 190,
+              width: double.infinity,
+              child: CustomPaint(painter: HistoryChart(points)),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'RX Mbit/s · sum of device interfaces · missing samples shown as gaps',
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 28,
+              runSpacing: 16,
+              children: [
+                for (final field in [
+                  'cpu_percent',
+                  'memory_percent',
+                  'uptime_seconds',
+                  'icmp_up',
+                  'snmp_up',
+                ])
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        field.replaceAll('_', ' '),
+                        style: const TextStyle(color: muted, fontSize: 12),
+                      ),
+                      Text(
+                        value(samples.last['values'][field]),
+                        style: const TextStyle(fontSize: 20),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget clients() => notice(
+    'Wireless client telemetry',
+    'No verified vendor client-count adapter is enabled in this development release. Client identities and counts are unavailable; they are never inferred from device inventory. Standard SNMP interface and availability monitoring is available under Monitoring.',
+  );
+  Widget alertsView({bool recent = false}) {
+    final data = (recent ? list('alerts').take(5) : list('alerts')).toList();
+    return section(
+      recent ? 'Recent alerts' : 'Alerts',
+      data.isEmpty
+          ? const Text('No alerts recorded.', style: TextStyle(color: muted))
+          : Column(
+              children: data
+                  .map(
+                    (a) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        a['severity'] == 'critical'
+                            ? Icons.error_outline
+                            : Icons.warning_amber,
+                        color: a['resolved_at'] != null
+                            ? muted
+                            : a['severity'] == 'critical'
+                            ? red
+                            : orange,
+                      ),
+                      title: Text(a['message']),
+                      subtitle: Text(
+                        '${nameOf('devices', a['device_id'])} · ${a['opened_at']}\n${a['resolved_at'] != null
+                            ? 'Resolved'
+                            : a['acknowledged_by'] != null
+                            ? 'Acknowledged'
+                            : 'Open'}',
+                        style: const TextStyle(color: muted, fontSize: 12),
+                      ),
+                      trailing: role != 'viewer' && a['acknowledged_by'] == null
+                          ? TextButton(
+                              onPressed: () async {
+                                try {
+                                  await api.request(
+                                    '/alerts/${a['id']}/acknowledge',
+                                    method: 'POST',
+                                  );
+                                  await reload();
+                                } catch (e) {
+                                  toast(e.toString());
+                                }
+                              },
+                              child: const Text('Acknowledge'),
+                            )
+                          : null,
+                    ),
+                  )
+                  .toList(),
+            ),
+    );
+  }
+
+  Widget networkMap() {
+    final towers = filtered(
+      'towers',
+    ).where((t) => t['latitude'] != null && t['longitude'] != null).toList();
+    LatLng point(dynamic t) => LatLng(
+      (t['latitude'] as num).toDouble(),
+      (t['longitude'] as num).toDouble(),
+    );
+    return Column(
+      children: [
+        toolbar('map'),
+        section(
+          'Geographic network map',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Only towers with saved coordinates are shown. Links require owner-entered verification evidence.',
+                style: TextStyle(color: muted),
+              ),
+              const SizedBox(height: 16),
+              if (towers.isEmpty)
+                const SizedBox(
+                  height: 320,
+                  child: Center(
+                    child: Text(
+                      'Add GPS coordinates to a tower to place it on the map.',
+                    ),
+                  ),
+                )
+              else
+                SizedBox(
+                  height: 520,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: FlutterMap(
+                      options: MapOptions(
+                        initialCenter: point(towers.first),
+                        initialZoom: 10,
+                      ),
+                      children: [
+                        TileLayer(
+                          urlTemplate:
+                              'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                          userAgentPackageName: 'com.airlink.isp_os',
+                        ),
+                        PolylineLayer(
+                          polylines: list('links')
+                              .where(
+                                (l) =>
+                                    towers.any(
+                                      (t) => t['id'] == l['source_id'],
+                                    ) &&
+                                    towers.any(
+                                      (t) => t['id'] == l['target_id'],
+                                    ),
+                              )
+                              .map(
+                                (l) => Polyline(
+                                  points: [
+                                    point(
+                                      towers.firstWhere(
+                                        (t) => t['id'] == l['source_id'],
+                                      ),
+                                    ),
+                                    point(
+                                      towers.firstWhere(
+                                        (t) => t['id'] == l['target_id'],
+                                      ),
+                                    ),
+                                  ],
+                                  color: blue,
+                                  strokeWidth: 3,
+                                ),
+                              )
+                              .toList(),
+                        ),
+                        MarkerLayer(
+                          markers: towers
+                              .map(
+                                (t) => Marker(
+                                  point: point(t),
+                                  width: 48,
+                                  height: 48,
+                                  child: IconButton(
+                                    tooltip: t['name'],
+                                    icon: Icon(
+                                      Icons.cell_tower,
+                                      color: t['status'] == 'online'
+                                          ? green
+                                          : t['status'] == 'offline'
+                                          ? red
+                                          : orange,
+                                      size: 32,
+                                    ),
+                                    onPressed: () => showDialog(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        title: Text(t['name']),
+                                        content: SizedBox(
+                                          width: 380,
+                                          child: SingleChildScrollView(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                badge(t['status']),
+                                                Text(
+                                                  '${t['location']}\n${t['management_ip'] ?? 'No management IP'}',
+                                                ),
+                                                const Divider(),
+                                                ...list('sectors')
+                                                    .where(
+                                                      (s) =>
+                                                          s['tower_id'] ==
+                                                          t['id'],
+                                                    )
+                                                    .map(
+                                                      (s) => Text(
+                                                        'Sector: ${s['name']} · ${s['ssid']}',
+                                                      ),
+                                                    ),
+                                                ...list('devices')
+                                                    .where(
+                                                      (d) =>
+                                                          d['tower_id'] ==
+                                                          t['id'],
+                                                    )
+                                                    .map(
+                                                      (d) => Text(
+                                                        '${d['name']} · ${d['ip_address']} · ${d['status']}',
+                                                      ),
+                                                    ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(context),
+                                            child: const Text('Close'),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                        const RichAttributionWidget(
+                          attributions: [
+                            TextSourceAttribution(
+                              '© OpenStreetMap contributors',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              const Text(
+                'Map tiles require internet access. Inventory and monitoring remain local.',
+                style: TextStyle(color: muted, fontSize: 12),
+              ),
+              if (owner)
+                TextButton.icon(
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (context) => ResourceDialog(
+                      title: 'Verify network link',
+                      fields: [
+                        FieldSpec(
+                          'source_id',
+                          'Source tower',
+                          required: true,
+                          options: list(
+                            'towers',
+                          ).map((t) => Option(t['id'], t['name'])).toList(),
+                        ),
+                        FieldSpec(
+                          'target_id',
+                          'Target tower',
+                          required: true,
+                          options: list(
+                            'towers',
+                          ).map((t) => Option(t['id'], t['name'])).toList(),
+                        ),
+                        FieldSpec(
+                          'evidence',
+                          'Verification evidence (10+ characters)',
+                          required: true,
+                        ),
+                      ],
+                      initial: const {},
+                      save: (data) async {
+                        await api.request('/links', method: 'POST', body: data);
+                        await reload();
+                      },
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_link),
+                  label: const Text('Add verified link'),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget reports() => section(
+    'Availability reports',
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'The report uses observed ICMP samples from the last 24 hours. Unsampled time is not counted as uptime.',
+          style: TextStyle(color: muted),
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          onPressed: () async {
+            try {
+              final csv = await api.request('/reports/availability.csv');
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Availability CSV'),
+                  content: SizedBox(
+                    width: 700,
+                    child: SingleChildScrollView(child: SelectableText(csv)),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              );
+            } catch (e) {
+              toast(e.toString());
+            }
+          },
+          icon: const Icon(Icons.table_view_outlined),
+          label: const Text('Generate report'),
+        ),
+      ],
+    ),
+  );
+  Widget updates() {
+    final state = updateState?['state'] as Map?;
+    final available = state?['available'] as Map?;
+    return section(
+      'Software Update Center',
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Current version: ${updateState?['current_version'] ?? 'Loading…'}',
+            style: const TextStyle(fontSize: 22),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            state?['configured'] == true
+                ? 'Trusted publisher configured'
+                : 'No trusted release source is configured. Add the release URL and publisher key locally before updating.',
+            style: const TextStyle(color: muted),
+          ),
+          const SizedBox(height: 16),
+          if (available != null) ...[
+            Text(
+              'Available: ${available['version']} · ${available['size']} bytes',
+            ),
+            Text(available['release_notes'] ?? ''),
+            Text('Reboot required: ${available['reboot_required']}'),
+          ],
+          Text('State: ${state?['state']?['status'] ?? 'Unavailable'}'),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final action in [
+                'check',
+                'download',
+                'verify',
+                'install',
+                'schedule',
+              ])
+                OutlinedButton(
+                  onPressed: state?['configured'] != true
+                      ? null
+                      : () async {
+                          final payload = <String, dynamic>{};
+                          if (action == 'install') {
+                            final ok = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Install verified update?'),
+                                content: const Text(
+                                  'Monitoring will pause during backup, migration and installation.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, true),
+                                    child: const Text('Install'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (ok != true) return;
+                          }
+                          if (action == 'schedule') {
+                            if (!mounted) return;
+                            final controller = TextEditingController();
+                            final at = await showDialog<String>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Schedule update'),
+                                content: TextField(
+                                  controller: controller,
+                                  decoration: const InputDecoration(
+                                    labelText: 'ISO time with timezone',
+                                    hintText: '2026-11-05T02:00:00+01:00',
+                                  ),
+                                ),
+                                actions: [
+                                  FilledButton(
+                                    onPressed: () =>
+                                        Navigator.pop(context, controller.text),
+                                    child: const Text('Schedule'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            controller.dispose();
+                            if (at == null) return;
+                            payload['at'] = at;
+                          }
+                          try {
+                            await api.request(
+                              '/updates/$action',
+                              method: 'POST',
+                              body: payload,
+                            );
+                            await loadUpdates();
+                            toast('Update action accepted');
+                          } catch (e) {
+                            toast(e.toString());
+                          }
+                        },
+                  child: Text(action[0].toUpperCase() + action.substring(1)),
+                ),
+              OutlinedButton(
+                onPressed: null,
+                child: const Text('Rollback unavailable'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const Text('Update history', style: TextStyle(fontSize: 18)),
+          const SizedBox(height: 12),
+          if ((updateState?['history'] as List? ?? []).isEmpty)
+            const Text('No updates recorded.', style: TextStyle(color: muted)),
+          for (final h in (updateState?['history'] as List? ?? []))
+            ListTile(
+              title: Text('${h['version']} · ${h['status']}'),
+              subtitle: Text(h['created_at']),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget settings() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      notice(
+        'Session & permissions',
+        'Signed in as ${api.user!['username']} ($role). Access is enforced by the server on every request.',
+      ),
+      if (owner) ...[
+        const SizedBox(height: 24),
+        section(
+          'SNMPv3 credential profiles',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'SHA-256 authentication • AES-128 privacy. Secrets are encrypted on the server and cannot be read back.',
+                style: TextStyle(color: muted),
+              ),
+              const SizedBox(height: 16),
+              for (final p in list('snmp-profiles'))
+                ListTile(
+                  leading: const Icon(Icons.key),
+                  title: Text(p['name']),
+                  subtitle: Text(p['id']),
+                ),
+              FilledButton.icon(
+                onPressed: () => edit('snmp-profiles'),
+                icon: const Icon(Icons.add),
+                label: const Text('Add SNMPv3 profile'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        NetworkSettings(api: api),
+        const SizedBox(height: 24),
+        section(
+          'Audit trail',
+          FilledButton(
+            onPressed: () async {
+              try {
+                final data = await api.request('/audit');
+                if (!mounted) return;
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Recent administrative events'),
+                    content: SizedBox(
+                      width: 600,
+                      height: 400,
+                      child: ListView(
+                        children: (data as List)
+                            .map(
+                              (e) => ListTile(
+                                title: Text(e['action']),
+                                subtitle: Text(
+                                  '${e['created_at']} · ${e['target'] ?? ''}',
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
+                );
+              } catch (e) {
+                toast(e.toString());
+              }
+            },
+            child: const Text('View audit log'),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+class Option {
+  final String value, label;
+  const Option(this.value, this.label);
+}
+
+class FieldSpec {
+  final String key, label, kind;
+  final bool required;
+  final dynamic initial;
+  final List<Option>? options;
+  FieldSpec(
+    this.key,
+    this.label, {
+    this.kind = 'text',
+    this.required = false,
+    this.initial,
+    this.options,
+  });
+}
+
+class ResourceDialog extends StatefulWidget {
+  final String title;
+  final List<FieldSpec> fields;
+  final Map<String, dynamic> initial;
+  final Future<void> Function(Map<String, dynamic>) save;
+  const ResourceDialog({
+    super.key,
+    required this.title,
+    required this.fields,
+    required this.initial,
+    required this.save,
+  });
+  @override
+  State<ResourceDialog> createState() => _ResourceDialogState();
+}
+
+class _ResourceDialogState extends State<ResourceDialog> {
+  final form = GlobalKey<FormState>();
+  final controls = <String, TextEditingController>{};
+  final values = <String, dynamic>{};
+  bool busy = false;
+  String? error;
+  @override
+  void initState() {
+    super.initState();
+    for (final f in widget.fields) {
+      final v = widget.initial[f.key] ?? f.initial;
+      values[f.key] = v;
+      controls[f.key] = TextEditingController(text: v?.toString() ?? '');
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in controls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    if (!form.currentState!.validate()) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final data = <String, dynamic>{};
+      for (final f in widget.fields) {
+        if (f.kind == 'bool' || f.options != null) {
+          data[f.key] = values[f.key] == '' ? null : values[f.key];
+        } else {
+          final text = controls[f.key]!.text;
+          data[f.key] = text.isEmpty
+              ? (f.initial == '' ? '' : null)
+              : f.kind == 'int'
+              ? int.parse(text)
+              : f.kind == 'number'
+              ? double.parse(text)
+              : text;
+        }
+      }
+      await widget.save(data);
+      if (mounted) Navigator.pop(context, data);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.title),
+    content: SizedBox(
+      width: 520,
+      child: SingleChildScrollView(
+        child: Form(
+          key: form,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final f in widget.fields)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: f.kind == 'bool'
+                      ? SwitchListTile(
+                          title: Text(f.label),
+                          value: values[f.key] == true,
+                          onChanged: (v) => setState(() => values[f.key] = v),
+                        )
+                      : f.options != null
+                      ? DropdownButtonFormField<String>(
+                          initialValue:
+                              f.options!.any((o) => o.value == values[f.key])
+                              ? values[f.key]
+                              : null,
+                          isExpanded: true,
+                          decoration: InputDecoration(labelText: f.label),
+                          items: f.options!
+                              .map(
+                                (o) => DropdownMenuItem(
+                                  value: o.value,
+                                  child: Text(o.label),
+                                ),
+                              )
+                              .toList(),
+                          validator: (v) =>
+                              f.required && (v == null || v.isEmpty)
+                              ? 'Required'
+                              : null,
+                          onChanged: (v) => values[f.key] = v,
+                        )
+                      : TextFormField(
+                          controller: controls[f.key],
+                          obscureText: f.kind == 'password',
+                          decoration: InputDecoration(labelText: f.label),
+                          validator: (v) {
+                            if (f.required && (v == null || v.isEmpty)) {
+                              return 'Required';
+                            }
+                            if (v != null &&
+                                v.isNotEmpty &&
+                                f.kind == 'number' &&
+                                double.tryParse(v) == null) {
+                              return 'Enter a number';
+                            }
+                            if (v != null &&
+                                v.isNotEmpty &&
+                                f.kind == 'int' &&
+                                int.tryParse(v) == null) {
+                              return 'Enter an integer';
+                            }
+                            return null;
+                          },
+                        ),
+                ),
+              if (error != null)
+                Text(error!, style: const TextStyle(color: red)),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: busy ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: busy ? null : submit,
+        child: Text(busy ? 'Saving…' : 'Save'),
+      ),
+    ],
+  );
+}
+
+class NetworkSettings extends StatefulWidget {
+  final Api api;
+  const NetworkSettings({super.key, required this.api});
+  @override
+  State<NetworkSettings> createState() => _NetworkSettingsState();
+}
+
+class _NetworkSettingsState extends State<NetworkSettings> {
+  final fields = {
+    for (final x in [
+      'interface',
+      'address',
+      'prefix',
+      'gateway',
+      'dns1',
+      'dns2',
+      'hostname',
+    ])
+      x: TextEditingController(),
+  };
+  String method = 'dhcp';
+  String? checkpoint;
+  String result = '';
+  bool busy = false;
+  @override
+  void initState() {
+    super.initState();
+    fields['prefix']!.text = '24';
+    fields['hostname']!.text = 'airlink';
+    load();
+  }
+
+  @override
+  void dispose() {
+    for (final c in fields.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> load() async {
+    try {
+      final data = await widget.api.request('/network');
+      if (mounted) {
+        setState(() {
+          result = data['interfaces'].toString();
+          checkpoint = data['pending']?['checkpoint'];
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => result = e.toString());
+    }
+  }
+
+  Map<String, dynamic> config() => {
+    'interface': fields['interface']!.text,
+    'method': method,
+    'hostname': fields['hostname']!.text,
+    if (method == 'static') ...{
+      'address': fields['address']!.text,
+      'prefix': int.parse(fields['prefix']!.text),
+      'gateway': fields['gateway']!.text,
+      'dns': [
+        fields['dns1']!.text,
+        if (fields['dns2']!.text.isNotEmpty) fields['dns2']!.text,
+      ],
+    },
+  };
+  Future<void> action(String name) async {
+    setState(() => busy = true);
+    try {
+      final body = ['confirm', 'restore'].contains(name)
+          ? {'checkpoint': checkpoint}
+          : name == 'test'
+          ? {
+              'address': fields['gateway']!.text.isEmpty
+                  ? '1.1.1.1'
+                  : fields['gateway']!.text,
+            }
+          : name == 'dns'
+          ? {'hostname': 'debian.org'}
+          : config();
+      final data = await widget.api.request(
+        '/network/$name',
+        method: 'POST',
+        body: body,
+      );
+      if (mounted) {
+        setState(() {
+          result = jsonEncode(data);
+          if (name == 'apply') checkpoint = data['checkpoint'];
+          if (['confirm', 'restore'].contains(name)) checkpoint = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => result = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    child: Padding(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Network settings', style: TextStyle(fontSize: 20)),
+          const SizedBox(height: 12),
+          const Text(
+            'Applying settings starts a 120-second rollback timer. Reconnect at the new address and confirm to keep them.',
+            style: TextStyle(color: muted),
+          ),
+          const SizedBox(height: 20),
+          DropdownButtonFormField<String>(
+            initialValue: method,
+            items: const [
+              DropdownMenuItem(value: 'dhcp', child: Text('Automatic DHCP')),
+              DropdownMenuItem(
+                value: 'static',
+                child: Text('Manual static IPv4'),
+              ),
+            ],
+            onChanged: (v) => setState(() => method = v!),
+            decoration: const InputDecoration(labelText: 'Address method'),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              for (final key in [
+                'interface',
+                'hostname',
+                if (method == 'static') ...[
+                  'address',
+                  'prefix',
+                  'gateway',
+                  'dns1',
+                  'dns2',
+                ],
+              ])
+                SizedBox(
+                  width: 250,
+                  child: TextField(
+                    controller: fields[key],
+                    decoration: InputDecoration(labelText: key),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final pair in [
+                ['save', 'Save settings'],
+                ['test', 'Test connection'],
+                ['dns', 'Test DNS'],
+                ['apply', 'Apply configuration'],
+                ['confirm', 'Keep configuration'],
+                ['restore', 'Restore previous'],
+              ])
+                OutlinedButton(
+                  onPressed:
+                      busy ||
+                          (['confirm', 'restore'].contains(pair[0]) &&
+                              checkpoint == null)
+                      ? null
+                      : () => action(pair[0]),
+                  child: Text(pair[1]),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SelectableText(result, style: const TextStyle(color: muted)),
+        ],
+      ),
+    ),
+  );
+}
+
+class HealthBar extends StatelessWidget {
+  final int online, offline, unknown;
+  const HealthBar({
+    super.key,
+    required this.online,
+    required this.offline,
+    required this.unknown,
+  });
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(6),
+    child: SizedBox(
+      height: 12,
+      child: online + offline + unknown == 0
+          ? Container(color: navy)
+          : Row(
+              children: [
+                if (online > 0)
+                  Expanded(
+                    flex: online,
+                    child: Container(color: green),
+                  ),
+                if (offline > 0)
+                  Expanded(
+                    flex: offline,
+                    child: Container(color: red),
+                  ),
+                if (unknown > 0)
+                  Expanded(
+                    flex: unknown,
+                    child: Container(color: muted),
+                  ),
+              ],
+            ),
+    ),
+  );
+}
+
+class HistoryChart extends CustomPainter {
+  final List<double?> points;
+  HistoryChart(this.points);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final grid = Paint()
+      ..color = muted.withValues(alpha: .15)
+      ..strokeWidth = 1;
+    for (var i = 0; i < 5; i++) {
+      final y = size.height * i / 4;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), grid);
+    }
+    final values = points.whereType<double>().toList();
+    if (values.isEmpty) {
+      final text = TextPainter(
+        text: const TextSpan(
+          text: 'Bandwidth counters unavailable',
+          style: TextStyle(color: muted, fontSize: 14),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      text.paint(canvas, Offset(16, size.height / 2));
+      return;
+    }
+    final max = values.reduce((a, b) => a > b ? a : b);
+    final scale = max > 0 ? max : 1.0;
+    final path = Path();
+    bool connected = false;
+    for (var i = 0; i < points.length; i++) {
+      final v = points[i];
+      if (v == null) {
+        connected = false;
+        continue;
+      }
+      final x = points.length == 1
+          ? size.width / 2
+          : size.width * i / (points.length - 1);
+      final y = size.height - 12 - (size.height - 28) * v / scale;
+      if (connected) {
+        path.lineTo(x, y);
+      } else {
+        path.moveTo(x, y);
+        connected = true;
+      }
+      canvas.drawCircle(Offset(x, y), 2, Paint()..color = blue);
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = blue
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    final label = TextPainter(
+      text: TextSpan(
+        text: '${max.toStringAsFixed(2)} Mbit/s',
+        style: const TextStyle(color: muted, fontSize: 11),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    label.paint(canvas, const Offset(4, 0));
+  }
+
+  @override
+  bool shouldRepaint(covariant HistoryChart oldDelegate) =>
+      oldDelegate.points != points;
+}

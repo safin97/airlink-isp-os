@@ -1,0 +1,22 @@
+[Unit]
+Description=AirLink ISP OS API
+After=postgresql.service redis-server.service airlink-live-init.service
+Requires=postgresql.service redis-server.service
+ConditionPathExists=/etc/airlink/provisioned
+[Service]
+Type=simple
+User=airlink
+Group=airlink
+WorkingDirectory=/opt/airlink
+EnvironmentFile=/etc/airlink/airlink.env
+ExecStart=/opt/airlink/venv/bin/uvicorn airlink.api:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/airlink
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+[Install]
+WantedBy=multi-user.target
