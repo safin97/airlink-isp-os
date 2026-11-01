@@ -4,6 +4,8 @@ A Debian 13 based x86_64 monitoring appliance with a local Qt installer, FastAPI
 
 **Development release, not a certified production appliance.** See [PROGRESS.md](PROGRESS.md) for verified behavior and remaining requirements. Never use the erase installer on a disk containing data you need. No default owner password exists.
 
+Download development releases from [GitHub Releases](https://github.com/safin97/airlink-isp-os/releases). Signed application updates are installed through the owner-only Update Center.
+
 ## Build
 
 Prerequisites: Docker with Linux amd64 support, Flutter 3.47 or compatible Dart >=3.8, QEMU with OVMF, at least 40 GB free build space (80 GB recommended), and internet access while building. Installation from the resulting image is offline; monitoring does not require internet. Online map tiles and software downloads do.
