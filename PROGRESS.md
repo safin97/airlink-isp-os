@@ -43,3 +43,5 @@ Validation: 79 Python tests passed with one Linux-only skip; 7 Flutter tests pas
 ## 0.1.1-dev rebuilt image and upgrade verification
 
 The rebuilt ISO passed UEFI/graphical boot and HTTPS version checks in QEMU; its served dashboard exactly matches the new web build. Offline provisioning/component checks passed. The signed sequence-2 package passed a real 0.1.0-to-0.1.1 upgrade, preserving owner access, test data, installation secrets and encrypted credentials, validating backup checksums and activating the new controller code. The full fresh-disk installer test was not repeated for this application-only change. See [0.1.1 verification](docs/releases/0.1.1-dev-verification.md).
+
+[v0.1.1-dev](https://github.com/safin97/airlink-isp-os/releases/tag/v0.1.1-dev) is published as Latest with 13 hash-verified assets. Anonymous real-updater Check/Download/Verify and matching-installed up-to-date detection passed against the public sequence-2 feed.
