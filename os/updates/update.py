@@ -129,7 +129,7 @@ def restart_status():
     return {'boot_id': boot_id, 'pending': bool(boot_id and requested.get('boot_id') == boot_id)}
 
 
-def restart_system(payload):
+def restart_system(payload, *, poweroff=False):
     if payload.get('confirm') is not True:
         raise ValueError('Confirm the system restart first')
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -149,7 +149,7 @@ def restart_system(payload):
         try:
             # A fixed, delayed systemd action allows the HTTP response/audit to finish.
             subprocess.run(['systemd-run', '--unit=airlink-system-restart', '--on-active=5s',
-                            '/usr/bin/systemctl', 'reboot'], check=True, capture_output=True, text=True)
+                            '/usr/bin/systemctl', 'poweroff' if poweroff else 'reboot'], check=True, capture_output=True, text=True)
         except Exception:
             (ROOT / 'restart.json').unlink(missing_ok=True)
             raise

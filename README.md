@@ -34,7 +34,7 @@ python3 -m venv .venv
 
 The Python suite uses disposable SQLite by default; `tests/linux-integration.sh` runs the suite against PostgreSQL inside a disposable Linux container. The suite ignores an inherited application `DATABASE_URL`; only `AIRLINK_TEST_DATABASE_URL` explicitly opts into another disposable test database. Never point that variable at a production database: fixtures drop and recreate application tables.
 
-See [installation](docs/INSTALLATION.md), [architecture and security](docs/ARCHITECTURE.md), [updates](docs/UPDATES.md), [recovery](docs/RECOVERY.md), and [monitoring support](docs/MONITORING.md).
+See [installation](docs/INSTALLATION.md), [local PC settings](docs/LOCAL-PANEL.md), [architecture and security](docs/ARCHITECTURE.md), [updates](docs/UPDATES.md), [recovery](docs/RECOVERY.md), and [monitoring support](docs/MONITORING.md).
 
 To host signed application updates on your own public GitHub repository, see [GitHub Releases setup](docs/GITHUB-UPDATES.md).
 

@@ -75,3 +75,16 @@ def test_queued_installer_waits_for_controller_lock(appliance, monkeypatch):
     assert len(errors) == 1 and isinstance(errors[0], ValueError)
     assert 'test has no package' in str(errors[0])
     assert calls == []
+
+
+def test_local_shutdown_uses_same_update_and_pending_guards(appliance):
+    root, _, calls = appliance
+    update.atomic(root/'state.json', {'status': 'installing'})
+    with pytest.raises(ValueError, match='installation'):
+        update.restart_system({'confirm': True}, poweroff=True)
+    assert calls == []
+    update.atomic(root/'state.json', {'status': 'installed'})
+    update.restart_system({'confirm': True}, poweroff=True)
+    assert calls[-1][-1] == 'poweroff'
+    with pytest.raises(ValueError, match='already been requested'):
+        update.restart_system({'confirm': True}, poweroff=True)

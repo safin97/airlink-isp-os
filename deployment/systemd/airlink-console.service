@@ -1,13 +1,14 @@
 [Unit]
-Description=AirLink ISP OS management console
-After=airlink-api.service airlink-controller.service
+Description=AirLink ISP OS local graphical settings panel
+After=airlink-api.service airlink-controller.service systemd-user-sessions.service
 Conflicts=getty@tty1.service
 ConditionPathExists=/etc/airlink/installed
 [Service]
-ExecStart=/opt/airlink/venv/bin/python /opt/airlink/os/console/console.py
+ExecStart=/usr/bin/xinit /usr/bin/python3 /opt/airlink/os/console/panel.py -- :0 vt1 -nolisten tcp
 EnvironmentFile=/etc/airlink/airlink.env
 StandardInput=tty
-StandardOutput=tty
+StandardOutput=journal
+StandardError=journal
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes

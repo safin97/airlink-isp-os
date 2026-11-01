@@ -12,7 +12,8 @@ def test_checkpoint_created_before_network_change_and_rolled_back(monkeypatch,tm
         def CheckpointRollback(self,checkpoint):events.append(('rollback',checkpoint))
     monkeypatch.setattr(network,'nm',lambda:Manager())
     monkeypatch.setattr(network,'PENDING',tmp_path/'pending.json')
-    monkeypatch.setattr(network.Path,'exists',lambda self:True)
+    original_exists = network.Path.exists
+    monkeypatch.setattr(network.Path,'exists',lambda self: True if str(self) == '/sys/class/net/eth0' else original_exists(self))
     def run(args):
         events.append(('command',args))
         raise RuntimeError('Activation failed')

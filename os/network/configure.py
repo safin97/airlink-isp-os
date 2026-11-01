@@ -4,11 +4,13 @@ import re
 import socket
 import subprocess
 import time
+import threading
 import uuid
 from pathlib import Path
 
 STATE = Path("/var/lib/airlink-system/network.json")
 PENDING = Path("/run/airlink/network-pending.json")
+LOCK = threading.RLock()
 
 
 def validate(data):
@@ -62,13 +64,43 @@ def write(path, value):
 
 
 def status():
-    return {"interfaces": run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"]),
-            "addresses": json.loads(run(["ip", "-j", "address"])),
+    interfaces = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"])
+    addresses = json.loads(run(["ip", "-j", "address"]))
+    configurations = {}
+    for line in interfaces.splitlines():
+        fields = line.split(":")
+        if len(fields) < 2 or fields[1] != 'ethernet':
+            continue
+        name = fields[0]
+        value = {'method': 'dhcp', 'dns': [], 'gateway': ''}
+        for interface in addresses:
+            if interface['ifname'] == name:
+                for address in interface.get('addr_info', []):
+                    if address.get('family') == 'inet' and address.get('scope') == 'global':
+                        value.update(address=address['local'], prefix=address['prefixlen'])
+                        break
+        try:
+            connection = run(['nmcli', '-g', 'GENERAL.CON-UUID', 'device', 'show', name])
+            if connection and connection != '--':
+                method = run(['nmcli', '-g', 'ipv4.method', 'connection', 'show', connection])
+                value['method'] = 'static' if method == 'manual' else 'dhcp'
+            value['gateway'] = run(['nmcli', '-g', 'IP4.GATEWAY', 'device', 'show', name]).splitlines()[0] if value.get('address') else ''
+            value['dns'] = run(['nmcli', '-g', 'IP4.DNS', 'device', 'show', name]).splitlines()
+        except (subprocess.CalledProcessError, IndexError):
+            pass  # A disconnected interface still belongs in the selector.
+        configurations[name] = value
+    return {"interfaces": interfaces, "addresses": addresses, "hostname": socket.gethostname(),
+            "configurations": configurations,
             "saved": json.loads(STATE.read_text()) if STATE.exists() else None,
             "pending": json.loads(PENDING.read_text()) if PENDING.exists() else None}
 
 
 def action(name, data):
+    with LOCK:
+        return _action(name, data)
+
+
+def _action(name, data):
     if name == "status":
         return status()
     if name == "save":
@@ -76,6 +108,8 @@ def action(name, data):
         write(STATE, value)
         return {"saved": True}
     if name == "apply":
+        if PENDING.exists() and json.loads(PENDING.read_text()).get('deadline', 0) > time.time():
+            raise ValueError('Keep or revert the pending network change first')
         value = validate(data or json.loads(STATE.read_text()))
         if not Path("/sys/class/net", value["interface"]).exists():
             raise ValueError("Interface not found")

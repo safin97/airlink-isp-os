@@ -15,7 +15,7 @@ Package: airlink-isp-os
 Version: $version
 Architecture: amd64
 Maintainer: AirLink Release Engineering
-Depends: python3 (>= 3.13), postgresql, redis-server, nginx
+Depends: python3 (>= 3.13), python3-pyqt6, xinit, postgresql, redis-server, nginx
 Description: AirLink ISP OS application and monitoring services
 CONTROL
 cat > "$stage/DEBIAN/postinst" <<'POSTINST'
