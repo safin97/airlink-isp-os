@@ -20,10 +20,10 @@ Scheduling writes a persistent systemd calendar timer with an explicit UTC date.
 
 Publisher utilities are `os/updates/build-package.sh` (run inside the amd64 application image) and `os/updates/sign_manifest.py` (run on the signing workstation). The current package contains the application/venv and fixed systemd files. It does **not** implement a full atomic kernel/base-OS upgrade. A separately qualified Debian security-update procedure or signed full-image upgrade mechanism is still needed before production operation.
 
-## In-dashboard workflow (source follow-up)
+## In-dashboard workflow (0.1.1-dev)
 
 The updated dashboard checks the signed GitHub feed when the owner opens Software Updates and every five minutes while that page remains open. **Update now** asks once for confirmation, then downloads, verifies, and starts installation without opening a browser tab. The page shows download progress and reconnects while services restart; success appears only after the installer reports completion. Schedule update downloads and verifies the same selected release before scheduling it. Requests pin the release version and sequence, and the background installer rechecks the persisted approval against the package hash and size. A concurrent check cannot silently change the approved package. Preflight rejection is reported without starting the installation.
 
 Checking an already installed, matching sequence reports “up to date”; installing or verifying that sequence again is still rejected. Invalid checks preserve the previously trusted manifest. A failed or active installation cannot be silently reset by checking/downloading another release.
 
-The Mac development preview performs real signed release checks but denies package installation on the server as well as disabling its controls. These follow-up source changes are not included in the immutable `v0.1.0-dev` release assets; PCs receive them through a subsequent signed package or rebuilt image.
+The Mac development preview performs real signed release checks but denies package installation on the server as well as disabling its controls. The `v0.1.1-dev` ISO and signed application package include this workflow. The immutable `v0.1.0-dev` release assets retain their original interface. Package upgrades restart the controller and console to activate the new code.

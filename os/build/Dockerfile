@@ -35,7 +35,8 @@ RUN cp /opt/airlink/deployment/systemd/* /etc/systemd/system/ && \
     sed -i "s/^#*listen_addresses =.*/listen_addresses = ''/" /etc/postgresql/*/main/postgresql.conf && \
     systemctl enable NetworkManager nftables postgresql redis-server nginx airlink-api airlink-monitor airlink-alerts airlink-controller airlink-console airlink-live-init airlink-installer airlink-qa airlink-health.timer && \
     chmod +x /opt/airlink/os/build/graphical-session.sh && systemctl mask getty@tty1.service live-config.service && \
-    printf 'NAME="AirLink ISP OS"\nID=airlink\nID_LIKE=debian\nPRETTY_NAME="AirLink ISP OS 0.1.0 Development"\nVERSION_ID="0.1.0"\n' > /etc/os-release && \
+    version=$(PYTHONPATH=/opt/airlink/backend /opt/airlink/venv/bin/python -c 'from airlink import __version__; print(__version__)') && \
+    printf 'NAME="AirLink ISP OS"\nID=airlink\nID_LIKE=debian\nPRETTY_NAME="AirLink ISP OS %s"\nVERSION_ID="%s"\n' "$version" "$version" > /etc/os-release && \
     printf 'AirLink ISP OS — Network Monitoring Operating System\n' > /etc/issue && \
     rm -f /usr/sbin/policy-rc.d /etc/machine-id /var/lib/dbus/machine-id && \
     touch /etc/machine-id && update-initramfs -u -k all && \

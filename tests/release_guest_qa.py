@@ -18,6 +18,10 @@ def main():
     sys.path.insert(0, '/opt/airlink/os')
     from updates import update
     credentials = json.loads((STAGE / 'credentials.json').read_text())
+    release = json.loads((STAGE / 'stable.json').read_text())['manifest']
+    sequence = release['sequence']
+    tower_name = f'Signed release preservation test {sequence}'
+    profile_name = f'Release credential preservation test {sequence}'
     subprocess.run(['bash', '/opt/airlink/deployment/health.sh'], check=True)
     client = httpx.Client(base_url='http://127.0.0.1:8000', timeout=30)
 
@@ -32,10 +36,10 @@ def main():
         return result.json()
 
     login()
-    tower = client.post('/api/towers', json={'name': 'Signed release preservation test', 'location': 'Disposable QA VM'})
+    tower = client.post('/api/towers', json={'name': tower_name, 'location': 'Disposable QA VM'})
     tower.raise_for_status()
     tower_id = tower.json()['id']
-    profile = client.post('/api/snmp-profiles', json={'name': 'Release credential preservation test',
+    profile = client.post('/api/snmp-profiles', json={'name': profile_name,
         'username': 'release-lab', 'auth_key': 'Release-lab-auth-2026', 'priv_key': 'Release-lab-priv-2026'})
     profile.raise_for_status()
     profile_id = profile.json()['id']
@@ -45,20 +49,27 @@ def main():
     for name in ('update-public-key.bin', 'update-source.json'):
         shutil.copyfile(STAGE / name, Path('/etc/airlink') / name)
     update.ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    assert not (update.ROOT / 'installed.json').exists()
+    previous_sequence = update.read(update.ROOT / 'installed.json', {'sequence': 0})['sequence']
+    assert sequence > previous_sequence
     shutil.copyfile(STAGE / 'stable.json', update.ROOT / 'manifest.json')
-    shutil.copyfile(STAGE / 'airlink-isp-os_0.1.0-dev_amd64.deb', update.ROOT / 'package.deb')
+    packages = list(STAGE.glob('airlink-isp-os_*_amd64.deb'))
+    assert len(packages) == 1
+    shutil.copyfile(packages[0], update.ROOT / 'package.deb')
     meta = update.manifest()
     update.verify_package(meta)
     print('RELEASE_QA_PREINSTALL_SIGNATURE_AND_PACKAGE_OK', flush=True)
     subprocess.run(['/usr/bin/python3', '/opt/airlink/os/updates/update.py', 'install'], check=True)
     assert update.read(update.ROOT / 'state.json', {})['status'] == 'installed'
-    assert update.read(update.ROOT / 'installed.json', {})['sequence'] == 1
+    assert update.read(update.ROOT / 'installed.json', {})['sequence'] == sequence
     assert hashlib.sha256(Path('/etc/airlink/airlink.env').read_bytes()).hexdigest() == key_before
     login()
-    assert any(t['id'] == tower_id and t['name'] == 'Signed release preservation test' for t in get('/api/towers'))
+    assert any(t['id'] == tower_id and t['name'] == tower_name for t in get('/api/towers'))
     assert any(p['id'] == profile_id for p in get('/api/snmp-profiles'))
     assert all(s == 'active' for s in get('/api/system')['services'].values())
+    updates = get('/api/updates')
+    assert updates['current_version'] == release['version']
+    assert updates['state']['install_supported'] is True
+    assert 'transfer' in updates['state']  # The long-lived controller reloaded the new code.
     new_backups = set(Path('/var/backups/airlink').iterdir()) - prior_backups
     assert new_backups
     for backup in new_backups:
@@ -68,13 +79,14 @@ def main():
         if '=' in line:
             key, value = line.split('=', 1)
             env[key] = value
-    check = '''import json
+    env['QA_PROFILE_ID'] = profile_id
+    check = '''import json,os
 from sqlalchemy import select
 from airlink.db import SessionLocal
 from airlink.models import SNMPProfile
 from airlink.security import cipher
 with SessionLocal() as db:
-    profile=db.scalar(select(SNMPProfile).where(SNMPProfile.name=="Release credential preservation test"))
+    profile=db.get(SNMPProfile,os.environ["QA_PROFILE_ID"])
     data=json.loads(cipher().decrypt(profile.encrypted_credentials.encode()))
     assert data["username"]=="release-lab"
     assert data["auth_key"]=="Release-lab-auth-2026"
