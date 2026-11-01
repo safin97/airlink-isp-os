@@ -1,6 +1,6 @@
 # AirLink ISP OS — delivery status
 
-Version **0.1.1-dev**, built 1 November 2026. This is a working development appliance, not completion of every production requirement in the master prompt. No existing starter files were present in the workspace.
+Version **0.1.2-dev**, built 1 November 2026. This is a working development appliance, not completion of every production requirement in the master prompt. No existing starter files were present in the workspace.
 
 | Phase | Implemented and verified | Remaining work |
 |---|---|---|
@@ -45,3 +45,7 @@ Validation: 79 Python tests passed with one Linux-only skip; 7 Flutter tests pas
 The rebuilt ISO passed UEFI/graphical boot and HTTPS version checks in QEMU; its served dashboard exactly matches the new web build. Offline provisioning/component checks passed. The signed sequence-2 package passed a real 0.1.0-to-0.1.1 upgrade, preserving owner access, test data, installation secrets and encrypted credentials, validating backup checksums and activating the new controller code. The full fresh-disk installer test was not repeated for this application-only change. See [0.1.1 verification](docs/releases/0.1.1-dev-verification.md).
 
 [v0.1.1-dev](https://github.com/safin97/airlink-isp-os/releases/tag/v0.1.1-dev) is published as Latest with 13 hash-verified assets. Anonymous real-updater Check/Download/Verify and matching-installed up-to-date detection passed against the public sequence-2 feed.
+
+## 0.1.2-dev AirLink branding
+
+The owner's stacked and horizontal logos now appear on login/setup, dashboard navigation/mobile headers, loading/error screens, browser/application icons, installer pages, ISO/installed GRUB menus and the repository header. Original PNG artwork is preserved. Desktop/mobile Chrome and all installer page layouts were inspected. The final ISO passed branded UEFI/graphical boot and exact served-logo checks. Offline provisioning and a signed 0.1.1-to-0.1.2 upgrade passed; the upgraded virtual disk also passed standalone UEFI boot and HTTPS/logo checks. See [branding release verification](docs/releases/0.1.2-dev-verification.md).

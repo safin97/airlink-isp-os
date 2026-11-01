@@ -1,3 +1,5 @@
+<p align="center"><img src="os/branding/airlink-header.svg" alt="AirLink — Telecommunication company" width="420"></p>
+
 # AirLink ISP OS
 
 A Debian 13 based x86_64 monitoring appliance with a local Qt installer, FastAPI/PostgreSQL backend, independent monitoring and alert workers, and a Flutter web dashboard.

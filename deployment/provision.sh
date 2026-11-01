@@ -2,6 +2,7 @@
 # Idempotent, offline provisioning, called only within the new target or live overlay.
 set -euo pipefail
 umask 077
+bash /opt/airlink/os/branding/install-boot-theme.sh
 install -d -m 0750 -o root -g airlink /etc/airlink
 install -d -m 0750 -o airlink -g airlink /var/lib/airlink
 install -d -m 0700 /var/backups/airlink /var/lib/airlink-system

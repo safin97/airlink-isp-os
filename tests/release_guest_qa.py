@@ -101,6 +101,13 @@ print("RELEASE_QA_ENCRYPTED_CREDENTIALS_PRESERVED")
         assert 'replay/downgrade' in str(exc)
     else:
         raise AssertionError('Installed update replay was accepted')
+    branding = Path('/opt/airlink/os/branding/airlink-horizontal.png')
+    if branding.exists():
+        assert Path('/boot/grub/themes/airlink/airlink-horizontal.png').read_bytes() == branding.read_bytes()
+        assert '/themes/airlink/theme.txt' in Path('/boot/grub/grub.cfg').read_text()
+        print('RELEASE_QA_INSTALLED_BOOT_BRANDING_OK', flush=True)
+    # The completed one-shot must not repeat destructive fixtures on a boot check.
+    subprocess.run(['systemctl', 'disable', 'airlink-release-qa.service'], check=True)
     print('RELEASE_QA_INSTALL_DATA_BACKUP_SERVICES_REPLAY_OK', flush=True)
     (STAGE / 'passed').write_text('signed update install passed\n')
 

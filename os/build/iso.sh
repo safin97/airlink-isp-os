@@ -22,6 +22,9 @@ cp "$kernel" image/live/vmlinuz
 cp "$initrd" image/live/initrd.img
 cp rootfs/opt/airlink/os/boot/grub.cfg image/boot/grub/grub.cfg
 cp rootfs/usr/share/grub/unicode.pf2 image/boot/grub/fonts/unicode.pf2
+mkdir -p image/boot/grub/themes/airlink
+cp rootfs/opt/airlink/os/branding/grub/theme.txt image/boot/grub/themes/airlink/theme.txt
+cp rootfs/opt/airlink/os/branding/airlink-horizontal.png image/boot/grub/themes/airlink/airlink-horizontal.png
 cp rootfs/opt/airlink/os/build/packages.lock packages.lock
 mksquashfs rootfs image/live/filesystem.squashfs -noappend -comp zstd -processors 2 -no-progress
 grub-mkrescue -o AirLink-ISP-OS-amd64.iso image -- -volid AIRLINK_ISP_OS

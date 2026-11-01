@@ -24,15 +24,33 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="AirLink ISP OS">
-  <link rel="apple-touch-icon" href="favicon.svg">
+  <link rel="apple-touch-icon" href="icons/airlink.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
 
   <title>AirLink ISP OS</title>
   <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#071426">
+  <style>
+    html, body { margin: 0; min-height: 100%; background: #071426; }
+    #airlink-loading { position: fixed; inset: 0; display: flex; align-items: center;
+      justify-content: center; flex-direction: column; gap: 20px; color: #e4efff;
+      font: 16px sans-serif; }
+    #airlink-loading img { width: min(320px, 80vw); height: auto; background: white;
+      border-radius: 12px; }
+  </style>
 </head>
 <body>
+  <div id="airlink-loading" role="status">
+    <img src="airlink-horizontal.png" alt="AirLink — Telecommunication company">
+    <span>Loading your network dashboard…</span>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      document.getElementById('airlink-loading')?.remove();
+    });
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

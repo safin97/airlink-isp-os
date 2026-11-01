@@ -21,6 +21,9 @@ CONTROL
 cat > "$stage/DEBIAN/postinst" <<'POSTINST'
 #!/bin/sh
 set -eu
+if [ "$1" = configure ] && [ -f /etc/airlink/installed ]; then
+  bash /opt/airlink/os/branding/install-boot-theme.sh
+fi
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
   systemctl daemon-reload
   # The previous updater restarts API/workers; reload long-lived control code too.

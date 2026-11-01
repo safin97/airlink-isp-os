@@ -8,6 +8,12 @@
   "description": "Network Monitoring Operating System",
   "icons": [
     {
+      "src": "icons/airlink.png",
+      "sizes": "1126x1131",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",

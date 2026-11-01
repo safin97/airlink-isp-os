@@ -1,0 +1,60 @@
+# Original AirLink artwork on a light surface.
+desktop-color: "#ffffff"
+title-text: ""
+message-color: "#073354"
+message-bg-color: "#ffffff"
+terminal-font: "Unifont Regular 16"
+# GRUB treats an image's native dimensions as its minimum size. The canvas
+# constrains the viewport so the original large PNG scales proportionally.
++ canvas {
+  left = 50%-300
+  top = 25
+  width = 600
+  height = 241
+  + image {
+    left = 0
+    top = 0
+    width = 100%
+    height = 100%
+    file = "airlink-horizontal.png"
+  }
+}
++ label {
+  left = 0
+  top = 280
+  width = 100%
+  height = 30
+  align = "center"
+  color = "#073354"
+  text = "ISP OS | Network Monitoring Operating System"
+}
++ boot_menu {
+  left = 15%
+  top = 340
+  width = 70%
+  height = 250
+  item_color = "#073354"
+  selected_item_color = "#3553ff"
+  item_height = 40
+  item_padding = 8
+  item_spacing = 6
+}
++ label {
+  left = 0
+  top = 90%
+  width = 100%
+  height = 30
+  align = "center"
+  color = "#073354"
+  text = "Use the arrow keys to choose an option. Press Enter to start."
+}
++ label {
+  id = "__timeout__"
+  left = 0
+  top = 95%
+  width = 100%
+  height = 24
+  align = "center"
+  color = "#073354"
+  text = "Starting in %d seconds"
+}

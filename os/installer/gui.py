@@ -4,15 +4,19 @@ import sys
 import subprocess
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QPushButton,
-                            QComboBox, QCheckBox, QLineEdit, QPlainTextEdit, QProgressBar, QStackedWidget, QMessageBox)
+                            QHBoxLayout, QComboBox, QCheckBox, QLineEdit, QPlainTextEdit, QProgressBar, QStackedWidget, QMessageBox)
 from installer.disks import discover
 from installer.install import install
 
+BRANDING = Path(__file__).resolve().parents[1] / "branding"
+
 STYLE = """
 QWidget { background: #071426; color: #e4efff; font: 16px 'DejaVu Sans'; }
-QLabel#title { font-size: 36px; font-weight: bold; }
+QLabel#title { font-size: 28px; font-weight: bold; }
+QLabel#brand { background: white; border-radius: 10px; }
 QPushButton { background: #1976ed; padding: 14px; border-radius: 7px; }
 QPushButton:disabled { background: #26354a; color: #8a9ab0; }
 QLineEdit,QComboBox,QPlainTextEdit { background: #10233d; padding: 10px; border: 1px solid #324b6b; }
@@ -45,6 +49,7 @@ class Installer(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AirLink ISP OS — Installation")
+        self.setWindowIcon(QIcon(str(BRANDING / "airlink-stacked.png")))
         self.resize(1100, 760)
         self.busy = False
         self.pages = QStackedWidget()
@@ -93,13 +98,27 @@ class Installer(QMainWindow):
     def page(self, title, subtitle):
         w = QWidget()
         layout = QVBoxLayout(w)
-        layout.setContentsMargins(50, 40, 50, 40)
+        layout.setContentsMargins(32, 24, 32, 24)
+        header = QHBoxLayout()
+        header.setSpacing(24)
+        logo = QLabel()
+        logo.setObjectName("brand")
+        logo.setAccessibleName("AirLink — Telecommunication company")
+        logo.setFixedSize(260, 105)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo.setPixmap(QPixmap(str(BRANDING / "airlink-horizontal.png")).scaled(
+            260, 105, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        header.addWidget(logo)
+        headings = QVBoxLayout()
         label = QLabel(title)
         label.setObjectName("title")
-        layout.addWidget(label)
+        label.setWordWrap(True)
+        headings.addWidget(label)
         label = QLabel(subtitle)
         label.setWordWrap(True)
-        layout.addWidget(label)
+        headings.addWidget(label)
+        header.addLayout(headings, 1)
+        layout.addLayout(header)
         self.pages.addWidget(w)
         return layout
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'api.dart';
+import 'branding.dart';
 import 'update_center.dart';
 
 const navy = Color(0xff071426);
@@ -89,7 +90,18 @@ class _SessionGateState extends State<SessionGate> {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AirLinkLogo(width: 280),
+              SizedBox(height: 24),
+              CircularProgressIndicator(),
+            ],
+          ),
+        ),
+      );
     }
     if (error != null) {
       return Scaffold(
@@ -99,7 +111,9 @@ class _SessionGateState extends State<SessionGate> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.cloud_off, size: 48, color: orange),
+                const AirLinkLogo(width: 280),
+                const SizedBox(height: 20),
+                const Icon(Icons.cloud_off, size: 32, color: orange),
                 const SizedBox(height: 20),
                 const Text('AirLink server is unavailable'),
                 Padding(padding: const EdgeInsets.all(20), child: Text(error!)),
@@ -202,12 +216,12 @@ class _LoginViewState extends State<LoginView> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.cell_tower, color: blue, size: 64),
+              const Center(child: AirLinkLogo(width: 156, stacked: true)),
               const SizedBox(height: 24),
               const Text(
                 'AirLink ISP OS',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -451,30 +465,18 @@ class _OperationsState extends State<Operations> {
       child: Column(
         children: [
           const Padding(
-            padding: EdgeInsets.fromLTRB(24, 28, 24, 30),
-            child: Row(
+            padding: EdgeInsets.fromLTRB(24, 24, 24, 20),
+            child: Column(
               children: [
-                Icon(Icons.cell_tower, color: blue, size: 30),
-                SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'AirLink',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      'ISP OPERATING SYSTEM',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: muted,
-                        letterSpacing: 1.7,
-                      ),
-                    ),
-                  ],
+                AirLinkLogo(),
+                SizedBox(height: 12),
+                Text(
+                  'ISP OPERATING SYSTEM',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: muted,
+                    letterSpacing: 1.7,
+                  ),
                 ),
               ],
             ),
@@ -555,6 +557,10 @@ class _OperationsState extends State<Operations> {
                                   Scaffold.of(context).openDrawer(),
                             ),
                           ),
+                        if (!wide) ...[
+                          const AirLinkLogo(width: 40, stacked: true),
+                          const SizedBox(width: 12),
+                        ],
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
