@@ -16,6 +16,31 @@ from airlink.security import hasher
 from fastapi.staticfiles import StaticFiles
 import fakeredis
 import uvicorn
+from fastapi import HTTPException
+sys.path.insert(0, str(ROOT / 'os'))
+from updates import update
+
+# Real signed GitHub metadata in the preview, with installation denied server-side.
+update.ROOT = ROOT / 'test-results' / 'local-update-preview'
+update.CONFIG = ROOT / 'deployment' / 'update-source' / 'update-source.json'
+update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
+appliance_broker = api.broker
+
+def preview_broker(action, payload=None):
+    if action.startswith('updates.'):
+        operation = action.split('.', 1)[1]
+        if operation not in {'status', 'check'}:
+            raise HTTPException(409, 'Install updates from the dashboard hosted on your AirLink PC. This is a local preview.')
+        try:
+            result = update.action(operation, payload or {})
+        except Exception as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if operation == 'status':
+            result.update(install_supported=False, preview=True)
+        return result
+    return appliance_broker(action, payload)
+
+api.broker = preview_broker
 api.cache=fakeredis.FakeRedis(decode_responses=True)
 Base.metadata.create_all(engine)
 with SessionLocal() as db:

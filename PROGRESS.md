@@ -33,3 +33,9 @@ Added publisher tools for repository URL validation, offline Ed25519 key creatio
 ## Published development release
 
 [v0.1.0-dev](https://github.com/safin97/airlink-isp-os/releases/tag/v0.1.0-dev) was published on 1 November 2026 with 13 verified assets, including the bootable ISO, signed application package, manifest and source archive. Anonymous GitHub Check/Download/Verify passed using the real updater. The exact package also passed a QEMU install rehearsal preserving a test tower, owner access and encrypted SNMP credentials. This qualifies the initial package path, not arbitrary future migrations, hardware, interrupted updates or rollback. The release remains a development build.
+
+## In-dashboard update workflow — source follow-up
+
+Added automatic signed-feed checks, release details in the existing page, one confirmed Update now action, download progress, package verification, installation/reconnect polling, and prepared scheduling. No external tab is opened. Version/sequence pinning and the persisted installation request prevent approval from switching to another release, including before a background or scheduled job starts. Matching installed releases report up to date without weakening install replay rejection. The local preview now performs live GitHub checks while blocking Linux installation on the Mac.
+
+Validation: 79 Python tests passed with one Linux-only skip; 7 Flutter tests passed; clean analyzer and release web build. The updated real updater checked, downloaded and verified the public GitHub package in an isolated Linux container, then correctly recognized a matching installed sequence. The local browser rendered the actual signed release. The immutable published `v0.1.0-dev` ISO/package has not been replaced by this source follow-up.

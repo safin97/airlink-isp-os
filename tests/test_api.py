@@ -161,3 +161,15 @@ def test_logout_revokes_access_even_without_refresh_cookie(client,owner):
 def test_empty_device_address_rejected(client,owner):
     tid=tower(client,owner)
     assert client.post('/api/devices',headers=owner,json={'name':'D','tower_id':tid,'ip_address':''}).status_code==422
+
+
+@pytest.mark.parametrize('role', ['manager', 'technician', 'viewer'])
+def test_update_checks_and_installation_are_owner_only(client, owner, monkeypatch, role):
+    _, headers = user(client, owner, role)
+    from airlink import api
+    def forbidden(*args, **kwargs):
+        pytest.fail('Non-owner reached the privileged update controller')
+    monkeypatch.setattr(api, 'broker', forbidden)
+    assert client.get('/api/updates', headers=headers).status_code == 403
+    for action in ('check', 'download', 'verify', 'install', 'schedule'):
+        assert client.post('/api/updates/' + action, headers=headers, json={}).status_code == 403

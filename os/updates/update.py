@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -50,13 +51,16 @@ def verify_manifest(envelope, public_key, current_sequence=0):
 
 def atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w") as file:
-        json.dump(data, file)
-        file.flush()
-        os.fsync(file.fileno())
-    tmp.chmod(0o600)
-    tmp.replace(path)
+    fd, name = tempfile.mkstemp(prefix=".update-", dir=path.parent)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w") as file:
+            json.dump(data, file)
+            file.flush()
+            os.fsync(file.fileno())
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def read(path, default):
@@ -70,11 +74,12 @@ class HTTPSOnly(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def download(url, destination, limit):
+def download(url, destination, limit, progress=None):
     if urllib.parse.urlparse(url).scheme != "https":
         raise ValueError("HTTPS required")
     opener = urllib.request.build_opener(HTTPSOnly())
     total = 0
+    last_progress = 0
     temp = destination.with_suffix(".partial")
     with opener.open(url, timeout=30) as source, open(temp, "wb") as out:
         while True:
@@ -85,6 +90,9 @@ def download(url, destination, limit):
             if total > limit:
                 raise ValueError("Download exceeds signed size")
             out.write(chunk)
+            if progress and (time.monotonic() - last_progress >= 0.5 or total == limit):
+                progress(total, limit)
+                last_progress = time.monotonic()
         out.flush()
         os.fsync(out.fileno())
     temp.replace(destination)
@@ -113,9 +121,40 @@ def verify_package(meta):
 
 
 def status():
+    installed = read(ROOT / "installed.json", {"sequence": 0})
+    available = read(ROOT / "verified.json", None)
+    if available and available["sequence"] <= installed["sequence"]:
+        available = None
     return {"configured": CONFIG.exists() and KEY.exists(), "rollback_supported": False,
+            "install_supported": True,
             "state": read(ROOT / "state.json", {"status": "idle"}),
-            "available": read(ROOT / "verified.json", None)}
+            "transfer": read(ROOT / "transfer.json", {}),
+            "last_check": read(ROOT / "check.json", None),
+            "available": available}
+
+
+def check_release():
+    candidate = ROOT / "candidate.json"
+    try:
+        download(read(CONFIG, {})["manifest_url"], candidate, 128 * 1024)
+        installed = read(ROOT / "installed.json", {"sequence": 0})
+        seq = installed["sequence"]
+        meta = verify_manifest(read(candidate, {}), KEY.read_bytes(), max(0, seq - 1))
+        if meta["sequence"] == seq:
+            if any(meta[field] != installed[field] for field in ("version", "sha256", "size")):
+                raise ValueError("Published release conflicts with the installed sequence")
+            (ROOT / "verified.json").unlink(missing_ok=True)
+            atomic(ROOT / "check.json", {"at": time.time(), "up_to_date": True})
+            return {"version": meta["version"], "up_to_date": True}
+        candidate.replace(ROOT / "manifest.json")
+        atomic(ROOT / "verified.json", meta)
+        atomic(ROOT / "check.json", {"at": time.time(), "up_to_date": False})
+        return meta
+    except Exception as exc:
+        atomic(ROOT / "check.json", {"at": time.time(), "error": str(exc)})
+        raise
+    finally:
+        candidate.unlink(missing_ok=True)
 
 
 def action(name, payload):
@@ -127,23 +166,35 @@ def action(name, payload):
     with open(ROOT / "lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if name == "check":
-            config = read(CONFIG, {})
-            download(config["manifest_url"], ROOT / "manifest.json", 128 * 1024)
-            meta = manifest()
-            atomic(ROOT / "verified.json", meta)
-            return meta
+            return check_release()
         meta = manifest()
+        if any(field in payload and payload[field] != meta[field] for field in ("version", "sequence")):
+            raise ValueError("Release changed. Check again before updating.")
         if name == "download":
-            download(meta["url"], ROOT / "package.deb", meta["size"])
-            verify_package(meta)
+            def progress(received, total):
+                atomic(ROOT / "transfer.json", {"status": "downloading", "version": meta["version"],
+                       "sequence": meta["sequence"], "received": received, "total": total})
+            progress(0, meta["size"])
+            try:
+                download(meta["url"], ROOT / "package.deb", meta["size"], progress=progress)
+                verify_package(meta)
+                atomic(ROOT / "transfer.json", {"status": "verified", "version": meta["version"],
+                       "sequence": meta["sequence"], "received": meta["size"], "total": meta["size"]})
+            except Exception as exc:
+                atomic(ROOT / "transfer.json", {"status": "failed", "error": str(exc)})
+                raise
         elif name == "verify":
             verify_package(meta)
         elif name in ("install", "schedule"):
+            if read(ROOT / "state.json", {}).get("status") in {"installing", "failed"}:
+                raise ValueError("An active or failed installation requires local review")
             verify_package(meta)
+            approved = {field: meta[field] for field in ("version", "sequence", "sha256", "size")}
             if name == "schedule":
                 at = datetime.fromisoformat(payload["at"].replace("Z", "+00:00"))
                 if at.tzinfo is None or at <= datetime.now(timezone.utc):
                     raise ValueError("Schedule must be in the future with timezone")
+                atomic(ROOT / "request.json", approved)
                 when = at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
                 timer = Path("/etc/systemd/system/airlink-update-job.timer")
                 timer.write_text("[Unit]\nDescription=Scheduled AirLink update\n[Timer]\nOnCalendar=" + when +
@@ -152,6 +203,7 @@ def action(name, payload):
                 subprocess.run(["systemctl", "daemon-reload"], check=True)
                 subprocess.run(["systemctl", "enable", "--now", "airlink-update-job.timer"], check=True)
             else:
+                atomic(ROOT / "request.json", approved)
                 subprocess.run(["systemctl", "start", "--no-block", "airlink-update-job.service"], check=True)
         else:
             raise ValueError("Unsupported update action")
@@ -165,11 +217,19 @@ def install():
         previous = read(ROOT / "state.json", {})
         if previous.get("status") in {"installing", "failed"}:
             raise RuntimeError("Interrupted/failed update requires local recovery review")
-        meta = manifest()
-        verify_package(meta)
-        if shutil.disk_usage("/").free < meta["size"] * 3 + 1024**3:
-            raise RuntimeError("Insufficient update/backup space")
-        subprocess.run(["/bin/bash", "/opt/airlink/deployment/health.sh"], check=True)
+        try:
+            meta = manifest()
+            approved = read(ROOT / "request.json", None)
+            if approved and any(meta[field] != approved[field] for field in ("version", "sequence", "sha256", "size")):
+                raise ValueError("Prepared release changed after approval. Check and approve it again.")
+            verify_package(meta)
+            if shutil.disk_usage("/").free < meta["size"] * 3 + 1024**3:
+                raise RuntimeError("Insufficient update/backup space")
+            subprocess.run(["/bin/bash", "/opt/airlink/deployment/health.sh"], check=True)
+        except Exception as exc:
+            atomic(ROOT / "state.json", {"status": "rejected", "error": str(exc),
+                   "finished": time.time(), "recovery_required": False})
+            raise
         atomic(ROOT / "state.json", {"status": "installing", "version": meta["version"], "started": time.time()})
         try:
             subprocess.run(["systemctl", "stop", "airlink-api", "airlink-monitor", "airlink-alerts"], check=True)

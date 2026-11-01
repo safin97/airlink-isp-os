@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'api.dart';
+import 'update_center.dart';
 
 const navy = Color(0xff071426);
 const panel = Color(0xff10233d);
@@ -335,7 +336,6 @@ class _OperationsState extends State<Operations> {
   DateTime? observed;
   Map<String, dynamic> summary = {};
   Map<String, List<dynamic>> rows = {};
-  Map<String, dynamic>? updateState;
   List<dynamic> samples = [];
   String? deviceId;
   Timer? timer;
@@ -405,7 +405,6 @@ class _OperationsState extends State<Operations> {
       if (deviceId != null && list('devices').any((d) => d['id'] == deviceId)) {
         await loadMetrics(deviceId!);
       }
-      if (page == 10 && owner) await loadUpdates();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
@@ -438,23 +437,11 @@ class _OperationsState extends State<Operations> {
     }
   }
 
-  Future<void> loadUpdates() async {
-    try {
-      final data = await api.request('/updates');
-      if (mounted) {
-        setState(() => updateState = Map<String, dynamic>.from(data));
-      }
-    } catch (e) {
-      toast(e.toString());
-    }
-  }
-
   void navigate(int index) {
     setState(() {
       page = index;
       search = '';
     });
-    if (index == 10 && owner) loadUpdates();
   }
 
   Widget navigation() => Container(
@@ -1669,136 +1656,7 @@ class _OperationsState extends State<Operations> {
       ],
     ),
   );
-  Widget updates() {
-    final state = updateState?['state'] as Map?;
-    final available = state?['available'] as Map?;
-    return section(
-      'Software Update Center',
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Current version: ${updateState?['current_version'] ?? 'Loading…'}',
-            style: const TextStyle(fontSize: 22),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            state?['configured'] == true
-                ? 'Trusted publisher configured'
-                : 'No trusted release source is configured. Add the release URL and publisher key locally before updating.',
-            style: const TextStyle(color: muted),
-          ),
-          const SizedBox(height: 16),
-          if (available != null) ...[
-            Text(
-              'Available: ${available['version']} · ${available['size']} bytes',
-            ),
-            Text(available['release_notes'] ?? ''),
-            Text('Reboot required: ${available['reboot_required']}'),
-          ],
-          Text('State: ${state?['state']?['status'] ?? 'Unavailable'}'),
-          const SizedBox(height: 20),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final action in [
-                'check',
-                'download',
-                'verify',
-                'install',
-                'schedule',
-              ])
-                OutlinedButton(
-                  onPressed: state?['configured'] != true
-                      ? null
-                      : () async {
-                          final payload = <String, dynamic>{};
-                          if (action == 'install') {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Install verified update?'),
-                                content: const Text(
-                                  'Monitoring will pause during backup, migration and installation.',
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.pop(context, false),
-                                    child: const Text('Cancel'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.pop(context, true),
-                                    child: const Text('Install'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (ok != true) return;
-                          }
-                          if (action == 'schedule') {
-                            if (!mounted) return;
-                            final controller = TextEditingController();
-                            final at = await showDialog<String>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: const Text('Schedule update'),
-                                content: TextField(
-                                  controller: controller,
-                                  decoration: const InputDecoration(
-                                    labelText: 'ISO time with timezone',
-                                    hintText: '2026-11-05T02:00:00+01:00',
-                                  ),
-                                ),
-                                actions: [
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.pop(context, controller.text),
-                                    child: const Text('Schedule'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            controller.dispose();
-                            if (at == null) return;
-                            payload['at'] = at;
-                          }
-                          try {
-                            await api.request(
-                              '/updates/$action',
-                              method: 'POST',
-                              body: payload,
-                            );
-                            await loadUpdates();
-                            toast('Update action accepted');
-                          } catch (e) {
-                            toast(e.toString());
-                          }
-                        },
-                  child: Text(action[0].toUpperCase() + action.substring(1)),
-                ),
-              OutlinedButton(
-                onPressed: null,
-                child: const Text('Rollback unavailable'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Update history', style: TextStyle(fontSize: 18)),
-          const SizedBox(height: 12),
-          if ((updateState?['history'] as List? ?? []).isEmpty)
-            const Text('No updates recorded.', style: TextStyle(color: muted)),
-          for (final h in (updateState?['history'] as List? ?? []))
-            ListTile(
-              title: Text('${h['version']} · ${h['status']}'),
-              subtitle: Text(h['created_at']),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget updates() => section('Software Update Center', UpdateCenter(api: api));
 
   Widget settings() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
