@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-/opt/airlink/venv/bin/pip install pytest fakeredis
+/opt/airlink/venv/bin/pip install pytest 'fakeredis[lua]'
 pg_lsclusters --no-header | while read -r version name rest; do
   pg_ctlcluster --skip-systemctl-redirect "$version" "$name" start
  done

@@ -28,7 +28,7 @@ The image output is `dist/AirLink-ISP-OS-amd64.iso` with `dist/SHA256SUMS` and a
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -r backend/requirements.lock pytest fakeredis
+.venv/bin/pip install -r backend/requirements.lock pytest 'fakeredis[lua]'
 .venv/bin/pytest -q
 ```
 

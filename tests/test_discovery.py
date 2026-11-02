@@ -44,7 +44,9 @@ def test_discovery_missing_ip_and_ping_error(client, owner, monkeypatch):
     monkeypatch.setattr(discovery, 'scan', fail)
     assert client.post(url, headers=owner, json={}).status_code == 503
     monkeypatch.setattr(discovery, 'scan', lambda network: [])
-    assert client.post(url, headers=owner, json={}).json()['hosts'] == []
+    result = client.post(url, headers=owner, json={})
+    assert result.status_code == 200, result.text
+    assert result.json()['hosts'] == []
 
 
 def test_bounded_ping_scan(monkeypatch):
