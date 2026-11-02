@@ -16,6 +16,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
   final password = TextEditingController();
   bool busy = true, enabled = true, verifyTls = true, allowHttp = false;
   bool hasCommunity = false, hasPassword = false;
+  bool tryPublicSnmp = true;
   int profiles = 0;
   String? error, message;
 
@@ -35,6 +36,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
 
   void apply(Map<String, dynamic> data) {
     enabled = data['enabled'] != false;
+    tryPublicSnmp = data['try_public_snmp'] != false;
     verifyTls = data['verify_tls'] != false;
     allowHttp = data['allow_http'] == true;
     hasCommunity = data['has_community'] == true;
@@ -66,6 +68,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
         method: 'PUT',
         body: {
           'enabled': enabled,
+          'try_public_snmp': tryPublicSnmp,
           'community': community.text.isEmpty ? null : community.text,
           'api_username': username.text.trim(),
           'api_password': password.text.isEmpty ? null : password.text,
@@ -107,6 +110,17 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
               onChanged: busy
                   ? null
                   : (value) => setState(() => enabled = value),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const AppText('Check SNMP with public community'),
+              subtitle: const AppText(
+                'Tries v2c then v1. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
+              ),
+              value: tryPublicSnmp,
+              onChanged: busy
+                  ? null
+                  : (value) => setState(() => tryPublicSnmp = value),
             ),
             if (profiles > 0)
               Text(

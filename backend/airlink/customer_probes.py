@@ -14,7 +14,7 @@ from .client_telemetry import number
 from .device_api import collect_api
 
 DEFAULTS = {'enabled': True, 'community': '', 'api_username': '', 'api_password': '',
-            'verify_tls': True, 'allow_http': False}
+            'verify_tls': True, 'allow_http': False, 'try_public_snmp': True}
 
 
 def configuration(db, user):
@@ -33,7 +33,13 @@ def configuration(db, user):
                     candidates.append(credentials)
             except Exception:
                 continue
-    config['snmp_candidates'] = candidates[:4]
+    config['configured_snmp_count'] = len(candidates[:4])
+    candidates = candidates[:4]
+    if config['try_public_snmp']:
+        candidates = [{'version': '2c', 'community': 'public'}] + [
+            candidate for candidate in candidates if not (
+                candidate.get('version') in ('1', '2c') and candidate.get('community') == 'public')]
+    config['snmp_candidates'] = candidates
     return config
 
 
@@ -74,9 +80,10 @@ async def probe(address, config):
                 attempts.append(candidate)
     for credentials in attempts:
         try:
-            values = await asyncio.wait_for(collect(address, credentials, 0, vendor='auto'), timeout=7)
-            result.update(readings(values), telemetry_status='available', telemetry_source='SNMP v' + credentials['version'])
+            values = await asyncio.wait_for(collect(address, credentials, 0, vendor='auto', link_only=True), timeout=7)
             vendor = values.get('detected_vendor', 'generic')
+            source = ('MikroTik ' if vendor == 'mikrotik' else '') + 'SNMP v' + credentials['version']
+            result.update(readings(values), telemetry_status='available', telemetry_source=source)
             break
         except Exception:
             continue

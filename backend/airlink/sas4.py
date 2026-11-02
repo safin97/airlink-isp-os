@@ -240,12 +240,13 @@ class ProbeSettingsInput(BaseModel):
     api_password: Optional[str] = Field(default=None, max_length=1024)
     verify_tls: bool = True
     allow_http: bool = False
+    try_public_snmp: bool = True
 
 
 def public_probe_settings(config):
-    return {key: config[key] for key in ('enabled', 'api_username', 'verify_tls', 'allow_http')} | {
+    return {key: config[key] for key in ('enabled', 'api_username', 'verify_tls', 'allow_http', 'try_public_snmp')} | {
         'has_community': bool(config['community']), 'has_api_password': bool(config['api_password']),
-        'saved_snmp_profiles': len(config['snmp_candidates'])}
+        'saved_snmp_profiles': config['configured_snmp_count']}
 
 
 @router.get('/device-access')
@@ -260,7 +261,7 @@ def save_probe_settings(data: ProbeSettingsInput, user=Depends(sas4_access), db=
         raise HTTPException(422, 'Enter the device API password when changing the username')
     if data.community is not None and data.community and not data.community.strip():
         raise HTTPException(422, 'Enter a valid SNMP community')
-    for key in ('enabled', 'api_username', 'verify_tls', 'allow_http'):
+    for key in ('enabled', 'api_username', 'verify_tls', 'allow_http', 'try_public_snmp'):
         config[key] = getattr(data, key)
     if data.community is not None:
         config['community'] = data.community
@@ -269,6 +270,7 @@ def save_probe_settings(data: ProbeSettingsInput, user=Depends(sas4_access), db=
     if not data.api_username:
         config['api_password'] = ''
     config.pop('snmp_candidates', None)
+    config.pop('configured_snmp_count', None)
     obj = db.get(CustomerProbeSettings, user.id)
     if obj is None:
         obj = CustomerProbeSettings(user_id=user.id)

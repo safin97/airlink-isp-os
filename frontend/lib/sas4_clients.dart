@@ -510,8 +510,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                   for (final label in [
                     'Status',
                     'Username',
-                    'Name',
-                    'Profile',
+                    if (!onlineOnly) ...['Name', 'Profile'],
                     if (onlineOnly) ...[
                       'IP address',
                       'Ethernet speed',
@@ -559,8 +558,10 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                                 ? null
                                 : () => openUser(row),
                           ),
-                          DataCell(Text(text(row['name']))),
-                          DataCell(Text(text(row['profile']))),
+                          if (!onlineOnly) ...[
+                            DataCell(Text(text(row['name']))),
+                            DataCell(Text(text(row['profile']))),
+                          ],
                           if (onlineOnly)
                             DataCell(SelectableText(text(row['ip_address']))),
                           if (onlineOnly) ...[

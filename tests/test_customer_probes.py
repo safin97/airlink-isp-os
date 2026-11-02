@@ -33,6 +33,10 @@ def test_device_access_secrets_scoped_and_encrypted(client, owner):
         saved = db.scalar(select(CustomerProbeSettings))
         assert 'private-' not in saved.encrypted_settings
         assert json.loads(cipher().decrypt(saved.encrypted_settings.encode()))['api_password'] == 'private-api'
+        assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == [{'version':'2c','community':'public'}]
+    disabled = client.put(path, headers=manager, json={'try_public_snmp':False})
+    assert disabled.status_code == 200 and disabled.json()['try_public_snmp'] is False
+    with SessionLocal() as db:
         assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == []
     assert client.put(path, headers=owner, json={'api_username':'changed'}).status_code == 422
     saved = client.put(path, headers=owner, json={'api_username':'monitor', 'community':None})
@@ -47,7 +51,8 @@ def test_discovery_rejects_non_customer_addresses(address):
 
 def test_snmp_version_fallback_and_api_fills_missing_signal(monkeypatch):
     calls = []
-    async def collect(address, credentials, retries, vendor):
+    async def collect(address, credentials, retries, vendor, link_only=False):
+        assert link_only is True
         calls.append(credentials['version'])
         if credentials['version'] == '2c': raise RuntimeError('No response')
         return {'snmp_up': True, 'detected_vendor': 'ubiquiti', 'interfaces': {
@@ -139,10 +144,16 @@ def test_background_cache_is_nonblocking_deduplicated_and_account_scoped(monkeyp
 
 
 @pytest.mark.parametrize('oid,vendor', [('1.3.6.1.4.1.14988.1','mikrotik'),('1.3.6.1.4.1.10002.1','ubiquiti'),('1.3.6.1.4.1.41112.1','ubiquiti')])
-def test_snmp_detects_vendor(monkeypatch,oid,vendor):
+@pytest.mark.parametrize('link_only', [False, True])
+def test_snmp_detects_vendor(monkeypatch,oid,vendor,link_only):
     monkeypatch.setattr(snmp.UdpTransportTarget,'create',AsyncMock(return_value=object()))
     monkeypatch.setattr(snmp,'get_cmd',AsyncMock(side_effect=[(None,0,0,[(snmp.UPTIME,100)]),(None,0,0,[('oid',oid)])]))
     tables=AsyncMock(return_value={});monkeypatch.setattr(snmp,'read_table',tables)
-    values=asyncio.run(snmp.collect('192.168.1.1',{'version':'2c','community':'private'},0,vendor='auto'))
+    values=asyncio.run(snmp.collect('192.168.1.1',{'version':'2c','community':'private'},0,vendor='auto',link_only=link_only))
     assert values['detected_vendor']==vendor
-    assert set(snmp.WIRELESS_TABLES[vendor].values()).issubset({call.args[3] for call in tables.call_args_list})
+    called = {call.args[3] for call in tables.call_args_list}
+    expected = {snmp.WIRELESS_TABLES[vendor]['signal_dbm']} if link_only else set(snmp.WIRELESS_TABLES[vendor].values())
+    assert expected.issubset(called)
+    if link_only:
+        assert not {snmp.TABLES['cpu'], snmp.TABLES['if_rx_octets'], snmp.FALLBACK_TABLES['if_tx32']} & called
+        assert snmp.TABLES['if_type'] in called and snmp.TABLES['if_speed_mbps'] in called

@@ -50,6 +50,7 @@ void main() {
       expect(saved!['community'], isNull);
       expect(saved!['api_password'], isNull);
       expect(saved!['verify_tls'], isTrue);
+      expect(saved!['try_public_snmp'], isTrue);
       expect(saved!['allow_http'], isFalse);
       expect(tester.takeException(), isNull);
     },

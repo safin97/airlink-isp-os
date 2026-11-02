@@ -90,7 +90,7 @@ async def read_table(engine, auth, target, oid, textual=False):
     return rows
 
 
-async def collect(address, credentials, retries, vendor="generic"):
+async def collect(address, credentials, retries, vendor="generic", link_only=False):
     auth = authentication(credentials)
     engine = SnmpEngine()
     try:
@@ -110,12 +110,14 @@ async def collect(address, credentials, retries, vendor="generic"):
             values["detected_vendor"] = vendor
         tables = {}
         for name, oid in TABLES.items():
-            if credentials.get("version") == "1" and name in ("if_rx_octets", "if_tx_octets"):
+            if link_only and name not in ("if_name", "if_type", "if_status", "if_speed_mbps"):
+                tables[name] = {}
+            elif credentials.get("version") == "1" and name in ("if_rx_octets", "if_tx_octets"):
                 tables[name] = {}  # SNMPv1 cannot carry Counter64 values.
             else:
                 tables[name] = await read_table(engine, auth, target, oid, name in ("if_name", "storage_type"))
         for name, oid in FALLBACK_TABLES.items():
-            tables[name] = await read_table(engine, auth, target, oid, name == "if_descr")
+            tables[name] = {} if link_only and name not in ("if_descr", "if_speed") else await read_table(engine, auth, target, oid, name == "if_descr")
         if tables["cpu"]:
             values["cpu_percent"] = sum(tables["cpu"].values()) / len(tables["cpu"])
         memory = [i for i, kind in tables["storage_type"].items() if kind == RAM_TYPE and all(i in tables[k] for k in ("storage_units", "storage_size", "storage_used"))]
@@ -147,6 +149,8 @@ async def collect(address, credentials, retries, vendor="generic"):
         family = "ubiquiti" if vendor in ("ubiquiti", "ubiquiti_m5", "ubiquiti_ac") else vendor
         wireless = {}
         for name, oid in WIRELESS_TABLES.get(family, {}).items():
+            if link_only and name != "signal_dbm":
+                continue
             table = await read_table(engine, auth, target, oid)
             table = {index: value for index, value in table.items() if
                      (name in ("signal_dbm", "noise_dbm") and -150 <= value < 0) or
