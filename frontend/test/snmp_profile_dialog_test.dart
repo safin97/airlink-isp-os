@@ -39,15 +39,15 @@ void main() {
       find.byKey(const ValueKey('community')),
       'private-lab',
     );
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('SNMP v3').last);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('community')), findsNothing);
     expect(find.byKey(const ValueKey('auth_key')), findsOneWidget);
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SNMP v2c').last);
+    await tester.tap(find.text('SNMP v2').last);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('auth_key')), findsNothing);
     await tester.tap(find.text('Save'));

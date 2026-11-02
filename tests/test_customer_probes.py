@@ -15,6 +15,12 @@ from test_api import user
 from monitoring import snmp
 
 
+@pytest.fixture(autouse=True)
+def no_background_network(monkeypatch):
+    monkeypatch.setattr(probes, 'reachable', AsyncMock(return_value=False))
+    monkeypatch.setattr(probes, 'detect_vendor', AsyncMock(return_value='generic'))
+
+
 def test_device_access_secrets_scoped_and_encrypted(client, owner):
     manager_id, manager = user(client, owner, 'manager')
     _, viewer = user(client, owner, 'viewer')
@@ -54,7 +60,7 @@ def test_snmp_version_fallback_and_api_fills_missing_signal(monkeypatch):
     async def collect(address, credentials, retries, vendor, link_only=False):
         assert link_only is True
         calls.append(credentials['version'])
-        if credentials['version'] == '2c': raise RuntimeError('No response')
+        if credentials['version'] == '1': raise RuntimeError('No response')
         return {'snmp_up': True, 'detected_vendor': 'ubiquiti', 'interfaces': {
             '1': {'name':'eth0','type':6,'status':1,'speed_mbps':100}}}
     monkeypatch.setattr(snmp, 'collect', collect)
@@ -63,10 +69,10 @@ def test_snmp_version_fallback_and_api_fills_missing_signal(monkeypatch):
     config = {**probes.DEFAULTS, 'snmp_candidates':[{'version':'2c','community':'private'}],
               'api_username':'monitor','api_password':'private'}
     result = asyncio.run(probes.probe('192.168.1.20', config))
-    assert calls == ['2c', '1']
+    assert calls == ['1', '2c']
     assert result['ethernet_links'][0]['speed_mbps'] == 100
     assert result['signal_dbm'] == -64
-    assert result['telemetry_source'] == 'SNMP v1 + airOS API'
+    assert result['telemetry_source'] == 'SNMP v2 + airOS API'
     api.assert_awaited_once()
 
 
@@ -121,7 +127,7 @@ def test_background_cache_is_nonblocking_deduplicated_and_account_scoped(monkeyp
         entered.set()
         await asyncio.to_thread(release.wait, 3)
         return {'ethernet_links':[{'name':'eth0','speed_mbps':100}], 'signal_dbm':-60,
-                'telemetry_status':'available','telemetry_source':'SNMP v2c'}
+                'telemetry_status':'available','telemetry_source':'SNMP v2'}
     monkeypatch.setattr(probes,'probe',fake_probe)
     monkeypatch.setattr(probes,'configuration',lambda db,user:{**probes.DEFAULTS, 'snmp_candidates':[{'version':'2c','community':'private'}]})
     service=probes.ProbeService();service.start()
@@ -157,3 +163,110 @@ def test_snmp_detects_vendor(monkeypatch,oid,vendor,link_only):
     if link_only:
         assert not {snmp.TABLES['cpu'], snmp.TABLES['if_rx_octets'], snmp.FALLBACK_TABLES['if_tx32']} & called
         assert snmp.TABLES['if_type'] in called and snmp.TABLES['if_speed_mbps'] in called
+
+
+def test_reachable_device_with_no_snmp_is_distinguished(monkeypatch):
+    monkeypatch.setattr(probes, 'reachable', AsyncMock(return_value=True))
+    monkeypatch.setattr(snmp, 'collect', AsyncMock(side_effect=RuntimeError('No SNMP response')))
+    result = asyncio.run(probes.probe('192.0.2.1', {
+        **probes.DEFAULTS, 'snmp_candidates': [{'version': '2c', 'community': 'public'}]}))
+    assert result['device_reachable'] is True
+    assert result['telemetry_status'] == 'snmp_unavailable'
+    assert result['signal_dbm'] is None and result['ethernet_links'] == []
+
+
+def test_slow_snmp_candidates_leave_time_for_api(monkeypatch):
+    monkeypatch.setattr(probes, 'reachable', AsyncMock(return_value=False))
+    monkeypatch.setattr(probes, 'SNMP_BUDGET', .02)
+    async def slow(*args, **kwargs):
+        await asyncio.sleep(1)
+    monkeypatch.setattr(snmp, 'collect', slow)
+    api = AsyncMock(return_value={'ethernet_links': [{'name': 'eth0', 'speed_mbps': 100}],
+                                  'signal_dbm': -60, 'telemetry_source': 'airOS API'})
+    monkeypatch.setattr(probes, 'collect_api', api)
+    result = asyncio.run(probes.probe('192.0.2.1', {**probes.DEFAULTS,
+        'snmp_candidates': [{'version': '2c', 'community': 'public'}],
+        'api_username': 'read', 'api_password': 'private'}))
+    api.assert_awaited_once()
+    assert result['signal_dbm'] == -60 and result['device_reachable'] is True
+
+
+def test_late_api_timeout_preserves_successful_snmp(monkeypatch):
+    monkeypatch.setattr(probes, 'reachable', AsyncMock(return_value=True))
+    monkeypatch.setattr(probes, 'PROBE_BUDGET', .03)
+    monkeypatch.setattr(snmp, 'collect', AsyncMock(return_value={
+        'snmp_up': True, 'interfaces': {'1': {'name':'ether1','type':6,'status':1,'speed_mbps':1000}}}))
+    async def slow(*args, **kwargs):
+        await asyncio.sleep(1)
+    monkeypatch.setattr(probes, 'collect_api', slow)
+    result = asyncio.run(probes.probe('192.0.2.1', {**probes.DEFAULTS,
+        'snmp_candidates': [{'version':'2c','community':'public'}], 'api_username':'read','api_password':'private'}))
+    assert result['ethernet_links'][0]['speed_mbps'] == 1000
+    assert result['telemetry_status'] == 'available' and result['telemetry_source'] == 'SNMP v1'
+
+
+def test_failed_direct_probe_preserves_partial_inventory_reading(monkeypatch):
+    config = {**probes.DEFAULTS, 'snmp_candidates': [{'version':'2c','community':'public'}]}
+    monkeypatch.setattr(probes, 'configuration', lambda db, user: config)
+    service = probes.ProbeService()
+    account = SimpleNamespace(id='owner')
+    key = ('owner', '192.0.2.1', '1', 'customer', probes.hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest())
+    service.cache[key] = (probes.time.monotonic(), {'ethernet_links':[], 'signal_dbm':None,
+        'telemetry_status':'unreachable', 'telemetry_source':None, 'device_reachable':False})
+    row = {'username':'customer', 'session_id':1, 'ip_address':'192.0.2.1',
+           'ethernet_links':[{'name':'eth0','speed_mbps':100}], 'signal_dbm':None,
+           'telemetry_status':'available', 'telemetry_source':'airOS API', 'device_reachable':True}
+    result = service.enrich(None, account, {'clients':[row]})['clients'][0]
+    assert result['telemetry_status'] == 'available' and result['telemetry_source'] == 'airOS API'
+    assert result['device_reachable'] is True
+
+
+def test_snmp_fallback_order_includes_configured_v3_and_stops_on_success(monkeypatch):
+    calls = []
+    async def collect(address, credentials, *args, **kwargs):
+        calls.append(credentials['version'])
+        if credentials['version'] != '3':
+            raise RuntimeError('No response')
+        assert credentials['username'] == 'reader'
+        return {'snmp_up': True, 'detected_vendor': 'mimosa', 'interfaces': {}}
+    monkeypatch.setattr(snmp, 'collect', collect)
+    config = {**probes.DEFAULTS, 'snmp_candidates': [
+        {'version':'3','username':'reader','auth_key':'private-auth','priv_key':'private-key'},
+        {'version':'2c','community':'public'}]}
+    result = asyncio.run(probes.probe('192.0.2.1', config))
+    assert calls == ['1','2c','3']
+    assert result['vendor_label'] == 'Mimosa' and result['telemetry_source'] == 'SNMP v3'
+    assert result['vendor_detection_source'] == 'SNMP'
+    assert [c['version'] for c in probes.snmp_attempts([{'version':'2c','community':'public'}])] == ['1','2c']
+
+
+def test_web_identity_is_retained_when_snmp_is_unavailable(monkeypatch):
+    monkeypatch.setattr(probes, 'detect_vendor', AsyncMock(return_value='mikrotik'))
+    monkeypatch.setattr(snmp, 'collect', AsyncMock(side_effect=RuntimeError('timeout')))
+    result = asyncio.run(probes.probe('192.0.2.1', {**probes.DEFAULTS,
+        'snmp_candidates':[{'version':'2c','community':'public'}]}))
+    assert result['vendor_label'] == 'MikroTik'
+    assert result['telemetry_status'] == 'snmp_unavailable'
+    assert result['signal_dbm'] is None
+
+
+@pytest.mark.parametrize('page,expected', [('MikroTik RouterOS','mikrotik'), ('airOS Ubiquiti','ubiquiti'), ('Mimosa C5','mimosa'), ('Login','generic')])
+def test_public_device_brand_detection_sends_no_credentials(page, expected):
+    def handler(request):
+        assert 'authorization' not in request.headers
+        if request.url.path == '/':
+            return httpx.Response(302, headers={'Location':'/login'})
+        assert request.url.path == '/login'
+        return httpx.Response(200, text=page)
+    assert asyncio.run(device_api.detect_vendor('192.0.2.1', probes.DEFAULTS,
+        transport=httpx.MockTransport(handler))) == expected
+
+
+def test_public_device_detection_rejects_external_redirects():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(302, headers={'Location':'http://127.0.0.1/'})
+    assert asyncio.run(device_api.detect_vendor('192.0.2.1', probes.DEFAULTS,
+        transport=httpx.MockTransport(handler))) == 'generic'
+    assert len(calls) == 1

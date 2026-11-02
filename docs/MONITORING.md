@@ -4,7 +4,7 @@ In **Settings → SNMP credential profiles → Add SNMP profile**, select the ve
 
 - **SNMP v2c:** community authentication; suitable for MikroTik and devices whose firmware supports v2c.
 - **SNMP v1:** explicit legacy option for airMAX M5/AC firmware. Ubiquiti documents read-only v1 support; choose the version your firmware actually supports.
-- **SNMP v3:** authPriv with SHA-256 and AES-128. Existing profiles retain v3 behavior. Firmware must support that exact combination.
+- **SNMP v3:** authPriv with selectable SHA-1, SHA-256 or MD5 authentication and AES-128 or DES privacy. New profile forms default to SHA-1/AES-128 for RouterOS compatibility; existing profiles without protocol fields keep SHA-256/AES-128. Match the device’s configured username, protocols and keys. See the [RouterOS SNMP reference](https://help.mikrotik.com/docs/spaces/ROS/pages/8978519/SNMP).
 
 ICMP echo is checked independently; a device is online when either ICMP or SNMP responds. Persistent failures cross the configured threshold before offline state. Availability reports specifically measure observed ICMP samples, so an ICMP-blocking device may have SNMP online status and 0% ICMP availability.
 
@@ -102,3 +102,10 @@ New devices default to Auto detect (SNMP / API); existing Generic devices also u
 ## PC connection measurements
 
 PC Performance includes ICMP round-trip latency to Google DNS (8.8.8.8) and an explicitly labeled gaming connection reference (1.1.1.1). The latter is not a PUBG Mobile or Call of Duty server measurement. Two shared, bounded probes run in parallel every five seconds; requests read their cache. Failed or blocked ICMP displays No reply, never a fabricated zero. System TX/RX and individual Ethernet cards are hidden from the dashboard. Network counters remain available to the monitoring service.
+
+
+## Online user device detection
+
+Online users automatically tries the configured communities with SNMP v1 first, then v2c, followed by saved SNMP v3 credentials. The first authenticated response ends the fallback sequence. v3 is never attempted with a guessed username or key. Owners can supply v3 credentials through Settings → SNMP credential profiles; global inventory secrets remain unavailable to other managers.
+
+Device type identifies MikroTik, Ubiquiti (including recognizable M5/AC models), and Mimosa using SNMP sysObjectID/sysDescr. Mimosa's enterprise identifier 43356 is listed in the [IANA enterprise registry](https://www.iana.org/assignments/enterprise-numbers/). A bounded, unauthenticated device web-page check can identify branding even when SNMP is blocked; it honors configured HTTP/TLS options and does not follow off-device redirects. Identification alone does not supply Ethernet speed or wireless signal. Mimosa identity and standard interface data are supported; vendor-specific Mimosa radio signal MIBs are not collected.

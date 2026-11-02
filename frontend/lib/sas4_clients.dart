@@ -330,6 +330,8 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
               'Add SNMP or device API credentials in My account → Customer device access.',
             'authentication_failed' =>
               'The device rejected the API login. Check Customer device access in My account.',
+            'snmp_unavailable' =>
+              'Device is reachable, but SNMP did not respond. Enable SNMP read access on UDP 161 for the AirLink server, or configure device API credentials in My account.',
             'unreachable' =>
               'No authenticated SNMP or supported API response. Check device credentials, services and network access.',
             'invalid_address' =>
@@ -542,6 +544,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                     if (!onlineOnly) ...['Name', 'Recharge card', 'Profile'],
                     if (onlineOnly) ...[
                       'IP address',
+                      'Device type',
                       'Ethernet speed',
                       'Signal',
                       'Connection',
@@ -615,6 +618,12 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                           if (onlineOnly)
                             DataCell(SelectableText(text(row['ip_address']))),
                           if (onlineOnly) ...[
+                            DataCell(
+                              Text(
+                                row['vendor_label']?.toString() ??
+                                    tr('Unknown / Generic'),
+                              ),
+                            ),
                             DataCell(telemetryCell(row, ethernet: true)),
                             DataCell(telemetryCell(row, ethernet: false)),
                             DataCell(
@@ -626,6 +635,8 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                                         'Credentials needed',
                                       'authentication_failed' =>
                                         'Login rejected',
+                                      'snmp_unavailable' =>
+                                        'Reachable · SNMP unavailable',
                                       'unreachable' => 'No response',
                                       'invalid_address' => 'Invalid IP',
                                       _ => '—',

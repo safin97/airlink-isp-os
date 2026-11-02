@@ -101,7 +101,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit username, password or role'));
       await tester.pumpAndSettle();
-      final field = find.byType(DropdownButtonFormField<String>).last;
+      final field = find.byType(DropdownButtonFormField<String>).first;
       await tester.ensureVisible(field);
       await tester.tap(field);
       await tester.pumpAndSettle();

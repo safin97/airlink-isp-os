@@ -118,7 +118,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
               contentPadding: EdgeInsets.zero,
               title: const AppText('Check SNMP with public community'),
               subtitle: const AppText(
-                'Tries v2c then v1. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
+                'Tries SNMP v1, then v2, then saved v3 credentials. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
               ),
               value: tryPublicSnmp,
               onChanged: busy || !canEdit

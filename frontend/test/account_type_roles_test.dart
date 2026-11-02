@@ -41,20 +41,25 @@ void main() {
               '/api/places' => [
                 {'id': 'p', 'name': 'Zakho', 'tower_count': 0},
               ],
-              '/api/users' =>
-                editing
-                    ? [
-                        {
-                          'id': 'm',
-                          'username': 'staff',
-                          'role': 'manager',
-                          'access_role_id': 'r',
-                          'access_role_name': 'Support',
-                          'place_ids': ['p'],
-                          'active': true,
-                        },
-                      ]
-                    : [],
+              '/api/users' => [
+                if (editing)
+                  {
+                    'id': 'm',
+                    'username': 'staff',
+                    'role': 'manager',
+                    'access_role_id': 'r',
+                    'access_role_name': 'Support',
+                    'place_ids': ['p'],
+                    'parent_id': 'parent',
+                    'active': true,
+                  },
+                {
+                  'id': 'parent',
+                  'username': 'regional.manager',
+                  'role': 'manager',
+                  'active': true,
+                },
+              ],
               _ => [],
             };
             return http.Response(jsonEncode(data), 200);
@@ -69,13 +74,15 @@ void main() {
         await tester.tap(find.widgetWithText(ListTile, 'Managers'));
         await tester.pumpAndSettle();
         if (editing) {
-          await tester.tap(find.byTooltip('Edit username, password or role'));
+          await tester.tap(
+            find.byTooltip('Edit username, password or role').first,
+          );
         } else {
           await tester.tap(find.text('Add account'));
         }
         await tester.pumpAndSettle();
         expect(roleReads, greaterThanOrEqualTo(2));
-        expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+        expect(find.byType(DropdownButtonFormField<String>), findsNWidgets(2));
         expect(find.text('Account type'), findsOneWidget);
         if (editing) {
           expect(
@@ -91,7 +98,10 @@ void main() {
           expect(saved!['role'], 'manager');
           expect(saved!['access_role_id'], 'r');
           expect(saved!.containsKey('place_ids'), isFalse);
-          await tester.tap(find.byTooltip('Edit username, password or role'));
+          expect(saved!.containsKey('parent_id'), isFalse);
+          await tester.tap(
+            find.byTooltip('Edit username, password or role').first,
+          );
           await tester.pumpAndSettle();
         } else {
           await tester.enterText(find.byType(TextFormField).first, 'new.staff');
@@ -100,7 +110,7 @@ void main() {
             'Example-Test-Password-534!',
           );
         }
-        await tester.tap(find.byType(DropdownButtonFormField<String>));
+        await tester.tap(find.byType(DropdownButtonFormField<String>).first);
         await tester.pumpAndSettle();
         await tester.tap(find.text(editing ? 'Manager' : 'Support').last);
         await tester.pumpAndSettle();
@@ -108,9 +118,15 @@ void main() {
         if (!editing) {
           await tester.tap(find.widgetWithText(CheckboxListTile, 'Zakho'));
         }
+        await tester.tap(find.byType(DropdownButtonFormField<String>).last);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(editing ? 'None' : 'regional.manager').last);
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
         expect(saved!['role'], 'manager');
+        expect(saved!['parent_id'], editing ? isNull : 'parent');
+        expect(saved!.containsKey('parent_id'), isTrue);
         expect(saved!['access_role_id'], editing ? isNull : 'r');
         if (!editing) expect(saved!['place_ids'], ['p']);
         expect(tester.takeException(), isNull);

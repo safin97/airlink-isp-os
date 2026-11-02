@@ -23,6 +23,8 @@ async def poll(device_id):
     ('1.3.6.1.4.1.41112.1','Linux','ubiquiti'),
     ('','MikroTik RouterOS 7','mikrotik'),
     ('','Mimosa B5','mimosa'),
+    ('1.3.6.1.4.1.43356.2','','mimosa'),
+    ('1.3.6.1.4.1.433560.2','','generic'),
     ('','generic Linux bridge','generic'),
     ('','unknown AC powered device','generic'),
 ])

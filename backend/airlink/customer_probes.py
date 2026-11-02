@@ -7,11 +7,13 @@ import ipaddress
 import json
 import threading
 import time
+import sys
 from sqlalchemy import select
 from .models import CustomerProbeSettings, SNMPProfile
 from .security import cipher
 from .client_telemetry import number
-from .device_api import collect_api
+from .device_api import collect_api, detect_vendor
+from .vendor_identity import VENDOR_LABELS, merge_vendor
 
 DEFAULTS = {'enabled': True, 'community': '', 'api_username': '', 'api_password': '',
             'verify_tls': True, 'allow_http': False, 'try_public_snmp': True}
@@ -67,22 +69,95 @@ def readings(values):
     return {'ethernet_links': links, 'signal_dbm': strength if number(strength, -150, -.001) else None}
 
 
+SNMP_BUDGET = 24
+PROBE_BUDGET = 33
+
+
+async def reachable(address):
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            'ping', '-n', '-c', '1', '-W', '1000' if sys.platform == 'darwin' else '1', address,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await asyncio.wait_for(proc.wait(), timeout=2)
+        return proc.returncode == 0
+    except asyncio.TimeoutError:
+        return False
+    except OSError:
+        return None
+    finally:
+        if proc and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+
+
 async def probe(address, config):
-    from monitoring.snmp import collect
     result = {'ethernet_links': [], 'signal_dbm': None, 'telemetry_status': 'unreachable', 'telemetry_source': None}
-    vendor = 'generic'
+    ping_task = asyncio.create_task(reachable(address))
+    async def identity():
+        try:
+            return await asyncio.wait_for(detect_vendor(address, config), timeout=3)
+        except Exception:
+            return 'generic'
+    identity_task = asyncio.create_task(identity())
+    try:
+        try:
+            await asyncio.wait_for(_telemetry(address, config, result), timeout=PROBE_BUDGET)
+        except asyncio.TimeoutError:
+            pass  # Keep SNMP readings even when a later API request times out.
+        web_vendor = await identity_task
+        vendor = result.get('detected_vendor', 'generic')
+        if vendor == 'generic' and web_vendor != 'generic':
+            vendor = web_vendor
+            result['vendor_detection_source'] = 'Device web interface'
+        result['detected_vendor'] = vendor
+        result['vendor_label'] = VENDOR_LABELS.get(vendor, 'Unknown / Generic')
+        result['device_reachable'] = await ping_task
+        if web_vendor != 'generic':
+            result['device_reachable'] = True
+        if result['telemetry_status'] == 'available':
+            result['device_reachable'] = True
+        elif result['device_reachable'] and result['telemetry_status'] == 'unreachable':
+            result['telemetry_status'] = 'snmp_unavailable'
+        return result
+    finally:
+        for task in (ping_task, identity_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(ping_task, identity_task, return_exceptions=True)
+
+
+def snmp_attempts(credentials_list):
     attempts = []
-    for credentials in config['snmp_candidates']:
-        versions = ('2c', '1') if credentials.get('version', '3') in ('1', '2c') else ('3',)
-        for version in versions:
+    for version in ('1', '2c', '3'):
+        for credentials in credentials_list:
+            saved_version = credentials.get('version', '3')
+            if (version == '3') != (saved_version == '3'):
+                continue
+            if version == '3' and not all(credentials.get(key) for key in ('username', 'auth_key', 'priv_key')):
+                continue
+            if version != '3' and not credentials.get('community'):
+                continue
             candidate = {**credentials, 'version': version}
             if candidate not in attempts:
                 attempts.append(candidate)
+    return attempts
+
+
+async def _telemetry(address, config, result):
+    from monitoring.snmp import collect
+    vendor = 'generic'
+    attempts = snmp_attempts(config['snmp_candidates'])
+    deadline = time.monotonic() + SNMP_BUDGET
     for credentials in attempts:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         try:
-            values = await asyncio.wait_for(collect(address, credentials, 0, vendor='auto', link_only=True), timeout=7)
+            values = await asyncio.wait_for(collect(address, credentials, 0, vendor='auto', link_only=True), timeout=min(12, remaining))
             vendor = values.get('detected_vendor', 'generic')
-            source = ('MikroTik ' if vendor == 'mikrotik' else '') + 'SNMP v' + credentials['version']
+            result.update(detected_vendor=vendor, vendor_detection_source='SNMP')
+            source = ('MikroTik ' if vendor == 'mikrotik' else '') + 'SNMP v' + ('2' if credentials['version'] == '2c' else credentials['version'])
             result.update(readings(values), telemetry_status='available', telemetry_source=source)
             break
         except Exception:
@@ -90,6 +165,9 @@ async def probe(address, config):
     if config.get('api_username') and config.get('api_password') and (not result['ethernet_links'] or result['signal_dbm'] is None):
         try:
             api = await asyncio.wait_for(collect_api(address, config, vendor), timeout=8)
+            result['detected_vendor'] = merge_vendor(vendor, api.get('detected_vendor'))
+            if api.get('detected_vendor') not in (None, 'generic'):
+                result['vendor_detection_source'] = 'API'
             used = False
             for key in ('ethernet_links', 'signal_dbm'):
                 if not result[key] and api.get(key) is not None and api.get(key) != []:
@@ -130,7 +208,7 @@ class ProbeService:
     def run(self, key, address, config):
         try:
             async def bounded():
-                return await asyncio.wait_for(probe(address, config), timeout=25)
+                return await asyncio.wait_for(probe(address, config), timeout=PROBE_BUDGET + 2)
             try:
                 result = asyncio.run(bounded())
             except Exception:
@@ -153,7 +231,8 @@ class ProbeService:
         for row in result.get('clients', []):
             # Fresh inventory data can still supply either field, but is not required.
             if row.get('ethernet_links') and row.get('signal_dbm') is not None:
-                row['telemetry_source'] = 'SNMP'
+                row.setdefault('telemetry_source', 'SNMP')
+                row['device_reachable'] = True
                 continue
             address = valid_address(row.get('ip_address'))
             if not address:
@@ -167,6 +246,10 @@ class ProbeService:
                 cached = self.cache.get(key)
                 if cached and time.monotonic() - cached[0] < (30 if cached[1]['telemetry_status'] == 'available' else 120):
                     for field, value in cached[1].items():
+                        if field in ('detected_vendor', 'vendor_label', 'vendor_detection_source') and row.get('detected_vendor') not in (None, 'generic') and cached[1].get('detected_vendor') in (None, 'generic'):
+                            continue
+                        if row.get('telemetry_status') == 'available' and cached[1]['telemetry_status'] != 'available' and field in ('telemetry_status', 'telemetry_source', 'device_reachable'):
+                            continue
                         if field in ('ethernet_links', 'signal_dbm') and (value is None or value == []):
                             continue
                         row[field] = value

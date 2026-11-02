@@ -1,5 +1,16 @@
 // UI copy: English key → Kurdish Badini (Arabic script), Arabic.
 const translations = <String, List<String>>{
+  "SAS4 Reports": ["ڕاپۆرتێن SAS4", "تقارير SAS4"],
+  "Activations": ["چالاککرن", "التفعيلات"],
+  "Activation statistics": ["ئامارێن چالاککرنێ", "إحصائيات التفعيل"],
+  "Money Transfers": ["ڤەگوهاستنا پارەی", "التحويلات المالية"],
+  "Report type": ["جۆرێ ڕاپۆرتێ", "نوع التقرير"],
+  "Total records": ["کۆما تۆماران", "إجمالي السجلات"],
+  "No records found for these filters.": [
+    "چ تۆمار نەهاتن دیتن.",
+    "لا توجد سجلات لهذه الفلاتر.",
+  ],
+
   "Live": ["راستەوخۆ", "مباشر"],
   "Reconnecting…": ["دوبارە گرێدان…", "جارٍ إعادة الاتصال…"],
 
@@ -10,6 +21,7 @@ const translations = <String, List<String>>{
   "NOC Screen": ["شاشەیا چاڤدێریێ", "شاشة مركز العمليات"],
   "Towers": ["تاوەر", "الأبراج"],
   "ISP Card": ["کارتا ئینتەرنێتێ", "بطاقة الإنترنت"],
+  "Parent manager": ["ڕێڤەبەرێ سەرەکی", "المدير الرئيسي"],
   "Managers": ["ڕێڤەبەر", "المديرون"],
   "Monitoring": ["چاڤدێری", "المراقبة"],
   "Network Map": ["نەخشەیا تۆڕێ", "خريطة الشبكة"],

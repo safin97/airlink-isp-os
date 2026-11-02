@@ -18,6 +18,7 @@ class _SnmpProfileDialogState extends State<SnmpProfileDialog>
       key: TextEditingController(),
   };
   String version = '2c';
+  String authProtocol = 'SHA1', privProtocol = 'AES128';
   bool busy = false;
   String? error;
 
@@ -44,6 +45,8 @@ class _SnmpProfileDialogState extends State<SnmpProfileDialog>
           'version': version,
           if (version == '3') ...{
             'username': fields['username']!.text.trim(),
+            'auth_protocol': authProtocol,
+            'priv_protocol': privProtocol,
             'auth_key': fields['auth_key']!.text,
             'priv_key': fields['priv_key']!.text,
           } else
@@ -104,7 +107,7 @@ class _SnmpProfileDialogState extends State<SnmpProfileDialog>
                   initialValue: version,
                   decoration: InputDecoration(labelText: tr('SNMP version')),
                   items: const [
-                    DropdownMenuItem(value: '2c', child: Text('SNMP v2c')),
+                    DropdownMenuItem(value: '2c', child: Text('SNMP v2')),
                     DropdownMenuItem(
                       value: '1',
                       child: AppText('SNMP v1 (legacy airMAX)'),
@@ -118,18 +121,48 @@ class _SnmpProfileDialogState extends State<SnmpProfileDialog>
                 field('name', 'Profile name', max: 120),
                 if (version == '3') ...[
                   field('username', 'SNMPv3 username', max: 32),
+                  DropdownButtonFormField<String>(
+                    initialValue: authProtocol,
+                    decoration: const InputDecoration(
+                      labelText: 'Authentication protocol',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'SHA1',
+                        child: Text('SHA-1 (MikroTik)'),
+                      ),
+                      DropdownMenuItem(value: 'SHA256', child: Text('SHA-256')),
+                      DropdownMenuItem(value: 'MD5', child: Text('MD5')),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (value) => setState(() => authProtocol = value!),
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: privProtocol,
+                    decoration: const InputDecoration(
+                      labelText: 'Privacy protocol',
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'AES128', child: Text('AES-128')),
+                      DropdownMenuItem(value: 'DES', child: Text('DES')),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (value) => setState(() => privProtocol = value!),
+                  ),
                   field(
                     'auth_key',
-                    'SHA-256 authentication key (12+ characters)',
+                    'Authentication key (8+ characters)',
                     secret: true,
-                    min: 12,
+                    min: 8,
                     max: 128,
                   ),
                   field(
                     'priv_key',
-                    'AES-128 privacy key (12+ characters)',
+                    'Privacy key (8+ characters)',
                     secret: true,
-                    min: 12,
+                    min: 8,
                     max: 128,
                   ),
                 ] else ...[

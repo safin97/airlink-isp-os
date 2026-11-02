@@ -14,6 +14,7 @@ import 'noc_screen.dart';
 import 'tower_discovery.dart';
 import 'network_map.dart';
 import 'sas4_clients.dart';
+import 'sas4_reports.dart';
 import 'account_panel.dart';
 import 'payment_settings.dart';
 import 'fullscreen.dart' as fullscreen;
@@ -366,6 +367,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
   bool ispDashboard = true;
+  bool ispReports = false;
   bool ispOnline = false;
   bool nocExpanded = false;
   int? nocOnlineUsers;
@@ -473,6 +475,19 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
     final identity = event['user'];
     final updates = event['rows'] as Map? ?? {};
+    // Keep performance data current without rebuilding unrelated forms, lists or maps.
+    if (event['type'] == 'patch' &&
+        identity == null &&
+        updates.isEmpty &&
+        event.containsKey('summary') &&
+        liveConnected &&
+        error == null &&
+        observed != null &&
+        !['Dashboard', 'NOC Screen'].contains(pages[page])) {
+      summary = Map<String, dynamic>.from(event['summary']);
+      observed = DateTime.now();
+      return;
+    }
     setState(() {
       liveConnected = true;
       if (identity is Map) {
@@ -772,7 +787,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   ),
                                   child: ListTile(
                                     dense: true,
-                                    selected: ispDashboard == dashboard,
+                                    selected:
+                                        !ispReports &&
+                                        ispDashboard == dashboard,
                                     selectedColor: blue,
                                     selectedTileColor: blue.withValues(
                                       alpha: .15,
@@ -790,7 +807,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       dashboard ? 'Dashboard' : 'Users',
                                     ),
                                     onTap: () {
-                                      setState(() => ispDashboard = dashboard);
+                                      setState(() {
+                                        ispReports = false;
+                                        ispDashboard = dashboard;
+                                      });
                                       if (Scaffold.of(context).isDrawerOpen) {
                                         Navigator.pop(context);
                                       }
@@ -799,7 +819,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                 ),
                             if (pages[i] == 'ISP Card' &&
                                 page == i &&
-                                !ispDashboard)
+                                !ispDashboard &&
+                                !ispReports)
                               for (final online in [false, true])
                                 Padding(
                                   padding: const EdgeInsets.only(
@@ -835,6 +856,33 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     },
                                   ),
                                 ),
+                            if (pages[i] == 'ISP Card' && page == i)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 24,
+                                  top: 3,
+                                ),
+                                child: ListTile(
+                                  key: const ValueKey('isp-card-reports'),
+                                  dense: true,
+                                  selected: ispReports,
+                                  selectedColor: blue,
+                                  selectedTileColor: blue.withValues(
+                                    alpha: .15,
+                                  ),
+                                  leading: const Icon(
+                                    Icons.receipt_long_outlined,
+                                    size: 18,
+                                  ),
+                                  title: const AppText('Reports'),
+                                  onTap: () {
+                                    setState(() => ispReports = true);
+                                    if (Scaffold.of(context).isDrawerOpen) {
+                                      Navigator.pop(context);
+                                    }
+                                  },
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1952,6 +2000,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'Confirm new password',
             kind: 'password',
           ),
+          managerParentField(account: row),
           managerPlacesField(),
         ],
         initial: {
@@ -1959,6 +2008,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           'role': row['access_role_id'] != null
               ? 'custom:${row['access_role_id']}'
               : row['role'],
+          'parent_id': row['parent_id'] ?? '',
           'place_ids': row['place_ids'] ?? [],
         },
         save: (data) async {
@@ -1972,6 +2022,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               'username': data['username'],
               'password': data['password'],
               'role': data['role'],
+              if (data.containsKey('parent_id')) 'parent_id': data['parent_id'],
               if (data.containsKey('place_ids')) 'place_ids': data['place_ids'],
               if (data.containsKey('access_role_id'))
                 'access_role_id': data['access_role_id'],
@@ -2221,14 +2272,58 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   Future<bool> refreshAccountRoles() async {
     try {
-      final data = await api.request('/access-roles') as List;
+      final data = await Future.wait([
+        api.request('/access-roles'),
+        api.request('/users'),
+      ]);
       if (!mounted) return false;
-      setState(() => rows['access-roles'] = data);
+      setState(() {
+        rows['access-roles'] = data[0] as List;
+        rows['users'] = data[1] as List;
+      });
       return true;
     } catch (e) {
       if (mounted) toast(e.toString());
       return false;
     }
+  }
+
+  FieldSpec managerParentField({Map? account}) {
+    final excluded = <String>{if (account != null) account['id'] as String};
+    final accounts = list('users');
+    var added = true;
+    while (added) {
+      added = false;
+      for (final manager in accounts) {
+        if (excluded.contains(manager['parent_id']) &&
+            excluded.add(manager['id'] as String)) {
+          added = true;
+        }
+      }
+    }
+    return FieldSpec(
+      'parent_id',
+      'Parent manager',
+      kind: 'manager_parent',
+      initial: '',
+      options: [
+        const Option('', 'None'),
+        ...accounts
+            .where(
+              (manager) =>
+                  manager['role'] == 'manager' &&
+                  (manager['active'] == true ||
+                      manager['id'] == account?['parent_id']) &&
+                  !excluded.contains(manager['id']),
+            )
+            .map(
+              (manager) => Option(
+                manager['id'],
+                '${manager['username']}${manager['active'] == true ? '' : ' (inactive)'}',
+              ),
+            ),
+      ],
+    );
   }
 
   FieldSpec managerPlacesField() => FieldSpec(
@@ -2326,6 +2421,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             kind: 'password',
           ),
           accountTypeField(allowOwner: true),
+          managerParentField(),
           managerPlacesField(),
         ];
       default:
@@ -2483,12 +2579,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
-  Widget clients() => Sas4Clients(
-    key: ValueKey('$accountRevision-$ispDashboard-$ispOnline'),
-    api: api,
-    showDashboard: ispDashboard,
-    showOnline: ispOnline,
-  );
+  Widget clients() => ispReports
+      ? Sas4Reports(key: ValueKey('reports-$accountRevision'), api: api)
+      : Sas4Clients(
+          key: ValueKey('$accountRevision-$ispDashboard-$ispOnline'),
+          api: api,
+          showDashboard: ispDashboard,
+          showOnline: ispOnline,
+        );
 
   Widget alertsView({bool recent = false}) {
     final data = (recent ? list('alerts').take(5) : list('alerts')).toList();
@@ -2832,7 +2930,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppText(
-                'SNMP v1 / v2c communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
+                'SNMP v1 / v2 communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
                 style: TextStyle(color: muted),
               ),
               const SizedBox(height: 16),
@@ -2840,7 +2938,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 ListTile(
                   leading: const Icon(Icons.key),
                   title: Text(p['name']),
-                  subtitle: Text('SNMP v${p['version'] ?? '3'}'),
+                  subtitle: Text(
+                    'SNMP v${p['version'] == '2c' ? '2' : p['version'] ?? '3'}',
+                  ),
                 ),
               FilledButton.icon(
                 onPressed: canEditSection(api.user!, 'settings')
@@ -2988,6 +3088,10 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
               data['access_role_id'] = null;
             }
           }
+        } else if (f.kind == 'manager_parent') {
+          if (managerSelected && changedSelections.contains(f.key)) {
+            data[f.key] = values[f.key] == '' ? null : values[f.key];
+          }
         } else if (f.kind == 'multiselect') {
           if (managerSelected && changedSelections.contains(f.key)) {
             data[f.key] = values[f.key];
@@ -3026,7 +3130,8 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final f in widget.fields)
-                if (f.kind != 'multiselect' || managerSelected)
+                if (!['multiselect', 'manager_parent'].contains(f.kind) ||
+                    managerSelected)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: f.kind == 'multiselect'

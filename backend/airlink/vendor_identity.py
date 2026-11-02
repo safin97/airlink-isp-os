@@ -16,6 +16,8 @@ def identify_vendor(object_id='', description='', family=None):
         family = 'mikrotik'
     elif enterprise(41112) or enterprise(10002):
         family = 'ubiquiti'
+    elif enterprise(43356):
+        family = 'mimosa'
     elif family is None:
         if re.search(r'\b(mikrotik|routeros)\b', text): family = 'mikrotik'
         elif re.search(r'\b(ubiquiti|ubnt|airos|airmax)\b', text): family = 'ubiquiti'

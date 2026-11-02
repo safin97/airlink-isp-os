@@ -76,7 +76,7 @@ void main() {
       await tester.tap(find.byTooltip('Edit username, password or role').first);
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'updated-team');
-      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Manager').last);
       await tester.pumpAndSettle();

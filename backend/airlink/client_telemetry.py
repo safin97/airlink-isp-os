@@ -4,6 +4,7 @@ from sqlalchemy import select
 from .models import Device, Metric, now
 from .manager_places import managed_towers
 from .security import aware
+from .vendor_identity import VENDOR_LABELS
 
 
 def number(value, low, high):
@@ -28,7 +29,7 @@ def attach_telemetry(db, user, result):
         if not match:
             continue
         device, metric = match
-        if not device.enabled or not device.snmp_profile_id:
+        if not device.enabled:
             continue
         row['telemetry_status'] = 'pending'
         if not device.last_poll or not metric:
@@ -36,15 +37,33 @@ def attach_telemetry(db, user, result):
         if (now() - aware(metric.collected_at)).total_seconds() > device.poll_interval * 3 + 30:
             row['telemetry_status'] = 'stale'
             continue
-        if metric.values.get('snmp_up') is not True:
+        snmp_ok = metric.values.get('snmp_up') is True
+        api_ok = metric.values.get('api_up') is True
+        if not snmp_ok and not api_ok:
             row['telemetry_status'] = 'failed'
             continue
+        vendor = metric.values.get('detected_vendor') or device.vendor
+        if vendor in VENDOR_LABELS and vendor != 'generic':
+            row.update(detected_vendor=vendor, vendor_label=VENDOR_LABELS[vendor], vendor_detection_source='Inventory')
         row['telemetry_status'] = 'available'
+        row['device_reachable'] = True
+        row['telemetry_source'] = metric.values.get('telemetry_source') if api_ok else 'SNMP'
+        if not row['telemetry_source']:
+            row['telemetry_source'] = 'Device API'
+        if api_ok:
+            row['ethernet_links'] = [
+                {'name': str(port.get('name', 'Ethernet'))[:120], 'speed_mbps': port['speed_mbps']}
+                for port in metric.values.get('ethernet_links', []) if isinstance(port, dict)
+                and number(port.get('speed_mbps'), .001, 1e9)]
+            strength = metric.values.get('signal_dbm')
+            if number(strength, -150, -.001):
+                row['signal_dbm'] = strength
         # IANA ifType ethernetCsmacd(6). Do not mistake Wi-Fi or bridge bandwidth
         # for an Ethernet link, and do not report a down port's nominal speed.
+        api_links = bool(row['ethernet_links'])
         for index, interface in metric.values.get('interfaces', {}).items():
             speed = interface.get('speed_mbps')
-            if interface.get('type') == 6 and interface.get('status') == 1 and number(speed, 0.001, 1e9):
+            if not api_links and interface.get('type') == 6 and interface.get('status') == 1 and number(speed, 0.001, 1e9):
                 row['ethernet_links'].append({'name': interface.get('name', index), 'speed_mbps': speed})
         signals = metric.values.get('wireless', {}).get('signal_dbm', {})
         # Multiple station/radio readings cannot identify this customer's link.

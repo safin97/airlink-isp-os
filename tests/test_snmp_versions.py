@@ -133,3 +133,17 @@ def test_legacy_rates_reject_ambiguous_wraps_and_counter_changes():
     assert snmp.interface_rate(old, current, 'rx', 60, rebooted=True) is None
     assert snmp.interface_rate(old, {**current, 'discontinuity': 100}, 'rx', 60) is None
     assert snmp.interface_rate({'rx_octets': 100}, {'rx_octets': 850}, 'rx', 60) == 100
+
+
+def test_v3_protocol_selection_and_legacy_defaults(client, owner):
+    credentials = {'username':'reader','auth_key':'auth-key-123','priv_key':'priv-key-123'}
+    legacy = snmp.authentication(credentials)
+    assert legacy.authentication_protocol == snmp.USM_AUTH_HMAC192_SHA256
+    for auth, constant in [('SHA1',snmp.USM_AUTH_HMAC96_SHA), ('MD5',snmp.USM_AUTH_HMAC96_MD5), ('SHA256',snmp.USM_AUTH_HMAC192_SHA256)]:
+        selected = snmp.authentication({**credentials,'auth_protocol':auth,'priv_protocol':'AES128'})
+        assert selected.authentication_protocol == constant
+    result = client.post('/api/snmp-profiles', headers=owner, json={
+        'name':'RouterOS v3', 'version':'3', **credentials, 'auth_protocol':'SHA1', 'priv_protocol':'AES128'})
+    assert result.status_code == 201, result.text
+    assert client.post('/api/snmp-profiles', headers=owner, json={
+        'name':'Invalid', 'version':'2c','community':'public','auth_protocol':'SHA1'}).status_code == 422

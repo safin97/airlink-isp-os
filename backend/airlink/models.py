@@ -27,6 +27,13 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class ManagerParent(Base):
+    __tablename__ = "manager_parents"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    parent_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    __table_args__ = (CheckConstraint("user_id != parent_id", name="manager_parent_not_self"),)
+
+
 class UserSectionAccess(Base):
     __tablename__ = "user_section_access"
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

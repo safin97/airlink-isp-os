@@ -2,6 +2,7 @@
 import json
 import math
 import re
+from urllib.parse import urljoin, urlsplit
 import httpx
 from .vendor_identity import identify_vendor
 
@@ -210,3 +211,37 @@ async def collect_api(address, credentials, vendor='generic', transport=None, in
             except (httpx.HTTPError, ValueError, KeyError, TypeError):
                 continue
     raise RuntimeError('No supported device API responded')
+
+
+async def detect_vendor(address, config, transport=None):
+    """Read public device branding only; never send credentials or follow off-device redirects."""
+    host = '[' + address + ']' if ':' in address else address
+    schemes = ['https', 'http'] if config.get('allow_http') else ['https']
+    for scheme in schemes:
+        base = scheme + '://' + host + '/'
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(1, connect=.7), follow_redirects=False,
+                    trust_env=False, verify=config.get('verify_tls', True), transport=transport) as client:
+                async def public_page(url):
+                    async with client.stream('GET', url) as response:
+                        content = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            content.extend(chunk)
+                            if len(content) > MAX_RESPONSE:
+                                raise ValueError('Device response too large')
+                        return response.status_code, response.headers, content.decode('utf-8', errors='ignore')
+                status, headers, page = await public_page(base)
+                # Login redirects on the same device are common on airOS/Mimosa.
+                if status in (301, 302, 303, 307, 308):
+                    target = urljoin(base, headers.get('location', ''))
+                    if urlsplit(target).netloc != urlsplit(base).netloc or urlsplit(target).scheme != scheme:
+                        continue
+                    status, headers, page = await public_page(target)
+                if status != 200:
+                    continue
+                vendor = identify_vendor(description=page[:2048])
+                if vendor != 'generic':
+                    return vendor
+        except (httpx.HTTPError, ValueError):
+            continue
+    return 'generic'

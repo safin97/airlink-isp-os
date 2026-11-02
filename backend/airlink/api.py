@@ -15,7 +15,7 @@ from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles
+from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
@@ -50,6 +50,7 @@ async def lifespan(app):
 
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
 app.include_router(sas4.router)
+app.include_router(sas4_reports.router)
 app.include_router(payments.router)
 app.include_router(access_roles.router)
 
@@ -88,6 +89,7 @@ def public(obj):
         result['deletable_sections'] = section_access.deletable(obj)
         result.update(access_roles.user_role(obj))
         result['place_ids'] = manager_places.public_places(obj)
+        result.update(manager_parents.public_parent(obj))
     return result
 
 
@@ -253,17 +255,20 @@ def users(user=Depends(owner), db=Depends(get_db)):
 
 @app.post("/api/users", status_code=201)
 def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
+    manager_parents.lock(db)
     obj = User(username=data.username, password_hash=hasher.hash(data.password), role=data.role)
     db.add(obj)
     db.flush()
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
+    manager_parents.save(db, obj, data)
     commit(db, user, "user.create", obj.id)
     return public(obj)
 
 
 @app.put("/api/users/{user_id}")
 def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depends(get_db)):
+    manager_parents.lock(db)
     obj = get(db, User, user_id)
     if obj.role == "owner":
         raise HTTPException(409, "Owner accounts cannot be edited here")
@@ -273,6 +278,7 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
     if role_changed:
         previous_role = obj.role
         if previous_role == 'manager':
+            manager_parents.clear(db, obj.id)
             db.execute(update(Tower).where(Tower.manager_id == obj.id).values(manager_id=None))
             db.execute(delete(ManagerPlace).where(ManagerPlace.user_id == obj.id))
             db.execute(delete(UserManagerRole).where(UserManagerRole.user_id == obj.id))
@@ -283,6 +289,7 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
         audit(db, user, 'user.role_change', f'{obj.id}:{previous_role}->{next_role}')
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
+    manager_parents.save(db, obj, data)
     obj.username = data.username
     if data.password is not None:
         obj.password_hash = hasher.hash(data.password)
@@ -330,6 +337,7 @@ def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner
 
 @app.delete("/api/users/{user_id}", status_code=204)
 def delete_account(user_id: str, user=Depends(owner), db=Depends(get_db)):
+    manager_parents.lock(db)
     obj = get(db, User, user_id)
     if obj.role == "owner":
         raise HTTPException(409, "Owner accounts cannot be deleted here")
@@ -347,6 +355,7 @@ def delete_account(user_id: str, user=Depends(owner), db=Depends(get_db)):
 
 @app.post("/api/users/{user_id}/disable")
 def disable_user(user_id: str, user=Depends(owner), db=Depends(get_db)):
+    manager_parents.lock(db)
     obj = get(db, User, user_id)
     if obj.id == user.id or obj.role == "owner":
         raise HTTPException(409, "Cannot disable owner accounts")

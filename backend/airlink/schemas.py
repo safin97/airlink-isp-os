@@ -38,6 +38,7 @@ class UserInput(Login):
     role: Literal["owner", "manager", "technician", "viewer"]
     manager_role_id: Optional[str] = None
     access_role_id: Optional[str] = None
+    parent_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
     place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     _strong = field_validator("password")(password_valid)
 
@@ -115,15 +116,18 @@ class ProfileInput(Strict):
     version: Literal["1", "2c", "3"] = "3"
     community: Optional[str] = Field(default=None, min_length=1, max_length=255)
     username: Optional[str] = Field(default=None, min_length=1, max_length=32)
-    auth_key: Optional[str] = Field(default=None, min_length=12, max_length=128)
-    priv_key: Optional[str] = Field(default=None, min_length=12, max_length=128)
+    auth_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
+    priv_key: Optional[str] = Field(default=None, min_length=8, max_length=128)
+
+    auth_protocol: Optional[Literal["SHA1", "SHA256", "MD5"]] = None
+    priv_protocol: Optional[Literal["AES128", "DES"]] = None
 
     @model_validator(mode="after")
     def credentials_for_version(self):
         if self.version == "3":
             if not all((self.username, self.auth_key, self.priv_key)) or self.community is not None:
                 raise ValueError("SNMPv3 requires username, authentication and privacy keys")
-        elif not self.community or not self.community.strip() or any((self.username, self.auth_key, self.priv_key)):
+        elif not self.community or not self.community.strip() or any((self.username, self.auth_key, self.priv_key, self.auth_protocol, self.priv_protocol)):
             raise ValueError("SNMPv1/v2c requires a community string only")
         return self
 
@@ -157,6 +161,7 @@ class ManagerUpdate(Strict):
     role: Optional[Literal["manager", "technician", "viewer"]] = None
     manager_role_id: Optional[str] = None
     access_role_id: Optional[str] = None
+    parent_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
     place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
     password: Optional[str] = None

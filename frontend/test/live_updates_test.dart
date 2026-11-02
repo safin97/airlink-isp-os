@@ -70,6 +70,26 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text('42.0%'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ListTile, 'Managers'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'regional');
+      await tester.pumpAndSettle();
+      final searchWithDraft = tester.widget<TextField>(find.byType(TextField));
+      sockets.single.controller.add({
+        'type': 'patch',
+        'summary': {
+          'system': {'cpu_percent': 51},
+        },
+      });
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)),
+        same(searchWithDraft),
+      );
+      expect(find.text('regional'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ListTile, 'Dashboard'));
+      await tester.pumpAndSettle();
+      expect(find.text('51.0%'), findsOneWidget);
       await tester.pump(const Duration(seconds: 31));
       expect(requests, initial);
       sockets.single.close();

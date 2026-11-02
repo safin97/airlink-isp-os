@@ -2,7 +2,7 @@
 from airlink.vendor_identity import identify_vendor
 from pysnmp.proto.rfc1905 import NoSuchObject, NoSuchInstance, EndOfMibView
 from pysnmp.hlapi.v3arch.asyncio import (SnmpEngine, CommunityData, UsmUserData, UdpTransportTarget, ContextData,
-    ObjectType, ObjectIdentity, get_cmd, walk_cmd, USM_AUTH_HMAC192_SHA256, USM_PRIV_CFB128_AES)
+    ObjectType, ObjectIdentity, get_cmd, walk_cmd, USM_AUTH_HMAC192_SHA256, USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5, USM_PRIV_CFB128_AES, USM_PRIV_CBC56_DES)
 
 # SNMPv2-MIB RFC 3418, IF-MIB RFC 2863, HOST-RESOURCES-MIB RFC 2790.
 UPTIME = "1.3.6.1.2.1.1.3.0"
@@ -67,7 +67,8 @@ def authentication(credentials):
     if version != "3":
         raise ValueError("Unsupported SNMP version")
     return UsmUserData(credentials["username"], credentials["auth_key"], credentials["priv_key"],
-                       authProtocol=USM_AUTH_HMAC192_SHA256, privProtocol=USM_PRIV_CFB128_AES)
+                       authProtocol={'SHA256': USM_AUTH_HMAC192_SHA256, 'SHA1': USM_AUTH_HMAC96_SHA, 'MD5': USM_AUTH_HMAC96_MD5}[credentials.get('auth_protocol', 'SHA256')],
+                       privProtocol={'AES128': USM_PRIV_CFB128_AES, 'DES': USM_PRIV_CBC56_DES}[credentials.get('priv_protocol', 'AES128')])
 
 
 async def read_table(engine, auth, target, oid, textual=False):
