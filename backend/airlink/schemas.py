@@ -36,6 +36,8 @@ class Setup(Login):
 
 class UserInput(Login):
     role: Literal["owner", "manager", "technician", "viewer"]
+    manager_role_id: Optional[str] = None
+    access_role_id: Optional[str] = None
     place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     _strong = field_validator("password")(password_valid)
 
@@ -137,18 +139,24 @@ class DiscoveryInput(Strict):
 
 
 class SectionAccessInput(Strict):
-    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings']] = Field(max_length=10)
-    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings']]] = Field(default=None, max_length=10)
+    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
+    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)
+
+    deletable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)
 
     @model_validator(mode='after')
     def edits_require_visibility(self):
         if self.editable_sections is not None and not set(self.editable_sections).issubset(self.sections):
             raise ValueError('Editable sections must also be visible')
+        if self.deletable_sections is not None and not set(self.deletable_sections).issubset(self.sections):
+            raise ValueError('Delete permissions require read access')
         return self
 
 
 class ManagerUpdate(Strict):
     role: Optional[Literal["manager", "technician", "viewer"]] = None
+    manager_role_id: Optional[str] = None
+    access_role_id: Optional[str] = None
     place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
     password: Optional[str] = None
@@ -170,3 +178,29 @@ class PasswordChange(Strict):
         if self.new_password != self.confirm_password:
             raise ValueError('New passwords do not match')
         return self
+
+
+class AccessRoleInput(SectionAccessInput):
+    name: str = Field(min_length=1, max_length=64)
+    editable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
+    deletable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('Name is required')
+        return value
+
+    @model_validator(mode='after')
+    def deletes_require_visibility(self):
+        if not set(self.deletable_sections).issubset(self.sections):
+            raise ValueError('Delete permissions require read access')
+        return self
+
+
+class ManagerRoleInput(Strict):
+    name: str = Field(min_length=1, max_length=64)
+    access_role_id: str = Field(min_length=1, max_length=36)
+    _clean = field_validator('name')(AccessRoleInput.clean_name.__func__)

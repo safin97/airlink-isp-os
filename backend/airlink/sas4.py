@@ -2,6 +2,7 @@
 Protocol reference: https://github.com/SnonoSystems/cryptojs_aes_python
 Profile edits and card recharge occur only through explicit, permission-checked requests.
 """
+from . import section_access
 import base64
 import hashlib
 import json
@@ -227,7 +228,7 @@ def connection_status(connection):
 
 
 def sas4_access(user=Depends(current_user)):
-    if user.role not in ('owner', 'manager'):
+    if user.role not in ('owner', 'manager') and section_access.role_policy(user) is None:
         raise HTTPException(403, 'Manager access is required for SAS4 clients')
     return user
 

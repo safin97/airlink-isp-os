@@ -16,14 +16,21 @@ const assignableSections = <String, String>{
   ...operationalSections,
   'software_updates': 'Software Updates',
   'settings': 'Settings',
+  'access_roles': 'Access Roles',
 };
 const pageSections = <String, String>{
   ...assignableSections,
   'managers': 'Managers',
 };
 
+bool usesSectionPermissions(Map<String, dynamic> user) =>
+    user['role'] == 'manager' || user['access_policy_configured'] == true;
+
 bool hasSection(Map<String, dynamic> user, String key) {
-  if (user['role'] != 'manager') return true;
+  if ((key == 'access_roles') && !usesSectionPermissions(user)) {
+    return user['role'] == 'owner';
+  }
+  if (!usesSectionPermissions(user)) return true;
   if (!assignableSections.containsKey(key)) return false;
   final sections = user['sections'] as List?;
   return sections == null
@@ -33,13 +40,22 @@ bool hasSection(Map<String, dynamic> user, String key) {
 
 bool canEditSection(Map<String, dynamic> user, String key) {
   if (user['role'] == 'owner') return true;
-  if (user['role'] != 'manager' || !hasSection(user, key)) return false;
+  if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
   final editable = user['editable_sections'] as List?;
   return editable == null || editable.contains(key);
 }
 
+bool canDeleteSection(Map<String, dynamic> user, String key) {
+  if (user['role'] == 'owner') return true;
+  if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
+  final deletable = user['deletable_sections'] as List?;
+  return deletable == null
+      ? canEditSection(user, key)
+      : deletable.contains(key);
+}
+
 bool canReadResource(Map<String, dynamic> user, String resource) {
-  if (user['role'] != 'manager') return true;
+  if (!usesSectionPermissions(user)) return true;
   const readers = <String, List<String>>{
     'dashboard': ['dashboard', 'noc'],
     'towers': ['towers', 'noc', 'network_map', 'monitoring'],
@@ -72,6 +88,9 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
   late final Set<String> editable = Set<String>.from(
     widget.account['editable_sections'] as List? ?? selected,
   );
+  late final Set<String> deletable = Set<String>.from(
+    widget.account['deletable_sections'] as List? ?? editable,
+  );
   bool busy = false;
   String? error;
 
@@ -86,6 +105,9 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
         method: 'PUT',
         body: {
           'sections': assignableSections.keys.where(selected.contains).toList(),
+          'deletable_sections': assignableSections.keys
+              .where((key) => selected.contains(key) && deletable.contains(key))
+              .toList(),
           'editable_sections': assignableSections.keys
               .where((key) => selected.contains(key) && editable.contains(key))
               .toList(),
@@ -106,13 +128,13 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
   Widget build(BuildContext context) => AlertDialog(
     title: Text('Section access · ${widget.account['username']}'),
     content: SizedBox(
-      width: 520,
+      width: 680,
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const AppText(
-              'Show a section to allow reading. Enable Allow edits to permit changes.',
+              'Show allows reading. Allow edits and Allow delete are separate permissions.',
             ),
             Row(
               children: [
@@ -130,6 +152,7 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
                       : () => setState(() {
                           selected.clear();
                           editable.clear();
+                          deletable.clear();
                         }),
                   child: const AppText('Clear all'),
                 ),
@@ -144,8 +167,13 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
                 subtitle: AppText(
                   !selected.contains(section.key)
                       ? 'Hidden'
+                      : editable.contains(section.key) &&
+                            deletable.contains(section.key)
+                      ? 'Edit and delete'
                       : editable.contains(section.key)
                       ? 'Can edit'
+                      : deletable.contains(section.key)
+                      ? 'Can delete'
                       : 'Read-only',
                 ),
                 secondary: Tooltip(
@@ -153,6 +181,22 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      const AppText('Allow delete'),
+                      Checkbox(
+                        key: ValueKey('delete-${section.key}'),
+                        value:
+                            selected.contains(section.key) &&
+                            deletable.contains(section.key),
+                        onChanged: busy || !selected.contains(section.key)
+                            ? null
+                            : (value) => setState(() {
+                                if (value == true) {
+                                  deletable.add(section.key);
+                                } else {
+                                  deletable.remove(section.key);
+                                }
+                              }),
+                      ),
                       const AppText('Allow edits'),
                       Checkbox(
                         key: ValueKey('edit-${section.key}'),
@@ -181,12 +225,13 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
                         } else {
                           selected.remove(section.key);
                           editable.remove(section.key);
+                          deletable.remove(section.key);
                         }
                       }),
               ),
             const SizedBox(height: 8),
             const AppText(
-              'Managers and permission controls remain owner-only. My account remains available.',
+              'Account administration stays owner-only. Access Roles can be delegated. My account remains available.',
             ),
             if (error != null)
               Text(

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from . import sas4
+from . import sas4, section_access
 from .db import get_db, SessionLocal
 from .models import PaymentGateway, RechargePayment, SAS4UserConnection, User, now, audit
 from .security import cipher, aware
@@ -298,8 +298,12 @@ def reconcile_order(db, order):
         return
     actor = db.get(User, order.user_id) if order.user_id else None
     connection = db.get(SAS4UserConnection, order.user_id) if order.user_id else None
-    if not actor or not actor.active or actor.role not in ('owner', 'manager') or not connection or connection.username != order.sas4_username:
+    if not actor or not actor.active or (actor.role not in ('owner', 'manager') and section_access.role_policy(actor, db) is None) or not connection or connection.username != order.sas4_username:
         order.status, order.detail = 'paid_review', 'Payment received. SAS4 account access changed; activation requires review.'
+        db.commit()
+        return
+    if section_access.role_policy(actor, db) is not None and 'isp_card' not in section_access.editable(actor, db):
+        order.status, order.detail = 'paid_review', 'Payment received. Recharge permission changed; activation requires review.'
         db.commit()
         return
     try:

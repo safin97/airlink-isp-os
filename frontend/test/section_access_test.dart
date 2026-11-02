@@ -198,6 +198,7 @@ void main() {
       expect(saved, {
         'sections': ['reports', 'software_updates', 'settings'],
         'editable_sections': ['settings'],
+        'deletable_sections': [],
       });
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

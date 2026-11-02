@@ -54,7 +54,7 @@ void main() {
         setAppLanguage(language);
         await tester.pumpAndSettle();
         expect(find.text(tr('Dashboard')), findsWidgets);
-        expect(find.text(tr('Network overview')), findsOneWidget);
+        expect(find.text(tr('PC performance')), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('theme-toggle')));
         await tester.pumpAndSettle();
         expect(

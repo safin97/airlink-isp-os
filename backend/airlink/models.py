@@ -39,6 +39,50 @@ class UserSectionEdits(Base):
     sections = Column(JSON, nullable=False)
 
 
+class UserSectionDeletes(Base):
+    __tablename__ = "user_section_deletes"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    sections = Column(JSON, nullable=False)
+
+
+class AccessRole(Base):
+    __tablename__ = "access_roles"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(64), nullable=False, unique=True)
+    sections = Column(JSON, nullable=False)
+    editable_sections = Column(JSON, nullable=False)
+    deletable_sections = Column(JSON, nullable=False)
+
+
+class BuiltinAccessRole(Base):
+    __tablename__ = "builtin_access_roles"
+    id = Column(String(16), primary_key=True)
+    name = Column(String(64), nullable=False)
+    sections = Column(JSON, nullable=False)
+    editable_sections = Column(JSON, nullable=False)
+    deletable_sections = Column(JSON, nullable=False)
+    deleted = Column(Boolean, nullable=False, default=False)
+
+
+class UserAccessRole(Base):
+    __tablename__ = "user_access_roles"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    access_role_id = Column(String(36), ForeignKey("access_roles.id", ondelete="RESTRICT"), nullable=False)
+
+
+class ManagerRole(Base):
+    __tablename__ = "manager_roles"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(64), nullable=False, unique=True)
+    access_role_id = Column(String(36), ForeignKey("access_roles.id", ondelete="RESTRICT"), nullable=False)
+
+
+class UserManagerRole(Base):
+    __tablename__ = "user_manager_roles"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(String(36), ForeignKey("manager_roles.id", ondelete="RESTRICT"), nullable=False)
+
+
 class Initialization(Base):
     __tablename__ = "initialization"
     id = Column(Integer, primary_key=True)

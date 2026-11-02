@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .config import settings
-from .section_access import enforce_request, require_any
+from .section_access import enforce_request, require_any, role_policy
 from .db import get_db
 from .models import User, LoginSession, RefreshToken, now
 
@@ -84,7 +84,7 @@ def delegated_section(section):
     def access(user=Depends(current_user)):
         if user.role == 'owner':
             return user
-        if user.role != 'manager':
+        if user.role != 'manager' and role_policy(user) is None:
             raise HTTPException(403, 'Owner or authorized manager access required')
         require_any(user, (section,))
         return user

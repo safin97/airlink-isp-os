@@ -64,6 +64,14 @@ async def preview_lifespan(app):
 
 api.app.router.lifespan_context = preview_lifespan
 Base.metadata.create_all(engine)
+# Keep local accounts aligned with the production consolidation migration.
+import importlib.util
+migration_spec = importlib.util.spec_from_file_location('preview_direct_access_roles',
+    ROOT / 'database/versions/e29df1458b01_direct_access_roles.py')
+role_migration = importlib.util.module_from_spec(migration_spec)
+migration_spec.loader.exec_module(role_migration)
+with engine.begin() as connection:
+    role_migration.consolidate(connection)
 with SessionLocal() as db:
     if not db.get(Role,'owner'):
         db.add_all(Role(name=x) for x in ['owner','manager','technician','viewer']);db.flush()

@@ -15,13 +15,13 @@ from sqlalchemy import select, func, text, delete, update, or_
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places
+from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles
 from .customer_probes import service as customer_probe_service
 from .system_stats import service as system_stats_service
 from .config import settings
 from .db import get_db, SessionLocal
 from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device,
-                     UserSectionAccess, UserSectionEdits, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
+                     UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, UserAccessRole, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
                        current_user, owner, settings_access, updates_access, resolve_user, cipher, bearer)
 from .schemas import Login, Setup, UserInput, PlaceInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange, SectionAccessInput
@@ -50,6 +50,7 @@ async def lifespan(app):
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
 app.include_router(sas4.router)
 app.include_router(payments.router)
+app.include_router(access_roles.router)
 
 
 @app.middleware("http")
@@ -83,6 +84,8 @@ def public(obj):
     if isinstance(obj, User):
         result['sections'] = section_access.effective(obj)
         result['editable_sections'] = section_access.editable(obj)
+        result['deletable_sections'] = section_access.deletable(obj)
+        result.update(access_roles.user_role(obj))
         result['place_ids'] = manager_places.public_places(obj)
     return result
 
@@ -116,7 +119,7 @@ def devices_query(db, user):
 
 def check_tower(db, user, tower_id, write=False):
     tower = get(db, Tower, tower_id)
-    if write and user.role not in ("owner", "manager"):
+    if write and user.role not in ("owner", "manager") and section_access.role_policy(user, db) is None:
         raise HTTPException(403, "Inventory write access required")
     if tower_id not in db.scalars(tower_ids(db, user)).all():
         raise HTTPException(404, "Resource not found")
@@ -253,6 +256,7 @@ def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
     db.add(obj)
     db.flush()
     manager_places.save(db, obj, data.place_ids)
+    access_roles.assign_input(db, obj, data)
     commit(db, user, "user.create", obj.id)
     return public(obj)
 
@@ -270,11 +274,14 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
         if previous_role == 'manager':
             db.execute(update(Tower).where(Tower.manager_id == obj.id).values(manager_id=None))
             db.execute(delete(ManagerPlace).where(ManagerPlace.user_id == obj.id))
+            db.execute(delete(UserManagerRole).where(UserManagerRole.user_id == obj.id))
+            db.execute(delete(UserAccessRole).where(UserAccessRole.user_id == obj.id))
         if previous_role == 'technician':
             db.execute(delete(DeviceAssignment).where(DeviceAssignment.user_id == obj.id))
         obj.role = next_role
         audit(db, user, 'user.role_change', f'{obj.id}:{previous_role}->{next_role}')
     manager_places.save(db, obj, data.place_ids)
+    access_roles.assign_input(db, obj, data)
     obj.username = data.username
     if data.password is not None:
         obj.password_hash = hasher.hash(data.password)
@@ -291,6 +298,8 @@ def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner
         raise HTTPException(409, 'Owner accounts always have full access')
     if obj.role != 'manager':
         raise HTTPException(422, 'Section permissions apply to manager accounts')
+    if section_access.role_policy(obj, db) is not None:
+        raise HTTPException(409, 'This account uses a role. Edit its access group in Access Roles.')
     row = db.get(UserSectionAccess, obj.id)
     if row is None:
         row = UserSectionAccess(user_id=obj.id)
@@ -304,8 +313,17 @@ def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner
         edits.sections = [key for key in row.sections if key in data.editable_sections]
     elif edits is not None:
         edits.sections = [key for key in row.sections if key in edits.sections]
+    deletes = db.get(UserSectionDeletes, obj.id)
+    if data.deletable_sections is not None:
+        if deletes is None:
+            deletes = UserSectionDeletes(user_id=obj.id)
+            db.add(deletes)
+        deletes.sections = [key for key in row.sections if key in data.deletable_sections]
+    elif deletes is not None:
+        deletes.sections = [key for key in row.sections if key in deletes.sections]
     commit(db, user, 'user.sections', obj.id + ':view=' + ','.join(row.sections)
-           + ';edit=' + ','.join(edits.sections if edits is not None else row.sections))
+           + ';edit=' + ','.join(edits.sections if edits is not None else row.sections)
+           + ';delete=' + ','.join(deletes.sections if deletes is not None else (edits.sections if edits is not None else row.sections)))
     return public(obj)
 
 
@@ -494,8 +512,12 @@ def edit_tower(tower_id: str, data: TowerInput, user=Depends(current_user), db=D
 
 
 @app.delete("/api/towers/{tower_id}", status_code=204)
-def delete_tower(tower_id: str, user=Depends(owner), db=Depends(get_db)):
-    db.delete(get(db, Tower, tower_id))
+def delete_tower(tower_id: str, user=Depends(current_user), db=Depends(get_db)):
+    obj = check_tower(db, user, tower_id, write=True)
+    # Legacy managers keep their previous owner-only tower deletion restriction.
+    if user.role != 'owner' and section_access.role_policy(user, db) is None:
+        raise HTTPException(403, 'Owner or role delete access required')
+    db.delete(obj)
     commit(db, user, "tower.delete", tower_id)
 
 
@@ -677,7 +699,7 @@ def alerts(user=Depends(current_user), db=Depends(get_db)):
 
 @app.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge(alert_id: str, user=Depends(current_user), db=Depends(get_db)):
-    if user.role == "viewer":
+    if user.role == "viewer" and section_access.role_policy(user, db) is None:
         raise HTTPException(403, "Read-only account")
     obj = get(db, Alert, alert_id)
     check_device(db, user, obj.device_id)

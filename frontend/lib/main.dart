@@ -20,6 +20,7 @@ import 'tower_marker.dart';
 import 'snmp_profile_dialog.dart';
 import 'system_performance.dart';
 import 'section_access.dart';
+import 'role_management.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -329,6 +330,7 @@ const pages = [
   'Towers',
   'ISP Card',
   'Managers',
+  'Access Roles',
   'Monitoring',
   'Network Map',
   'Alerts',
@@ -342,6 +344,7 @@ const icons = [
   Icons.cell_tower,
   Icons.devices,
   Icons.group_outlined,
+  Icons.admin_panel_settings_outlined,
   Icons.monitor_heart_outlined,
   Icons.map_outlined,
   Icons.notifications_outlined,
@@ -385,12 +388,22 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Api get api => widget.api;
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
-  bool get writer => owner || role == 'manager';
+  bool get writer => owner || usesSectionPermissions(api.user!);
   bool get inventoryWriter => canEditSection(api.user!, 'towers');
+  bool get inventoryDeleter => canDeleteSection(api.user!, 'towers');
+  bool get towerDeleter =>
+      inventoryDeleter &&
+      (owner ||
+          api.user!['access_role_id'] != null ||
+          api.user!['manager_role_id'] != null ||
+          api.user!['access_policy_configured'] == true);
   bool get canManageSettings =>
-      owner || (role == 'manager' && hasSection(api.user!, 'settings'));
+      owner ||
+      (usesSectionPermissions(api.user!) && hasSection(api.user!, 'settings'));
   bool get canManageUpdates =>
-      owner || (role == 'manager' && hasSection(api.user!, 'software_updates'));
+      owner ||
+      (usesSectionPermissions(api.user!) &&
+          hasSection(api.user!, 'software_updates'));
   bool canPage(int index) => hasSection(
     api.user!,
     pageSections.entries.firstWhere((entry) => entry.value == pages[index]).key,
@@ -480,7 +493,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     refreshing = true;
     if (!quiet) setState(() => loading = true);
     try {
-      if (role == 'manager') {
+      if (!owner) {
         final identity = await api.request('/auth/me');
         if (!mounted) return;
         if (identity is Map &&
@@ -503,7 +516,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         'devices',
         'alerts',
         'links',
-        if (owner) 'users',
+        if (owner) ...['users', 'access-roles'],
         if (canManageSettings) 'snmp-profiles',
       ].where((resource) => canReadResource(api.user!, resource)).toList();
       final data = await Future.wait([
@@ -920,6 +933,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 'Owner access required',
                 'Account creation and assignments are restricted to the owner.',
               );
+      case 'Access Roles':
+        return RoleManagement(
+          key: ValueKey(pages[page]),
+          api: api,
+          accessGroups: true,
+          onChanged: () => reload(quiet: true),
+        );
       case 'Monitoring':
         return monitoring();
       case 'Network Map':
@@ -1142,101 +1162,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   Widget dashboard() {
-    final cards = [
-      ['Total towers', 'towers', Icons.cell_tower],
-      ['Total sectors', 'sectors', Icons.wifi_tethering],
-      ['Total devices', 'devices', Icons.router],
-      ['Online devices', 'online', Icons.check_circle_outline],
-      ['Offline devices', 'offline', Icons.error_outline],
-      ['Connected clients', 'connected_clients', Icons.devices],
-      ['Active alerts', 'active_alerts', Icons.notifications_outlined],
-      [
-        'ICMP availability · 24h',
-        'availability_24h',
-        Icons.monitor_heart_outlined,
-      ],
-    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const AppText(
-          'Network overview',
-          style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        AppText(
-          'Measured network health, inventory and recent events.',
-          style: TextStyle(color: muted),
-        ),
-        const SizedBox(height: 24),
-        LayoutBuilder(
-          builder: (context, c) {
-            final count = c.maxWidth > 1000
-                ? 4
-                : c.maxWidth > 580
-                ? 2
-                : 1;
-            return Wrap(
-              spacing: 16,
-              runSpacing: 16,
-              children: cards
-                  .map(
-                    (item) => SizedBox(
-                      width: (c.maxWidth - (count - 1) * 16) / count,
-                      child: card(
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: AppText(
-                                    item[0] as String,
-                                    style: TextStyle(
-                                      color: muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ),
-                                Icon(
-                                  item[2] as IconData,
-                                  color: blue,
-                                  size: 20,
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 22),
-                            Text(
-                              value(
-                                summary[item[1]],
-                                suffix: item[1] == 'availability_24h'
-                                    ? '%'
-                                    : '',
-                              ),
-                              style: TextStyle(
-                                fontSize: summary[item[1]] == null ? 18 : 32,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              item[1] == 'connected_clients'
-                                  ? 'Requires verified vendor telemetry'
-                                  : item[1] == 'availability_24h'
-                                  ? '${summary['sample_count'] ?? 0} observed samples'
-                                  : 'From authorized inventory',
-                              style: TextStyle(color: muted, fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            );
-          },
-        ),
-        const SizedBox(height: 24),
         SystemPerformance(
           data: Map<String, dynamic>.from(summary['system'] ?? {}),
         ),
@@ -1267,8 +1195,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        alertsView(recent: true),
       ],
     );
   }
@@ -1505,7 +1431,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     TowerMarker(statusColor: color),
                                     const Spacer(),
                                     badge(tower['status']),
-                                    if (inventoryWriter)
+                                    if (inventoryWriter || towerDeleter)
                                       SizedBox(
                                         width: 32,
                                         height: 36,
@@ -1537,17 +1463,19 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                             }
                                           },
                                           itemBuilder: (_) => [
-                                            const PopupMenuItem(
-                                              value: 'discover',
-                                              child: AppText(
-                                                'Discover devices',
+                                            if (inventoryWriter)
+                                              const PopupMenuItem(
+                                                value: 'discover',
+                                                child: AppText(
+                                                  'Discover devices',
+                                                ),
                                               ),
-                                            ),
-                                            const PopupMenuItem(
-                                              value: 'edit',
-                                              child: AppText('Edit tower'),
-                                            ),
-                                            if (owner)
+                                            if (inventoryWriter)
+                                              const PopupMenuItem(
+                                                value: 'edit',
+                                                child: AppText('Edit tower'),
+                                              ),
+                                            if (towerDeleter)
                                               const PopupMenuItem(
                                                 value: 'delete',
                                                 child: AppText('Delete tower'),
@@ -1776,7 +1704,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                         ],
                         'users' => [
                           row['username'],
-                          row['role'],
+                          row['access_role_name'] ??
+                              row['manager_role_name'] ??
+                              row['role'],
                           row['active'],
                           row['created_at']?.toString().substring(0, 10),
                         ],
@@ -1847,7 +1777,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                 if (resource == 'users' &&
                                     owner &&
                                     row['role'] != 'owner') ...[
-                                  if (row['role'] == 'manager')
+                                  if (row['role'] == 'manager' &&
+                                      row['manager_role_id'] == null &&
+                                      row['access_role_id'] == null &&
+                                      row['access_policy_configured'] != true)
                                     TextButton.icon(
                                       label: const AppText('Section access'),
                                       icon: const Icon(
@@ -1908,9 +1841,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     ),
                                   ),
                                 if (resource != 'users' &&
-                                    ((resource == 'towers' && owner) ||
+                                    ((resource == 'towers' && towerDeleter) ||
                                         (resource != 'towers' &&
-                                            inventoryWriter)))
+                                            inventoryDeleter)))
                                   IconButton(
                                     tooltip: 'Delete',
                                     onPressed: () => remove(resource, row),
@@ -1934,22 +1867,15 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   Future<void> editAccount(Map row) async {
+    if (!await refreshAccountRoles()) return;
+    if (!mounted) return;
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => ResourceDialog(
         title: 'Edit account',
         fields: [
           FieldSpec('username', 'Username', required: true),
-          FieldSpec(
-            'role',
-            'Role',
-            required: true,
-            options: const [
-              Option('manager', 'Manager'),
-              Option('technician', 'Technician'),
-              Option('viewer', 'Viewer'),
-            ],
-          ),
+          accountTypeField(),
           FieldSpec(
             'password',
             'New password (leave blank to keep current)',
@@ -1964,7 +1890,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         ],
         initial: {
           'username': row['username'],
-          'role': row['role'],
+          'role': row['access_role_id'] != null
+              ? 'custom:${row['access_role_id']}'
+              : row['role'],
           'place_ids': row['place_ids'] ?? [],
         },
         save: (data) async {
@@ -1979,6 +1907,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               'password': data['password'],
               'role': data['role'],
               if (data.containsKey('place_ids')) 'place_ids': data['place_ids'],
+              if (data.containsKey('access_role_id'))
+                'access_role_id': data['access_role_id'],
             },
           );
         },
@@ -2099,6 +2029,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   Future<void> edit(String resource, {Map<String, dynamic>? existing}) async {
+    if (resource == 'users' && !await refreshAccountRoles()) return;
+    if (!mounted) return;
     if (resource == 'snmp-profiles') {
       final saved = await showDialog<bool>(
         context: context,
@@ -2201,6 +2133,38 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
+  FieldSpec accountTypeField({bool allowOwner = false}) => FieldSpec(
+    'role',
+    'Account type',
+    kind: 'account_type',
+    required: true,
+    initial: list('access-roles').any((r) => r['account_type'] == 'manager')
+        ? 'manager'
+        : null,
+    options: [
+      ...list('access-roles')
+          .where((r) => allowOwner || r['account_type'] != 'owner')
+          .map(
+            (r) => Option(
+              r['built_in'] == true ? r['account_type'] : 'custom:${r['id']}',
+              r['name'],
+            ),
+          ),
+    ],
+  );
+
+  Future<bool> refreshAccountRoles() async {
+    try {
+      final data = await api.request('/access-roles') as List;
+      if (!mounted) return false;
+      setState(() => rows['access-roles'] = data);
+      return true;
+    } catch (e) {
+      if (mounted) toast(e.toString());
+      return false;
+    }
+  }
+
   FieldSpec managerPlacesField() => FieldSpec(
     'place_ids',
     'Assigned places',
@@ -2295,17 +2259,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             required: true,
             kind: 'password',
           ),
-          FieldSpec(
-            'role',
-            'Role',
-            initial: 'manager',
-            options: const [
-              Option('manager', 'Manager'),
-              Option('technician', 'Technician'),
-              Option('viewer', 'Viewer'),
-              Option('owner', 'Owner'),
-            ],
-          ),
+          accountTypeField(allowOwner: true),
           managerPlacesField(),
         ];
       default:
@@ -2501,8 +2455,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
                       trailing:
-                          role != 'viewer' &&
-                              (role == 'technician' ||
+                          ((role == 'technician' &&
+                                      !usesSectionPermissions(api.user!)) ||
                                   canEditSection(api.user!, 'alerts')) &&
                               a['acknowledged_by'] == null
                           ? TextButton(
@@ -2923,6 +2877,10 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
   final controls = <String, TextEditingController>{};
   final values = <String, dynamic>{};
   final changedSelections = <String>{};
+  bool get managerSelected =>
+      values['role'] == 'manager' ||
+      (values['role'] is String &&
+          (values['role'] as String).startsWith('custom:'));
   bool busy = false;
   String? error;
   @override
@@ -2952,9 +2910,20 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
     try {
       final data = <String, dynamic>{};
       for (final f in widget.fields) {
-        if (f.kind == 'multiselect') {
-          if (values['role'] == 'manager' &&
-              changedSelections.contains(f.key)) {
+        if (f.kind == 'account_type') {
+          final selected = values[f.key] as String;
+          if (selected.startsWith('custom:')) {
+            data['role'] = 'manager';
+            data['access_role_id'] = selected.substring('custom:'.length);
+          } else {
+            data['role'] = selected;
+            final previous = widget.initial[f.key];
+            if (previous is String && previous.startsWith('custom:')) {
+              data['access_role_id'] = null;
+            }
+          }
+        } else if (f.kind == 'multiselect') {
+          if (managerSelected && changedSelections.contains(f.key)) {
             data[f.key] = values[f.key];
           }
         } else if (f.kind == 'bool' || f.options != null) {
@@ -2991,7 +2960,7 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final f in widget.fields)
-                if (f.kind != 'multiselect' || values['role'] == 'manager')
+                if (f.kind != 'multiselect' || managerSelected)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: f.kind == 'multiselect'
@@ -3038,7 +3007,10 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                         ? SwitchListTile(
                             title: AppText(f.label),
                             value: values[f.key] == true,
-                            onChanged: (v) => setState(() => values[f.key] = v),
+                            onChanged: (v) => setState(() {
+                              values[f.key] = v;
+                              changedSelections.add(f.key);
+                            }),
                           )
                         : f.options != null
                         ? DropdownButtonFormField<String>(
@@ -3060,7 +3032,10 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                                 f.required && (v == null || v.isEmpty)
                                 ? 'Required'
                                 : null,
-                            onChanged: (v) => setState(() => values[f.key] = v),
+                            onChanged: (v) => setState(() {
+                              values[f.key] = v;
+                              changedSelections.add(f.key);
+                            }),
                           )
                         : TextFormField(
                             controller: controls[f.key],

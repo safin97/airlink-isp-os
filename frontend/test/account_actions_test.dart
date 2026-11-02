@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'account_type_fixtures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -47,7 +48,9 @@ void main() {
           }
           return http.Response(
             jsonEncode(
-              request.url.path == '/api/users'
+              request.url.path == '/api/access-roles'
+                  ? builtInAccountTypes
+                  : request.url.path == '/api/users'
                   ? accounts
                   : request.url.path == '/api/dashboard'
                   ? {}

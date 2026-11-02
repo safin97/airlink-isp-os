@@ -116,7 +116,9 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
                         '${user['username'] ?? ''}',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      subtitle: Text('Role: ${user['role'] ?? ''}'),
+                      subtitle: Text(
+                        'Role: ${user['access_role_name'] ?? user['manager_role_name'] ?? user['role'] ?? ''}',
+                      ),
                     ),
                     if (user['created_at'] != null)
                       Text(
@@ -201,7 +203,8 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
                         padding: const EdgeInsets.only(top: 12),
                         child: Text(message!),
                       ),
-                    if (['owner', 'manager'].contains(user['role']) &&
+                    if ((user['role'] == 'owner' ||
+                            usesSectionPermissions(user)) &&
                         (hasSection(user, 'isp_card') ||
                             hasSection(user, 'noc'))) ...[
                       const Divider(height: 40),
