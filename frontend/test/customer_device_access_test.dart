@@ -8,7 +8,7 @@ import 'package:airlink_isp_os/customer_device_access.dart';
 
 void main() {
   testWidgets(
-    'device access keeps secrets write-only and saves explicit transport settings',
+    'customer access exposes only SNMP settings and keeps the community write-only',
     (tester) async {
       Map<String, dynamic>? saved;
       final api = Api(
@@ -39,20 +39,21 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Customer device access'));
       await tester.pumpAndSettle();
-      expect(find.text('monitor'), findsOneWidget);
+      expect(find.text('monitor'), findsNothing);
+      expect(find.text('Device API username'), findsNothing);
       final fields = tester
           .widgetList<TextField>(find.byType(TextField))
           .toList();
       expect(fields[0].controller!.text, isEmpty);
-      expect(fields[2].controller!.text, isEmpty);
+      expect(fields.length, 1);
       await tester.ensureVisible(find.text('Save device access'));
       await tester.tap(find.text('Save device access'));
       await tester.pumpAndSettle();
       expect(saved!['community'], isNull);
-      expect(saved!['api_password'], isNull);
-      expect(saved!['verify_tls'], isTrue);
+      expect(saved!.containsKey('api_password'), isFalse);
+      expect(saved!.containsKey('verify_tls'), isFalse);
       expect(saved!['try_public_snmp'], isTrue);
-      expect(saved!['allow_http'], isFalse);
+      expect(saved!.containsKey('allow_http'), isFalse);
       expect(tester.takeException(), isNull);
     },
   );

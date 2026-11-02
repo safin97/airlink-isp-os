@@ -157,7 +157,7 @@ def online_record(row):
             'nas': nas.get('shortname') if isinstance(nas, dict) else None}
 
 
-def fetch_clients(connection, password, page=1, search='', count=50, transport=None, online=False):
+def fetch_clients(connection, password, page=1, search='', count=7, transport=None, online=False):
     route = 'index/online' if online else 'index/user'
     with sas4_session(connection, password, transport) as (client, headers):
         result = response_json(client.post(DEFAULT_SERVER + API_PATH + route, headers=headers,

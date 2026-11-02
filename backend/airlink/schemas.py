@@ -122,6 +122,11 @@ class ProfileInput(Strict):
     auth_protocol: Optional[Literal["SHA1", "SHA256", "MD5"]] = None
     priv_protocol: Optional[Literal["AES128", "DES"]] = None
 
+    @field_validator('version', mode='before')
+    @classmethod
+    def normalize_version(cls, value):
+        return '2c' if value == '2' else value
+
     @model_validator(mode="after")
     def credentials_for_version(self):
         if self.version == "3":

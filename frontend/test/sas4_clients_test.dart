@@ -56,6 +56,7 @@ void main() {
                           ]
                         : [],
                     'signal_dbm': page == 1 ? -62 : null,
+                    'ssid': page == 1 ? 'AirLink-test' : null,
                   },
                 ],
                 'total': 2,
@@ -193,8 +194,10 @@ void main() {
       expect(find.text('online-1'), findsOneWidget);
       expect(find.text('Ethernet speed'), findsOneWidget);
       expect(find.text('Signal'), findsOneWidget);
-      expect(find.text('1 Gbps'), findsOneWidget);
+      expect(find.text('eth0: 1 Gbps'), findsOneWidget);
       expect(find.text('-62 dBm'), findsOneWidget);
+      expect(find.text('SSID'), findsOneWidget);
+      expect(find.text('AirLink-test'), findsOneWidget);
       expect(find.text('client-2'), findsNothing);
       await tester.enterText(find.byType(TextField), 'Ali');
       await tester.tap(find.text('Search'));

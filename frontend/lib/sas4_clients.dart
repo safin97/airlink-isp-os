@@ -302,38 +302,57 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   String text(dynamic value) =>
       value == null || value.toString().isEmpty ? '—' : value.toString();
 
-  Widget telemetryCell(Map<String, dynamic> row, {required bool ethernet}) {
+  Widget telemetryCell(
+    Map<String, dynamic> row, {
+    required bool ethernet,
+    bool ssid = false,
+  }) {
     final links = (row['ethernet_links'] as List?) ?? [];
     String speed(num mbps) {
       final amount = mbps >= 1000 ? mbps / 1000 : mbps;
       return '${amount.toString().replaceFirst(RegExp(r'\.0$'), '')} ${mbps >= 1000 ? 'Gbps' : 'Mbps'}';
     }
 
-    final String? reading = ethernet
+    final String? reading = ssid
+        ? row['ssid'] as String?
+        : ethernet
         ? (links.isEmpty
               ? null
               : links
                     .map(
                       (link) =>
-                          '${links.length > 1 ? '${link['name']}: ' : ''}${speed(link['speed_mbps'] as num)}',
+                          '${link['name']}: ${speed(link['speed_mbps'] as num)}',
                     )
                     .join(' · '))
         : (row['signal_dbm'] == null ? null : '${row['signal_dbm']} dBm');
-    final hint = reading != null
-        ? (ethernet
+    final retained =
+        row['telemetry_refreshing'] == true ||
+        ((row['telemetry_stale_fields'] as List?) ?? []).contains(
+          ssid
+              ? 'ssid'
+              : ethernet
+              ? 'ethernet_links'
+              : 'signal_dbm',
+        );
+    final hint = reading != null && retained
+        ? 'Last reported reading. It will update when a new device reading is received.'
+        : reading != null
+        ? (ssid
+              ? 'Reported SSID from the customer device via SNMP.'
+              : ethernet
               ? 'Reported Ethernet link speed from the customer device.'
               : 'Reported signal from the customer device.')
         : switch (row['telemetry_status']) {
             'checking' =>
-              'Checking SNMP and supported device APIs at this user IP. Results refresh automatically.',
+              'Checking SNMP at this user IP. Results refresh automatically.',
             'credentials_required' =>
-              'Add SNMP or device API credentials in My account → Customer device access.',
+              'Add SNMP credentials in My account → Customer device access.',
             'authentication_failed' =>
               'The device rejected the API login. Check Customer device access in My account.',
             'snmp_unavailable' =>
-              'Device is reachable, but SNMP did not respond. Enable SNMP read access on UDP 161 for the AirLink server, or configure device API credentials in My account.',
+              'Device is reachable, but SNMP did not respond. Check SNMP read access on UDP 161 for the AirLink server.',
             'unreachable' =>
-              'No authenticated SNMP or supported API response. Check device credentials, services and network access.',
+              'No SNMP response. Check the read community, device SNMP service and network access.',
             'invalid_address' =>
               'This session does not have a usable customer device IP address.',
             'pending' =>
@@ -349,7 +368,8 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
       message: tr(hint),
       child: reading == null
           ? AppText(
-              row['telemetry_status'] == 'checking'
+              (row['telemetry_status'] == 'checking' ||
+                      row['telemetry_status'] == 'pending')
                   ? 'Checking…'
                   : 'Unavailable',
             )
@@ -547,6 +567,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                       'Device type',
                       'Ethernet speed',
                       'Signal',
+                      'SSID',
                       'Connection',
                     ],
                     'Expiration',
@@ -626,6 +647,9 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                             ),
                             DataCell(telemetryCell(row, ethernet: true)),
                             DataCell(telemetryCell(row, ethernet: false)),
+                            DataCell(
+                              telemetryCell(row, ethernet: false, ssid: true),
+                            ),
                             DataCell(
                               Text(
                                 row['telemetry_source']?.toString() ??

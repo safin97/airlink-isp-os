@@ -74,7 +74,7 @@ def test_online_telemetry_never_uses_aggregate_ap_signal(client, owner):
         assert rows[0]['ethernet_links'] == []
 
 
-def test_online_telemetry_uses_fresh_api_without_snmp_profile(client, owner):
+def test_online_telemetry_rejects_api_only_inventory(client, owner):
     tid = tower(client, owner)
     did = device(client, owner, tid)
     with SessionLocal() as db:
@@ -84,5 +84,5 @@ def test_online_telemetry_uses_fresh_api_without_snmp_profile(client, owner):
             'ethernet_links':[{'name':'eth0','speed_mbps':1000}], 'signal_dbm':-59}))
         db.commit()
         row = attach_telemetry(db, SimpleNamespace(role='owner'), {'clients':[{'ip_address':'192.0.2.1'}]})['clients'][0]
-        assert row['signal_dbm'] == -59 and row['ethernet_links'][0]['speed_mbps'] == 1000
-        assert row['telemetry_source'] == 'airOS API' and row['device_reachable'] is True
+        assert row['signal_dbm'] is None and row['ethernet_links'] == []
+        assert row['telemetry_status'] == 'failed'

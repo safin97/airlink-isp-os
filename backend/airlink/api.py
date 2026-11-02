@@ -17,6 +17,7 @@ from redis import Redis
 from redis.exceptions import RedisError
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
+from .customer_collector import service as customer_collector_service
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
@@ -36,10 +37,12 @@ async def lifespan(app):
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
     if os.environ.get('AIRLINK_TESTING') != 'true':
         customer_probe_service.start()
+        customer_collector_service.start()
         system_stats_service.start()
     try:
         yield
     finally:
+        customer_collector_service.stop()
         customer_probe_service.stop()
         system_stats_service.stop()
         if task:

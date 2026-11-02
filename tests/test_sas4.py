@@ -68,8 +68,8 @@ def test_sas4_pagination_search_and_private_field_filter(monkeypatch):
             return httpx.Response(200, json={'token': 'test-token'})
         assert request.url.path == '/admin/api/index.php/api/index/user'
         assert request.headers['Authorization'] == 'Bearer test-token'
-        assert payload == {'page': 2, 'count': 50, 'sortBy': 'username', 'direction': 'asc', 'search': 'Ali'}
-        return httpx.Response(200, json={'current_page': 2, 'per_page': 50, 'total': 101,
+        assert payload == {'page': 2, 'count': 7, 'sortBy': 'username', 'direction': 'asc', 'search': 'Ali'}
+        return httpx.Response(200, json={'current_page': 2, 'per_page': 7, 'total': 101,
           'next_page_url': 'https://must-not-follow.example', 'data': [{
             'id': 3, 'username': 'ali', 'firstname': 'Ali', 'lastname': 'Test',
             'profile_details': {'name': '20 Mbps'}, 'enabled': 1, 'online_status': 1,
@@ -78,7 +78,7 @@ def test_sas4_pagination_search_and_private_field_filter(monkeypatch):
           }]})
     result = sas4.fetch_clients(SimpleNamespace(**SETTINGS), SETTINGS['password'], page=2, search='Ali', transport=httpx.MockTransport(transport))
     assert len(requests) == 2
-    assert result['last_page'] == 3 and result['page'] == 2 and result['total'] == 101
+    assert result['last_page'] == 15 and result['page'] == 2 and result['total'] == 101
     record = result['clients'][0]
     assert record['name'] == 'Ali Test' and record['status'] == 'active • online' and record['profile'] == '20 Mbps'
     assert 'password' not in record and 'balance' not in record
@@ -170,13 +170,13 @@ def test_online_users_use_live_sessions_and_filter_private_fields(monkeypatch):
             return httpx.Response(200, json={'token': 'test-token'})
         assert request.method == 'POST' and request.url.path.endswith('/index/online')
         payload = json.loads(request.content)
-        assert payload['page'] == 2 and payload['search'] == 'Ali'
-        return httpx.Response(200, json={'total': 75, 'per_page': 50, 'current_page': 2, 'data': [{
+        assert payload['page'] == 2 and payload['search'] == 'Ali' and payload['count'] == 7
+        return httpx.Response(200, json={'total': 75, 'per_page': 7, 'current_page': 2, 'data': [{
             'username': 'ali', 'user_profile_name': '20 Mbps', 'framedipaddress': '192.0.2.8',
             'user_details': {'firstname': 'Ali', 'lastname': 'Test', 'expiration': '2026-12-01', 'password': 'MUST-NOT-LEAK'},
             'nas_details': {'shortname': 'Tower 1', 'secret': 'MUST-NOT-LEAK'}}]})
     result = sas4.fetch_clients(SimpleNamespace(**SETTINGS), SETTINGS['password'], page=2, search='Ali', online=True, transport=httpx.MockTransport(transport))
-    assert result['total'] == 75 and result['page'] == result['last_page'] == 2
+    assert result['total'] == 75 and result['page'] == 2 and result['last_page'] == 11
     row = result['clients'][0]
     assert row['name'] == 'Ali Test' and row['ip_address'] == '192.0.2.8' and row['online'] is True
     assert row['profile'] == '20 Mbps' and row['nas'] == 'Tower 1'

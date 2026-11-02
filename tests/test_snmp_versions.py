@@ -36,7 +36,7 @@ def test_community_encrypted_and_not_returned(client, owner, version):
 
 @pytest.mark.parametrize('credentials', [
     {'version': '2c'}, {'version': '1', 'community': '   '},
-    {'version': '2', 'community': 'lab'}, {'version': '3', 'community': 'lab'},
+    {'version': '3', 'community': 'lab'},
     {'version': '2c', 'community': 'lab', 'username': 'mixed'},
 ])
 def test_invalid_profile_rejected(client, owner, credentials):
@@ -64,6 +64,7 @@ def test_vendor_device_accepted(client, owner, vendor):
 def test_authentication_versions():
     assert snmp.authentication({'version': '1', 'community': 'lab'}).message_processing_model == 0
     assert snmp.authentication({'version': '2c', 'community': 'lab'}).message_processing_model == 1
+    assert snmp.authentication({'version': '2', 'community': 'lab'}).message_processing_model == 1
     assert isinstance(snmp.authentication({'username': 'old', 'auth_key': 'old-auth-secret',
                                           'priv_key': 'old-priv-secret'}), snmp.UsmUserData)
     with pytest.raises(ValueError):
@@ -147,3 +148,57 @@ def test_v3_protocol_selection_and_legacy_defaults(client, owner):
     assert result.status_code == 201, result.text
     assert client.post('/api/snmp-profiles', headers=owner, json={
         'name':'Invalid', 'version':'2c','community':'public','auth_protocol':'SHA1'}).status_code == 422
+
+
+def test_v2_alias_is_saved_as_community_protocol(client, owner):
+    response = client.post('/api/snmp-profiles', headers=owner,
+                           json={'name': 'MikroTik v2', 'version': '2', 'community': 'public'})
+    assert response.status_code == 201
+    assert response.json()['version'] == '2c'
+
+
+@pytest.mark.parametrize('bulk_fails', [False, True])
+def test_v2_bulk_walk_and_legacy_getnext_fallback(monkeypatch, bulk_fails):
+    calls = []
+    async def bulk(*args, **kwargs):
+        calls.append('bulk')
+        assert args[4:6] == (0, 10)
+        if bulk_fails:
+            yield None, 5, 0, []
+        else:
+            yield None, 0, 0, [('1.2.3.1', 1000), ('1.2.3.2', 100)]
+    async def walk(*args, **kwargs):
+        calls.append('next')
+        yield None, 0, 0, [('1.2.3.1', 1000)]
+    monkeypatch.setattr(snmp, 'bulk_walk_cmd', bulk)
+    monkeypatch.setattr(snmp, 'walk_cmd', walk)
+    result = asyncio.run(snmp.read_table(None, snmp.authentication({'version':'2c','community':'public'}), None, '1.2.3'))
+    assert result['1'] == 1000
+    assert calls == (['bulk', 'next'] if bulk_fails else ['bulk'])
+
+
+def test_mikrotik_station_signal_ssid_and_ether1(monkeypatch):
+    from airlink.client_telemetry import snmp_readings
+    requested = []
+    async def table(engine, auth, target, oid, textual=False):
+        requested.append(oid)
+        if oid == snmp.TABLES['if_name']: return {'1':'ether1','2':'ether2'}
+        if oid == snmp.TABLES['if_type']: return {'1':6,'2':6}
+        if oid == snmp.TABLES['if_status']: return {'1':1,'2':1}
+        if oid == snmp.TABLES['if_speed_mbps']: return {'1':1000,'2':100}
+        if oid == snmp.STATION_TABLES['mikrotik']['station_signal_dbm']: return {'3':-58}
+        if oid == snmp.STATION_TABLES['mikrotik']['ssid']:
+            assert textual
+            return {'3':'AirLink test'}
+        return {}
+    monkeypatch.setattr(snmp, 'read_table', table)
+    monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
+    monkeypatch.setattr(snmp, 'get_cmd', AsyncMock(return_value=(None, 0, 0, [(snmp.UPTIME, 100)])))
+    values = asyncio.run(snmp.collect('192.0.2.1', {'version':'2','community':'public'}, 0, vendor='mikrotik', link_only=True))
+    assert snmp_readings(values) == {'ethernet_links':[{'name':'ether1','speed_mbps':1000}],
+                                    'signal_dbm':-58, 'ssid':'AirLink test'}
+    assert snmp.WIRELESS_TABLES['mikrotik']['signal_dbm'] not in requested
+    values['wireless']['station_signal_dbm']['4'] = -80
+    values['wireless']['ssid']['4'] = 'Other radio'
+    assert snmp_readings(values)['signal_dbm'] is None
+    assert snmp_readings(values)['ssid'] is None

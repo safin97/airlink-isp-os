@@ -2,7 +2,7 @@
 from airlink.vendor_identity import identify_vendor
 from pysnmp.proto.rfc1905 import NoSuchObject, NoSuchInstance, EndOfMibView
 from pysnmp.hlapi.v3arch.asyncio import (SnmpEngine, CommunityData, UsmUserData, UdpTransportTarget, ContextData,
-    ObjectType, ObjectIdentity, get_cmd, walk_cmd, USM_AUTH_HMAC192_SHA256, USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5, USM_PRIV_CFB128_AES, USM_PRIV_CBC56_DES)
+    ObjectType, ObjectIdentity, get_cmd, walk_cmd, bulk_walk_cmd, USM_AUTH_HMAC192_SHA256, USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5, USM_PRIV_CFB128_AES, USM_PRIV_CBC56_DES)
 
 # SNMPv2-MIB RFC 3418, IF-MIB RFC 2863, HOST-RESOURCES-MIB RFC 2790.
 UPTIME = "1.3.6.1.2.1.1.3.0"
@@ -41,6 +41,13 @@ WIRELESS_TABLES = {
     },
 }
 RAM_TYPE = "1.3.6.1.2.1.25.2.1.2"
+STATION_TABLES = {
+    'mikrotik': {
+        'station_signal_dbm': '1.3.6.1.4.1.14988.1.1.1.1.1.4',
+        'ssid': '1.3.6.1.4.1.14988.1.1.1.1.1.5',
+    },
+    'ubiquiti': {'ssid': '1.3.6.1.4.1.41112.1.4.5.1.2'},
+}
 
 
 def counter_rate(previous, current, seconds, rebooted=False, discontinuity_changed=False):
@@ -62,7 +69,7 @@ def interface_rate(previous, current, direction, seconds, rebooted=False):
 
 def authentication(credentials):
     version = credentials.get("version", "3")  # Existing encrypted profiles remain v3.
-    if version in ("1", "2c"):
+    if version in ("1", "2", "2c"):
         return CommunityData(credentials["community"], mpModel=0 if version == "1" else 1)
     if version != "3":
         raise ValueError("Unsupported SNMP version")
@@ -73,21 +80,38 @@ def authentication(credentials):
 
 async def read_table(engine, auth, target, oid, textual=False):
     rows = {}
-    async for error, status, _, binds in walk_cmd(engine, auth, target, ContextData(), ObjectType(ObjectIdentity(oid)),
-                                                 lexicographicMode=False, lookupMib=False, maxRows=256):
-        if error or status or not binds:
-            break
-        for key, value in binds:
-            if isinstance(value, (NoSuchObject, NoSuchInstance, EndOfMibView)):
-                continue
-            key = str(key)
-            if not key.startswith(oid + "."):
-                continue
-            try:
-                rows[key[len(oid) + 1:]] = str(value) if textual else int(value)
-            except (ValueError, TypeError):
-                pass
-        if len(rows) >= 256:
+    # v2 GETBULK avoids one round trip per interface on RouterOS. Older agents
+    # that reject bulk requests retain the GETNEXT compatibility path.
+    modes = (True, False) if getattr(auth, 'message_processing_model', None) == 1 else (False,)
+    for bulk in modes:
+        args = (engine, auth, target, ContextData())
+        iterator = (bulk_walk_cmd(*args, 0, 10, ObjectType(ObjectIdentity(oid)),
+                    lexicographicMode=False, lookupMib=False, maxRows=256) if bulk else
+                    walk_cmd(*args, ObjectType(ObjectIdentity(oid)),
+                    lexicographicMode=False, lookupMib=False, maxRows=256))
+        failed = False
+        async for error, status, _, binds in iterator:
+            if error or status:
+                failed = True
+                break
+            if not binds:
+                break
+            for key, value in binds:
+                if isinstance(value, (NoSuchObject, NoSuchInstance, EndOfMibView)):
+                    continue
+                key = str(key)
+                if not key.startswith(oid + "."):
+                    continue
+                try:
+                    rows[key[len(oid) + 1:]] = str(value)[:128] if textual else int(value)
+                except (ValueError, TypeError):
+                    pass
+                if len(rows) >= 256:
+                    break
+            if len(rows) >= 256:
+                break
+        await iterator.aclose()
+        if rows or not failed:
             break
     return rows
 
@@ -150,8 +174,17 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
         values["interfaces"] = interfaces
         family = "ubiquiti" if vendor in ("ubiquiti", "ubiquiti_m5", "ubiquiti_ac") else vendor
         wireless = {}
+        for name, oid in STATION_TABLES.get(family, {}).items():
+            table = await read_table(engine, auth, target, oid, textual=name == 'ssid')
+            table = {index: value for index, value in table.items() if
+                     (name == 'ssid' and isinstance(value, str) and value) or
+                     (name == 'station_signal_dbm' and isinstance(value, (int, float)) and -150 <= value < 0)}
+            if table:
+                wireless[name] = table
         for name, oid in WIRELESS_TABLES.get(family, {}).items():
             if link_only and name != "signal_dbm":
+                continue
+            if link_only and name == 'signal_dbm' and wireless.get('station_signal_dbm'):
                 continue
             table = await read_table(engine, auth, target, oid)
             table = {index: value for index, value in table.items() if
