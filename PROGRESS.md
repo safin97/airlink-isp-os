@@ -59,3 +59,7 @@ Added an owner-confirmed Restart system action beside Schedule update. It works 
 ## 0.1.6-dev — Dashboard and NOC application update
 
 Adds Kurdish Badini/Arabic language selection, day/night styles, sidebar account access, visible owner payment setup, compact user-status indicators, recharge method squares, NOC fullscreen and scoped SAS4 online-user counts. GPU detection/status is included; NVIDIA driver installation remains a separate ISO/base-system operation. This release is an application-only GitHub update and leaves the 0.1.5-dev installer unchanged. Local validation: 181 Python tests passed with one Linux-only skip, 39 Flutter tests passed, and the analyzer is clean. See [release notes](docs/releases/0.1.6-dev.md); package/upgrade verification is attached to the GitHub release.
+
+## 0.1.7-dev — ICMP discovery permission fix
+
+The API service now receives CAP_NET_RAW while retaining NoNewPrivileges and its other sandbox settings. Its capability bounding set is restricted to CAP_NET_RAW. This enables ping discovery from the unprivileged Linux API service. The application update restarts the service; no installer ISO is rebuilt. See [release notes](docs/releases/0.1.7-dev.md).
