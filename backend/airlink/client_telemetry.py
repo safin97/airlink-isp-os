@@ -1,7 +1,8 @@
 """Enrich SAS4 sessions with fresh SNMP readings from the matching customer IP."""
 import math
 from sqlalchemy import select
-from .models import Device, Metric, Tower, now
+from .models import Device, Metric, now
+from .manager_places import managed_towers
 from .security import aware
 
 
@@ -18,7 +19,7 @@ def attach_telemetry(db, user, result):
     query = (select(Device, Metric).outerjoin(Metric, Metric.id == latest)
              .where(Device.ip_address.in_(addresses)))
     if user.role != 'owner':
-        query = query.where(Device.tower_id.in_(select(Tower.id).where(Tower.manager_id == user.id)))
+        query = query.where(Device.tower_id.in_(managed_towers(user.id)))
     matches = {device.ip_address: (device, metric) for device, metric in db.execute(query)} if addresses else {}
     for row in rows:
         row.update(ethernet_links=[], signal_dbm=None, telemetry_status='not_monitored')

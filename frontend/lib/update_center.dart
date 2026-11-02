@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
+import 'section_access.dart';
 
 const updateFeedUrl =
     'https://github.com/safin97/airlink-isp-os/releases/latest/download/stable.json';
@@ -16,6 +17,7 @@ class UpdateCenter extends StatefulWidget {
 }
 
 class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'software_updates');
   Map<String, dynamic>? snapshot;
   String? error;
   String? message;
@@ -64,6 +66,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       if (!mounted) return;
       setState(() => snapshot = data);
       if (check &&
+          canEdit &&
           data['state']?['configured'] == true &&
           data['state']?['state']?['status'] != 'installing') {
         await widget.api.request('/updates/check', method: 'POST', body: {});
@@ -83,7 +86,8 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   }
 
   Future<void> restartSystem() async {
-    if (!restartSupported ||
+    if (!canEdit ||
+        !restartSupported ||
         busy ||
         installing ||
         recovering ||
@@ -165,6 +169,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   }
 
   Future<void> updateNow() async {
+    if (!canEdit) return;
     final release = available;
     if (release == null || busy || !installSupported) return;
     final confirmed = await showDialog<bool>(
@@ -192,6 +197,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   }
 
   Future<void> scheduleUpdate() async {
+    if (!canEdit) return;
     final release = available;
     if (release == null || busy || !installSupported) return;
     final controller = TextEditingController();
@@ -363,6 +369,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
         ? (received / total).clamp(0.0, 1.0)
         : null;
     final canInstall =
+        canEdit &&
         configured &&
         installSupported &&
         release != null &&
@@ -373,6 +380,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
         !restartPending &&
         error == null;
     final canRestart =
+        canEdit &&
         restartSupported &&
         !busy &&
         !checking &&
@@ -382,6 +390,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (!canEdit) const AppText('Read-only access'),
         Text(
           'Current version: ${snapshot?['current_version'] ?? (error == null ? 'Loading…' : 'Unavailable')}',
           style: Theme.of(context).textTheme.titleLarge,
@@ -463,7 +472,8 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
             ),
             OutlinedButton(
               onPressed:
-                  (configured || snapshot == null) &&
+                  canEdit &&
+                      (configured || snapshot == null) &&
                       !busy &&
                       !checking &&
                       !installing

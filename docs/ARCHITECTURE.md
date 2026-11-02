@@ -18,3 +18,18 @@ Official implementation references:
 - Debian UEFI: https://wiki.debian.org/UEFI
 - NetworkManager checkpoint API: https://networkmanager.dev/docs/api/latest/gdbus-org.freedesktop.NetworkManager.html
 - PySNMP API: https://docs.lextudio.com/pysnmp/v7.1/docs/api-reference
+
+
+## Manager section access
+
+Owners always have full section access. In **Managers → Section access**, the owner can select Dashboard, NOC Screen, Towers, ISP Card, Monitoring, Network Map, Alerts, Reports, Software Updates and Settings for each manager. Managers and permission administration remain owner-only. Settings and Software Updates require explicit grants; existing managers are not automatically granted either. My account/password changes remain available even if no operational section is enabled. Existing managers retain all operational sections until the owner changes their selections.
+
+Selections are stored per user in `user_section_access`. The server checks the current stored selection on every authenticated request, including dashboard WebSocket delivery; changing access therefore does not depend on a token refresh. The sidebar refreshes the user's permissions every 30 seconds, removes denied sections, clears previously loaded page data, and switches to an allowed section. With no sections selected it shows an account-only landing message.
+
+Shared read APIs remain available when an enabled section needs them: for example, Network Map and NOC can read the manager's scoped tower/device inventory. These reads do not enable Towers writes or Monitoring history. Alert acknowledgements require Alerts; historical metrics require Monitoring; card operations and payments require ISP Card. NOC uses a separate online-user-count endpoint that does not return ISP balance or user lists. SAS4 connection credentials are personal account settings for ISP Card/NOC users. All existing role and tower/device assignment checks still apply in addition to section access. Permission changes are audited; managers cannot change their own permissions or grant administrative access.
+
+A Settings grant enables the Settings page's network configuration, SNMP profile creation/metadata, audit log and personal payment gateway settings. A Software Updates grant enables update checks, download/verification/install/scheduling and the update page's confirmed restart action. Existing action validation, signed update verification and preview installation restrictions still apply. Grants are checked on every request, and removing a grant immediately blocks those operations.
+
+Manager place assignments are edited in Add/Edit Manager. Each selected place grants access to all its current and future towers and devices; moving a tower out removes inherited access. Multiple managers can share a place. Section permissions still apply. Existing direct tower assignments are preserved until an explicit place selection replaces them. Account credential edits with no place selection leave assignments unchanged. Assigned empty places remain visible. Leaving the manager role or deleting the account clears place assignments.
+
+Section access has separate Show and Allow edits controls. A visible section without edit permission is read-only. The server checks both grants on every request, including recharge, payment setup, discovery, settings, update and restart actions. Shared connection settings require edit access to at least one section that owns them. Personal password changes remain available. Existing grants keep their prior behavior until the owner sets edit permissions; older clients cannot overwrite an explicit read-only policy. Owner access and existing role/inventory scope checks remain in force.

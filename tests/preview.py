@@ -45,6 +45,24 @@ def preview_broker(action, payload=None):
 
 api.broker = preview_broker
 api.cache=fakeredis.FakeRedis(decode_responses=True)
+from contextlib import asynccontextmanager, suppress
+import asyncio
+from monitoring import worker as inventory_worker
+inventory_worker.cache = api.cache
+original_lifespan = api.app.router.lifespan_context
+
+@asynccontextmanager
+async def preview_lifespan(app):
+    async with original_lifespan(app):
+        task = asyncio.create_task(inventory_worker.main())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+api.app.router.lifespan_context = preview_lifespan
 Base.metadata.create_all(engine)
 with SessionLocal() as db:
     if not db.get(Role,'owner'):

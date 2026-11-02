@@ -1,5 +1,6 @@
 """Bounded read-only RouterOS REST and legacy airOS status adapters."""
 import json
+import math
 import re
 import httpx
 
@@ -36,7 +37,44 @@ def signal(value):
     return value if -150 <= value < 0 else None
 
 
-async def routeros(client, base, credentials):
+def numeric(value, low=0, high=1e18):
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) and low <= number <= high else None
+    except (TypeError, ValueError):
+        return None
+
+
+def uptime_seconds(value):
+    direct = numeric(value)
+    if direct is not None:
+        return direct
+    if not isinstance(value, str) or not re.fullmatch(r'(?:\d+w)?(?:\d+d)?(?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?', value) or not value:
+        return None
+    return sum(float(amount) * {'w':604800, 'd':86400, 'h':3600, 'm':60, 's':1}[unit]
+               for amount, unit in re.findall(r'(\d+(?:\.\d+)?)([wdhms])', value))
+
+
+def resource_values(resource):
+    if not isinstance(resource, dict):
+        return {}
+    values = {}
+    for field, raw in (('cpu_percent', numeric(resource.get('cpu-load'), 0, 100)),
+                       ('uptime_seconds', uptime_seconds(resource.get('uptime')))):
+        if raw is not None:
+            values[field] = raw
+    total, free = numeric(resource.get('total-memory'), 1), numeric(resource.get('free-memory'))
+    if total is not None and free is not None and free <= total:
+        values.update(memory_total_bytes=total, memory_used_bytes=total-free, memory_percent=100*(total-free)/total)
+    for source, target in (('version', 'firmware_version'), ('board-name', 'device_model')):
+        if isinstance(resource.get(source), str):
+            values[target] = resource[source][:120]
+    return values
+
+
+async def routeros(client, base, credentials, inventory=False):
     auth = httpx.BasicAuth(credentials['api_username'], credentials['api_password'])
     async def read(path, payload=None):
         status, raw = await request(client, 'GET' if payload is None else 'POST', base + '/rest/' + path,
@@ -59,6 +97,7 @@ async def routeros(client, base, credentials):
             if data[0].get('status') == 'link-ok' and speed:
                 links.append({'name': str(port.get('name', port['.id']))[:120], 'speed_mbps': speed})
     strength = None
+    wireless_values = {}
     for path, field in (('interface/wireless/registration-table', 'signal-strength'),
                         ('interface/wifi/registration-table', 'signal'),
                         ('interface/wifiwave2/registration-table', 'signal')):
@@ -66,11 +105,25 @@ async def routeros(client, base, credentials):
         if isinstance(data, list) and data:
             # More than one station cannot be attributed to this customer's link.
             strength = signal(data[0].get(field)) if len(data) == 1 and isinstance(data[0], dict) else None
+            signals = [signal(row.get(field)) for row in data[:256] if isinstance(row, dict)]
+            signals = [value for value in signals if value is not None]
+            wireless_values['wireless_clients'] = len(data)
+            if signals:
+                wireless_values['weakest_signal_dbm'] = min(signals)
             break
-    return {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API'}
+        if isinstance(data, list):
+            wireless_values.setdefault('wireless_clients', 0)
+    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API'}
+    if inventory:
+        result.update(wireless_values)
+        resource = await read('system/resource')
+        if isinstance(resource, list) and resource:
+            resource = resource[0]
+        result.update(resource_values(resource))
+    return result
 
 
-def airos_values(data):
+def airos_values(data, inventory=False):
     if not isinstance(data, dict) or not isinstance(data.get('wireless'), dict):
         raise ValueError('Not an airOS status response')
     links = []
@@ -91,10 +144,27 @@ def airos_values(data):
     wireless = data['wireless']
     # airOS station mode only; AP status must not become a subscriber signal.
     strength = signal(wireless.get('signal')) if wireless.get('mode') in ('sta', 'station', 'Station', 'sta-wds', 'sta-ptmp', 'sta-ptp') else None
-    return {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'airOS API'}
+    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'airOS API'}
+    if inventory:
+        host = data.get('host') if isinstance(data.get('host'), dict) else {}
+        for key, raw in (('cpu_percent', numeric(host.get('cpuload'), 0, 100)),
+                         ('uptime_seconds', numeric(host.get('uptime'))),
+                         ('wireless_clients', numeric(wireless.get('count'), 0, 100000))):
+            if raw is not None:
+                result[key] = raw
+        total, free = numeric(host.get('totalram'), 1), numeric(host.get('freeram'))
+        if total is not None and free is not None and free <= total:
+            result.update(memory_total_bytes=total, memory_used_bytes=total-free, memory_percent=100*(total-free)/total)
+        frequency = numeric(wireless.get('frequency'), 1, 65535)
+        if frequency is not None:
+            result['radio_frequencies_mhz'] = [frequency]
+        for source, target in (('fwversion', 'firmware_version'), ('devmodel', 'device_model')):
+            if isinstance(host.get(source), str):
+                result[target] = host[source][:120]
+    return result
 
 
-async def airos(client, base, credentials):
+async def airos(client, base, credentials, inventory=False):
     payload = {key: (None, value) for key, value in {
         'username': credentials['api_username'], 'password': credentials['api_password'],
         'uri': '/status.cgi', 'submit': 'Login'}.items()}
@@ -104,20 +174,21 @@ async def airos(client, base, credentials):
     status, raw = await request(client, 'GET', base + '/status.cgi')
     if status != 200:
         raise PermissionError('Device API status unavailable')
-    return airos_values(json.loads(raw))
+    return airos_values(json.loads(raw), inventory=inventory)
 
 
-async def collect_api(address, credentials, vendor='generic', transport=None):
+async def collect_api(address, credentials, vendor='generic', transport=None, inventory=False):
     host = '[' + address + ']' if ':' in address else address
-    schemes = ['https', 'http'] if credentials.get('allow_http') else ['https']
+    schemes = [credentials['protocol']] if credentials.get('protocol') in ('http', 'https') else (['https', 'http'] if credentials.get('allow_http') else ['https'])
     for scheme in schemes:
-        base = scheme + '://' + host
+        port = credentials.get('port')
+        base = scheme + '://' + host + (':' + str(port) if port else '')
         async with httpx.AsyncClient(timeout=httpx.Timeout(2, connect=1), follow_redirects=False,
                                      trust_env=False, verify=credentials.get('verify_tls', True), transport=transport) as client:
             try:
                 status, root = await request(client, 'GET', base + '/')
                 page = root.decode('utf-8', errors='ignore').lower()
-                kind = vendor
+                kind = 'ubiquiti' if vendor in ('ubiquiti_m5', 'ubiquiti_ac') else vendor
                 if kind == 'generic':
                     if 'mikrotik' in page or 'routeros' in page:
                         kind = 'mikrotik'
@@ -125,9 +196,9 @@ async def collect_api(address, credentials, vendor='generic', transport=None):
                         kind = 'ubiquiti'
                 # Authentication is sent only after a supported device is identified.
                 if kind == 'mikrotik':
-                    return await routeros(client, base, credentials)
+                    return await routeros(client, base, credentials, inventory=inventory)
                 if kind == 'ubiquiti':
-                    return await airos(client, base, credentials)
+                    return await airos(client, base, credentials, inventory=inventory)
             except PermissionError:
                 raise  # No repeated password attempts or downgrade after rejected login.
             except (httpx.HTTPError, ValueError, KeyError, TypeError):

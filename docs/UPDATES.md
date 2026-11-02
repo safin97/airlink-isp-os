@@ -2,7 +2,7 @@
 
 For a public GitHub repository, use the configuration and signed release tools in [GITHUB-UPDATES.md](GITHUB-UPDATES.md). They work with the current ISO's update format. Linking a repository does not automatically install releases.
 
-The source configuration now selects the public GitHub repository `safin97/airlink-isp-os` and its publisher public key for new installations. The original ISO remains unconfigured until the generated configuration bundle is installed. Private signing keys are never included in an image. Without a trusted public key and source, the update UI is disabled. Only owners can check/download/verify/install/schedule updates.
+The source configuration now selects the public GitHub repository `safin97/airlink-isp-os` and its publisher public key for new installations. The original ISO remains unconfigured until the generated configuration bundle is installed. Private signing keys are never included in an image. Without a trusted public key and source, the update UI is disabled. Owners and managers explicitly granted Software Updates edit access can check/download/verify/install/schedule updates. Managers with read-only access can view update status.
 
 Store a raw 32-byte Ed25519 publisher public key at `/etc/airlink/update-public-key.bin` and a root-owned JSON configuration at `/etc/airlink/update-source.json`:
 

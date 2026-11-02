@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'section_access.dart';
 import 'app_language.dart';
 
 class CustomerDeviceAccess extends StatefulWidget {
@@ -11,6 +12,7 @@ class CustomerDeviceAccess extends StatefulWidget {
 
 class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
     with LanguageRebuild {
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'isp_card');
   final community = TextEditingController();
   final username = TextEditingController();
   final password = TextEditingController();
@@ -57,6 +59,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
   }
 
   Future<void> save() async {
+    if (!canEdit) return;
     setState(() {
       busy = true;
       error = null;
@@ -107,7 +110,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
               contentPadding: EdgeInsets.zero,
               title: const AppText('Automatic detection'),
               value: enabled,
-              onChanged: busy
+              onChanged: busy || !canEdit
                   ? null
                   : (value) => setState(() => enabled = value),
             ),
@@ -118,7 +121,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
                 'Tries v2c then v1. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
               ),
               value: tryPublicSnmp,
-              onChanged: busy
+              onChanged: busy || !canEdit
                   ? null
                   : (value) => setState(() => tryPublicSnmp = value),
             ),
@@ -129,7 +132,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
             TextField(
               controller: community,
               obscureText: true,
-              enabled: !busy,
+              enabled: !busy && canEdit,
               autocorrect: false,
               enableSuggestions: false,
               decoration: InputDecoration(
@@ -142,7 +145,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
             const SizedBox(height: 12),
             TextField(
               controller: username,
-              enabled: !busy,
+              enabled: !busy && canEdit,
               autocorrect: false,
               enableSuggestions: false,
               decoration: InputDecoration(labelText: tr('Device API username')),
@@ -151,7 +154,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
             TextField(
               controller: password,
               obscureText: true,
-              enabled: !busy,
+              enabled: !busy && canEdit,
               autocorrect: false,
               enableSuggestions: false,
               decoration: InputDecoration(
@@ -168,7 +171,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
                 'Turn off only for devices with self-signed certificates.',
               ),
               value: verifyTls,
-              onChanged: busy
+              onChanged: busy || !canEdit
                   ? null
                   : (value) => setState(() => verifyTls = value),
             ),
@@ -179,12 +182,12 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
                 'Sends device credentials without encryption. Use only on a trusted management network.',
               ),
               value: allowHttp,
-              onChanged: busy
+              onChanged: busy || !canEdit
                   ? null
                   : (value) => setState(() => allowHttp = value),
             ),
             FilledButton(
-              onPressed: busy ? null : save,
+              onPressed: busy || !canEdit ? null : save,
               child: const AppText('Save device access'),
             ),
             if (busy) const LinearProgressIndicator(),

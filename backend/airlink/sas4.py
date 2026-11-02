@@ -333,6 +333,12 @@ def get_dashboard(user=Depends(sas4_access), db=Depends(get_db)):
         raise HTTPException(502, str(exc)) from exc
 
 
+@router.get('/online-count')
+def get_online_count(user=Depends(sas4_access), db=Depends(get_db)):
+    result = get_dashboard(user, db)
+    return {'online_users': result.get('online_users')}
+
+
 @router.get('/online')
 def get_online_users(page: int = Query(1, ge=1, le=1000000), search: str = Query('', max_length=200),
                      user=Depends(sas4_access), db=Depends(get_db)):

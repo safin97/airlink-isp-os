@@ -81,7 +81,7 @@ void main() {
         client: MockClient(
           (request) async => http.Response(
             jsonEncode(
-              request.url.path == '/api/integrations/sas4/dashboard'
+              request.url.path == '/api/integrations/sas4/online-count'
                   ? {'online_users': 125}
                   : request.url.path.endsWith('/dashboard')
                   ? {
@@ -123,7 +123,7 @@ void main() {
       expect(find.text('No alerts recorded.'), findsOneWidget);
       await tester.tap(find.widgetWithText(ListTile, 'Towers'));
       await tester.pumpAndSettle();
-      expect(find.text('0 towers'), findsOneWidget);
+      expect(find.text('Places'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

@@ -36,7 +36,20 @@ class Setup(Login):
 
 class UserInput(Login):
     role: Literal["owner", "manager", "technician", "viewer"]
+    place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     _strong = field_validator("password")(password_valid)
+
+
+class PlaceInput(Strict):
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('Place name is required')
+        return value
 
 
 class TowerInput(Strict):
@@ -46,6 +59,13 @@ class TowerInput(Strict):
     location: str = Field(default="", max_length=250)
     management_ip: Optional[str] = None
     manager_id: Optional[str] = None
+    place_id: Optional[str] = None
+    api_enabled: Optional[bool] = None
+    api_username: Optional[str] = Field(default=None, max_length=128)
+    api_password: Optional[str] = Field(default=None, max_length=256)
+    api_protocol: Optional[Literal["https", "http"]] = None
+    api_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    api_verify_tls: Optional[bool] = None
     _ip = field_validator("management_ip")(ip)
 
     @model_validator(mode="after")
@@ -116,8 +136,20 @@ class DiscoveryInput(Strict):
     prefix: int = Field(default=24, ge=24, le=32)
 
 
+class SectionAccessInput(Strict):
+    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings']] = Field(max_length=10)
+    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings']]] = Field(default=None, max_length=10)
+
+    @model_validator(mode='after')
+    def edits_require_visibility(self):
+        if self.editable_sections is not None and not set(self.editable_sections).issubset(self.sections):
+            raise ValueError('Editable sections must also be visible')
+        return self
+
+
 class ManagerUpdate(Strict):
     role: Optional[Literal["manager", "technician", "viewer"]] = None
+    place_ids: Optional[list[str]] = Field(default=None, max_length=1000)
     username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
     password: Optional[str] = None
 

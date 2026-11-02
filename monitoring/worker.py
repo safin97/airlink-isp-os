@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import timedelta
+import sys
 from sqlalchemy import select, delete
 from redis import Redis
 from airlink.config import settings
@@ -10,6 +10,8 @@ from airlink.db import SessionLocal
 from airlink.models import Device, SNMPProfile, Metric, Interface, Alert, now
 from airlink.security import aware, cipher
 from .snmp import collect, interface_rate
+from airlink.device_api import collect_api
+from airlink.tower_api import configuration as tower_configuration
 
 log = logging.getLogger("airlink.monitor")
 cache = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
@@ -17,7 +19,7 @@ cache = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_time
 
 async def ping(address, retries):
     for _ in range(retries + 1):
-        proc = await asyncio.create_subprocess_exec("ping", "-n", "-c", "1", "-W", "2", address,
+        proc = await asyncio.create_subprocess_exec("ping", "-n", "-c", "1", "-W", "2000" if sys.platform == "darwin" else "2", address,
                                                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         try:
             await asyncio.wait_for(proc.wait(), timeout=4)
@@ -44,10 +46,33 @@ async def poll(device_id, semaphore):
                     profile = db.get(SNMPProfile, device.snmp_profile_id)
                     try:
                         credentials = json.loads(cipher().decrypt(profile.encrypted_credentials.encode()))
-                        values.update(await asyncio.wait_for(collect(device.ip_address, credentials, device.retries, vendor=device.vendor), timeout=45))
+                        values.update(await asyncio.wait_for(collect(device.ip_address, credentials, device.retries, vendor="auto" if device.vendor == "generic" else device.vendor), timeout=45))
                     except Exception:
                         values.update(snmp_up=False, snmp_error="SNMP unavailable; check version, credentials, ACL and supported MIBs")
+                api_config = tower_configuration(db, device.tower_id)
+                if api_config['enabled']:
+                    try:
+                        api_values = await asyncio.wait_for(collect_api(device.ip_address, api_config,
+                            vendor=values.get('detected_vendor', device.vendor), inventory=True), timeout=30)
+                        # Empty API fields must not replace useful SNMP readings.
+                        values.update({key: value for key, value in api_values.items()
+                                       if value is not None and value != [] and
+                                       (key != 'uptime_seconds' or key not in values)})
+                        values.update(api_up=True, api_status='connected')
+                    except PermissionError:
+                        values.update(api_up=False, api_status='authentication_failed')
+                    except Exception:
+                        values.update(api_up=False, api_status='failed')
                 timestamp = now()
+                # Discard results if configuration was changed or device deleted during network I/O.
+                original = (device.ip_address, device.tower_id, device.snmp_profile_id, device.vendor)
+                db.expire_all()
+                current = db.get(Device, device_id)
+                if (not current or not current.enabled or
+                    original != (current.ip_address, current.tower_id, current.snmp_profile_id, current.vendor) or
+                    tower_configuration(db, current.tower_id) != api_config):
+                    return
+                device = current
                 previous = db.scalar(select(Metric).where(Metric.device_id == device_id).order_by(Metric.collected_at.desc()).limit(1))
                 if previous and "interfaces" in values:
                     elapsed = (timestamp - aware(previous.collected_at)).total_seconds()
@@ -66,7 +91,7 @@ async def poll(device_id, semaphore):
                     obj.name = interface.get("name", index)
                     obj.speed_mbps = interface.get("speed_mbps")
                     obj.oper_status = interface.get("status")
-                up = values["icmp_up"] or values.get("snmp_up", False)
+                up = values["icmp_up"] or values.get("snmp_up", False) or values.get("api_up", False)
                 device.last_poll = timestamp
                 device.failures = 0 if up else device.failures + 1
                 if up:

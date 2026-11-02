@@ -33,6 +33,16 @@ void main() {
             'id': '1',
             'name': 'North online',
             'snmp_status': 'connected',
+            'api_status': 'connected',
+            'telemetry': {
+              'ethernet_links': [
+                {'name': 'ether1', 'speed_mbps': 1000},
+              ],
+              'signal_dbm': -62,
+              'cpu_percent': 23,
+              'memory_percent': 48,
+              'uptime_seconds': 90060,
+            },
             'tower_id': 'north',
             'ip_address': '192.0.2.1',
             'status': 'online',
@@ -80,12 +90,23 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ListTile, entry));
       await tester.pumpAndSettle();
+      if (entry == 'Towers') {
+        expect(find.text('North'), findsNothing);
+        await tester.tap(find.text('Unassigned towers'));
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text('North').first);
       await tester.pumpAndSettle();
       expect(find.text('Devices at North'), findsOneWidget);
       expect(find.text('3 devices'), findsOneWidget);
       expect(find.text('SNMP status'), findsOneWidget);
-      expect(find.text('Connected'), findsOneWidget);
+      expect(find.text('Connected'), findsNWidgets(2));
+      expect(find.text('API status'), findsOneWidget);
+      expect(find.text('ether1: 1000 Mbps'), findsOneWidget);
+      expect(find.text('-62 dBm'), findsOneWidget);
+      expect(find.text('23%'), findsOneWidget);
+      expect(find.text('48%'), findsOneWidget);
+      expect(find.text('1d 1h 1m'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
       expect(find.text('Waiting for poll'), findsOneWidget);
       for (final name in ['North online', 'North offline', 'North unknown']) {
@@ -105,6 +126,11 @@ void main() {
       );
       await tester.tap(find.widgetWithText(ListTile, entry));
       await tester.pumpAndSettle();
+      if (entry == 'Towers') {
+        expect(find.text('North'), findsNothing);
+        await tester.tap(find.text('Unassigned towers'));
+        await tester.pumpAndSettle();
+      }
       await tester.tap(find.text('North').first);
       await tester.pumpAndSettle();
       await tester.tap(
@@ -115,6 +141,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Devices at North'), findsNothing);
       await tester.tap(find.widgetWithText(ListTile, 'Towers'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Unassigned towers'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Empty tower').first);
       await tester.pumpAndSettle();

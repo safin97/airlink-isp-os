@@ -18,6 +18,8 @@ import 'payment_settings.dart';
 import 'fullscreen.dart' as fullscreen;
 import 'tower_marker.dart';
 import 'snmp_profile_dialog.dart';
+import 'system_performance.dart';
+import 'section_access.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -372,6 +374,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String? error;
   String search = '';
   String? towerFilter;
+  String? placeFilter;
   int towerOrigin = pages.indexOf('Towers');
   DateTime? observed;
   Map<String, dynamic> summary = {};
@@ -383,9 +386,31 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
   bool get writer => owner || role == 'manager';
+  bool get inventoryWriter => canEditSection(api.user!, 'towers');
+  bool get canManageSettings =>
+      owner || (role == 'manager' && hasSection(api.user!, 'settings'));
+  bool get canManageUpdates =>
+      owner || (role == 'manager' && hasSection(api.user!, 'software_updates'));
+  bool canPage(int index) => hasSection(
+    api.user!,
+    pageSections.entries.firstWhere((entry) => entry.value == pages[index]).key,
+  );
+
+  void selectAllowedPage() {
+    if (canPage(page)) return;
+    if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
+    page =
+        List.generate(pages.length, (i) => i).where(canPage).firstOrNull ?? 0;
+    towerFilter = null;
+    placeFilter = null;
+    nocExpanded = false;
+    mapExpanded = false;
+  }
+
   @override
   void initState() {
     super.initState();
+    selectAllowedPage();
     stopFullscreen = fullscreen.watchFullscreen(
       changed: (active) {
         if (!active && mounted && nocExpanded) {
@@ -420,12 +445,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   Future<void> reloadNocUsers() async {
-    if (fetchingNocUsers || !writer) return;
+    if (fetchingNocUsers || !writer || !hasSection(api.user!, 'noc')) return;
     fetchingNocUsers = true;
     int? count;
     String? message;
     try {
-      final data = await api.request('/integrations/sas4/dashboard');
+      final data = await api.request('/integrations/sas4/online-count');
       final value = data['online_users'];
       if (value is int && value >= 0) count = value;
       if (count == null) message = 'Unavailable';
@@ -455,27 +480,38 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     refreshing = true;
     if (!quiet) setState(() => loading = true);
     try {
-      final data = await Future.wait([
-        api.request('/dashboard'),
-        ...[
-          'towers',
-          'sectors',
-          'devices',
-          'alerts',
-          'links',
-          if (owner) 'users',
-          if (owner) 'snmp-profiles',
-        ].map((x) => api.request('/$x')),
-      ]);
+      if (role == 'manager') {
+        final identity = await api.request('/auth/me');
+        if (!mounted) return;
+        if (identity is Map &&
+            identity['role'] != null &&
+            jsonEncode(identity) != jsonEncode(api.user)) {
+          setState(() {
+            api.user = Map<String, dynamic>.from(identity);
+            rows = {};
+            summary = {};
+            samples = [];
+            deviceId = null;
+            selectAllowedPage();
+          });
+        }
+      }
       final names = [
         'towers',
+        'places',
         'sectors',
         'devices',
         'alerts',
         'links',
         if (owner) 'users',
-        if (owner) 'snmp-profiles',
-      ];
+        if (canManageSettings) 'snmp-profiles',
+      ].where((resource) => canReadResource(api.user!, resource)).toList();
+      final data = await Future.wait([
+        canReadResource(api.user!, 'dashboard')
+            ? api.request('/dashboard')
+            : Future<dynamic>.value(<String, dynamic>{}),
+        ...names.map((x) => api.request('/$x')),
+      ]);
       final next = <String, List<dynamic>>{};
       for (var i = 0; i < names.length; i++) {
         next[names[i]] = data[i + 1] as List<dynamic>;
@@ -494,6 +530,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         setState(() {
           if (summaryChanged) summary = nextSummary;
           if (rowsChanged) rows = next;
+          if (placeFilter != null &&
+              placeFilter != '' &&
+              !list('places').any((p) => p['id'] == placeFilter)) {
+            placeFilter = null;
+          }
           observed = DateTime.now();
           error = null;
         });
@@ -528,6 +569,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           .firstOrNull ??
       (id?.toString() ?? '—');
   Future<void> loadMetrics(String id, {bool quiet = false}) async {
+    if (!hasSection(api.user!, 'monitoring')) return;
     try {
       final data = await api.request('/devices/$id/metrics');
       if (mounted &&
@@ -553,6 +595,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   void navigate(int index) {
+    if (!canPage(index)) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     setState(() {
       page = index;
@@ -560,11 +603,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       nocExpanded = false;
       search = '';
       towerFilter = null;
+      placeFilter = null;
     });
     if (pages[index] == 'NOC Screen') unawaited(reloadNocUsers());
   }
 
   void openTowerDevices(String id) {
+    if (!hasSection(api.user!, 'towers')) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     setState(() {
       towerOrigin = page;
@@ -602,106 +647,124 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             Expanded(
               child: ListView.builder(
                 itemCount: pages.length,
-                itemBuilder: (context, i) => Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 3,
-                  ),
-                  child: Column(
-                    children: [
-                      ListTile(
-                        dense: true,
-                        selected: i == page,
-                        selectedTileColor: blue.withValues(alpha: .15),
-                        selectedColor: blue,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                itemBuilder: (context, i) =>
+                    !canPage(i) && pages[i] != 'Settings'
+                    ? const SizedBox.shrink()
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 3,
                         ),
-                        leading: Icon(icons[i], size: 22),
-                        title: AppText(pages[i]),
-                        onTap: () {
-                          navigate(i);
-                          if (Scaffold.of(context).isDrawerOpen) {
-                            Navigator.pop(context);
-                          }
-                        },
+                        child: Column(
+                          children: [
+                            if (canPage(i))
+                              ListTile(
+                                dense: true,
+                                selected: i == page,
+                                selectedTileColor: blue.withValues(alpha: .15),
+                                selectedColor: blue,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                leading: Icon(icons[i], size: 22),
+                                title: AppText(pages[i]),
+                                onTap: () {
+                                  navigate(i);
+                                  if (Scaffold.of(context).isDrawerOpen) {
+                                    Navigator.pop(context);
+                                  }
+                                },
+                              ),
+                            if (pages[i] == 'Settings')
+                              ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.account_circle_outlined,
+                                  size: 22,
+                                ),
+                                title: const AppText('My account'),
+                                onTap: () {
+                                  if (Scaffold.of(context).isDrawerOpen) {
+                                    Navigator.pop(context);
+                                  }
+                                  openAccount();
+                                },
+                              ),
+                            if (pages[i] == 'ISP Card' && page == i)
+                              for (final dashboard in [true, false])
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 24,
+                                    top: 3,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    selected: ispDashboard == dashboard,
+                                    selectedColor: blue,
+                                    selectedTileColor: blue.withValues(
+                                      alpha: .15,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    leading: Icon(
+                                      dashboard
+                                          ? Icons.space_dashboard_outlined
+                                          : Icons.people_outline,
+                                      size: 18,
+                                    ),
+                                    title: AppText(
+                                      dashboard ? 'Dashboard' : 'Users',
+                                    ),
+                                    onTap: () {
+                                      setState(() => ispDashboard = dashboard);
+                                      if (Scaffold.of(context).isDrawerOpen) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                  ),
+                                ),
+                            if (pages[i] == 'ISP Card' &&
+                                page == i &&
+                                !ispDashboard)
+                              for (final online in [false, true])
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 40,
+                                    top: 3,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    selected: ispOnline == online,
+                                    selectedColor: blue,
+                                    selectedTileColor: blue.withValues(
+                                      alpha: .15,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    leading: Icon(
+                                      online ? Icons.wifi : Icons.list_alt,
+                                      size: 16,
+                                    ),
+                                    title: AppText(
+                                      online ? 'Online users' : 'Users list',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    onTap: () {
+                                      setState(() => ispOnline = online);
+                                      if (Scaffold.of(context).isDrawerOpen) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                  ),
+                                ),
+                          ],
+                        ),
                       ),
-                      if (pages[i] == 'Settings')
-                        ListTile(
-                          dense: true,
-                          leading: const Icon(
-                            Icons.account_circle_outlined,
-                            size: 22,
-                          ),
-                          title: const AppText('My account'),
-                          onTap: () {
-                            if (Scaffold.of(context).isDrawerOpen) {
-                              Navigator.pop(context);
-                            }
-                            openAccount();
-                          },
-                        ),
-                      if (pages[i] == 'ISP Card' && page == i)
-                        for (final dashboard in [true, false])
-                          Padding(
-                            padding: const EdgeInsets.only(left: 24, top: 3),
-                            child: ListTile(
-                              dense: true,
-                              selected: ispDashboard == dashboard,
-                              selectedColor: blue,
-                              selectedTileColor: blue.withValues(alpha: .15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              leading: Icon(
-                                dashboard
-                                    ? Icons.space_dashboard_outlined
-                                    : Icons.people_outline,
-                                size: 18,
-                              ),
-                              title: AppText(dashboard ? 'Dashboard' : 'Users'),
-                              onTap: () {
-                                setState(() => ispDashboard = dashboard);
-                                if (Scaffold.of(context).isDrawerOpen) {
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                          ),
-                      if (pages[i] == 'ISP Card' && page == i && !ispDashboard)
-                        for (final online in [false, true])
-                          Padding(
-                            padding: const EdgeInsets.only(left: 40, top: 3),
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              selected: ispOnline == online,
-                              selectedColor: blue,
-                              selectedTileColor: blue.withValues(alpha: .15),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              leading: Icon(
-                                online ? Icons.wifi : Icons.list_alt,
-                                size: 16,
-                              ),
-                              title: AppText(
-                                online ? 'Online users' : 'Users list',
-                                style: const TextStyle(fontSize: 13),
-                              ),
-                              onTap: () {
-                                setState(() => ispOnline = online);
-                                if (Scaffold.of(context).isDrawerOpen) {
-                                  Navigator.pop(context);
-                                }
-                              },
-                            ),
-                          ),
-                    ],
-                  ),
-                ),
               ),
             ),
             Divider(color: themeColor(0xff20334e, 0xffd6dfeb)),
@@ -804,7 +867,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                     ),
                   if (loading) const LinearProgressIndicator(minHeight: 2),
                   Expanded(
-                    child: pages[page] == 'Network Map'
+                    child: pages[page] == 'Network Map' && canPage(page)
                         ? networkMap()
                         : SingleChildScrollView(
                             padding: EdgeInsets.all(wide ? 28 : 16),
@@ -820,6 +883,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     },
   );
   Widget content() {
+    if (!canPage(page)) {
+      return notice(
+        'No sections assigned',
+        'The owner can enable sections for your account. My account is still available.',
+      );
+    }
     switch (pages[page]) {
       case 'Dashboard':
         return dashboard();
@@ -860,11 +929,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       case 'Reports':
         return reports();
       case 'Software Updates':
-        return owner
+        return canManageUpdates
             ? updates()
             : notice(
                 'Owner access required',
-                'Software updates require owner permission.',
+                'Software Updates access must be enabled by the owner.',
               );
       default:
         return settings();
@@ -978,6 +1047,100 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
+  Widget deviceApiStatus(Map<String, dynamic> device) {
+    final status = device['api_status'] ?? 'not_configured';
+    final (label, hint, color) = switch (status) {
+      'connected' => (
+        'Connected',
+        'The latest device API poll succeeded.',
+        green,
+      ),
+      'authentication_failed' => (
+        'Login rejected',
+        'Check the API username, password and read permissions in Edit tower.',
+        red,
+      ),
+      'failed' => (
+        'Failed',
+        'Check the device API service, port, HTTPS certificate and network access.',
+        red,
+      ),
+      'disabled' => (
+        'Disabled',
+        'Monitoring is disabled for this device.',
+        muted,
+      ),
+      'stale' => ('Stale', 'Check the monitoring service.', orange),
+      'pending' => (
+        'Waiting for poll',
+        'Waiting for the next device API poll.',
+        muted,
+      ),
+      _ => (
+        'Not configured',
+        'Configure device API access in Add tower or Edit tower.',
+        muted,
+      ),
+    };
+    return Tooltip(
+      message: tr(hint),
+      child: AppText(label, style: TextStyle(color: color, fontSize: 12)),
+    );
+  }
+
+  Widget deviceReading(Map<String, dynamic> device, String field) {
+    final data = Map<String, dynamic>.from(device['telemetry'] ?? {});
+    String reading = 'Unavailable';
+    String number(num value) => value == value.roundToDouble()
+        ? value.toInt().toString()
+        : value.toStringAsFixed(1);
+    if (field == 'ethernet_links') {
+      final links = (data[field] as List? ?? []).whereType<Map>();
+      if (links.isNotEmpty) {
+        reading = links
+            .map((p) => '${p['name']}: ${number(p['speed_mbps'] as num)} Mbps')
+            .join(' · ');
+      }
+    } else if (field == 'wireless') {
+      final parts = <String>[];
+      final signal = data['signal_dbm'] ?? data['weakest_signal_dbm'];
+      if (signal is num) {
+        parts.add(
+          '${data['signal_dbm'] == null ? 'Weakest: ' : ''}${number(signal)} dBm',
+        );
+      }
+      if (data['wireless_clients'] is num) {
+        parts.add('${number(data['wireless_clients'])} clients');
+      }
+      if (data['radio_frequencies_mhz'] is List &&
+          (data['radio_frequencies_mhz'] as List).isNotEmpty) {
+        parts.add('${(data['radio_frequencies_mhz'] as List).join(', ')} MHz');
+      }
+      if (parts.isNotEmpty) reading = parts.join(' · ');
+    } else if (field == 'uptime_seconds' && data[field] is num) {
+      final seconds = (data[field] as num).toInt();
+      reading =
+          '${seconds ~/ 86400}d ${(seconds % 86400) ~/ 3600}h ${(seconds % 3600) ~/ 60}m';
+    } else if (data[field] is num) {
+      reading = '${number(data[field])}%';
+    }
+    final details = [
+      reading,
+      if (data['telemetry_source'] != null) data['telemetry_source'],
+      if (data['device_model'] != null) data['device_model'],
+      if (data['firmware_version'] != null) data['firmware_version'],
+      if (device['telemetry_at'] != null)
+        'Collected: ${device['telemetry_at']}',
+    ].join('\n');
+    return Tooltip(
+      message: details,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Text(reading, maxLines: 2, overflow: TextOverflow.ellipsis),
+      ),
+    );
+  }
+
   Widget dashboard() {
     final cards = [
       ['Total towers', 'towers', Icons.cell_tower],
@@ -1074,6 +1237,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           },
         ),
         const SizedBox(height: 24),
+        SystemPerformance(
+          data: Map<String, dynamic>.from(summary['system'] ?? {}),
+        ),
+        const SizedBox(height: 24),
         section(
           'Network health',
           Column(
@@ -1101,15 +1268,34 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           ),
         ),
         const SizedBox(height: 24),
-        monitoring(),
-        const SizedBox(height: 24),
         alertsView(recent: true),
       ],
     );
   }
 
   Widget towersView() {
-    final towers = filtered('towers');
+    final towers = filtered('towers')
+        .where((t) => t['place_id'] == (placeFilter == '' ? null : placeFilter))
+        .toList();
+    final unassigned = list(
+      'towers',
+    ).where((t) => t['place_id'] == null).length;
+    final places =
+        <dynamic>[
+              ...list('places'),
+              if (unassigned > 0)
+                {
+                  'id': '',
+                  'name': 'Unassigned towers',
+                  'tower_count': unassigned,
+                },
+            ]
+            .where(
+              (p) => p['name'].toString().toLowerCase().contains(
+                search.toLowerCase(),
+              ),
+            )
+            .toList();
     final deviceCounts = <dynamic, int>{};
     final onlineCounts = <dynamic, int>{};
     final offlineCounts = <dynamic, int>{};
@@ -1133,190 +1319,327 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        toolbar('towers'),
-        Text(
-          '${towers.length} ${towers.length == 1 ? 'tower' : 'towers'}',
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 8),
-        AppText(
-          'Click a tower to view all its devices.',
-          style: TextStyle(color: muted),
-        ),
-        const SizedBox(height: 20),
-        if (towers.isEmpty)
-          card(
-            Text(
-              search.isEmpty
-                  ? 'No towers to display yet.'
-                  : 'No towers match your search.',
-              style: TextStyle(color: muted),
-            ),
-          )
-        else
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final size = constraints.maxWidth.clamp(0.0, 240.0).toDouble();
-              return Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: towers.map((tower) {
-                  final color = switch (tower['status']) {
-                    'online' => green,
-                    'offline' => red,
-                    'warning' => orange,
-                    _ => muted,
-                  };
-                  final count = deviceCounts[tower['id']] ?? 0;
-                  final online = onlineCounts[tower['id']] ?? 0;
-                  final offline = offlineCounts[tower['id']] ?? 0;
-                  return SizedBox(
-                    key: ValueKey('tower-card-${tower['id']}'),
-                    width: size,
-                    height: size,
-                    child: Material(
-                      color: panel,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(color: color.withValues(alpha: .35)),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: InkWell(
-                        onTap: () => openTowerDevices(tower['id']),
-                        child: Padding(
-                          padding: const EdgeInsets.all(14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  TowerMarker(statusColor: color),
-                                  const Spacer(),
-                                  badge(tower['status']),
-                                  if (writer)
-                                    PopupMenuButton<String>(
-                                      tooltip: 'Tower actions',
-                                      icon: Icon(
-                                        Icons.more_vert,
-                                        size: 20,
-                                        color: muted,
-                                      ),
-                                      onSelected: (action) {
-                                        if (action == 'discover') {
-                                          discoverTower(
-                                            Map<String, dynamic>.from(tower),
-                                          );
-                                        } else if (action == 'edit') {
-                                          edit(
-                                            'towers',
-                                            existing: Map<String, dynamic>.from(
-                                              tower,
-                                            ),
-                                          );
-                                        } else if (action == 'delete') {
-                                          remove('towers', tower);
-                                        }
-                                      },
-                                      itemBuilder: (_) => [
-                                        const PopupMenuItem(
-                                          value: 'discover',
-                                          child: AppText('Discover devices'),
-                                        ),
-                                        const PopupMenuItem(
-                                          value: 'edit',
-                                          child: AppText('Edit tower'),
-                                        ),
-                                        if (owner)
-                                          const PopupMenuItem(
-                                            value: 'delete',
-                                            child: AppText('Delete tower'),
-                                          ),
-                                      ],
+        if (placeFilter == null) ...[
+          Row(
+            children: [
+              const Expanded(
+                child: AppText(
+                  'Places',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (owner)
+                FilledButton.icon(
+                  onPressed: () => edit('places'),
+                  icon: const Icon(Icons.add_location_alt_outlined),
+                  label: const AppText('Add place'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          toolbar('places'),
+          if (places.isNotEmpty)
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: places
+                  .map(
+                    (place) => SizedBox(
+                      width: 220,
+                      height: 150,
+                      child: Card(
+                        margin: EdgeInsets.zero,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => setState(() {
+                            placeFilter = place['id'];
+                            search = '';
+                          }),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.location_on_outlined,
+                                      color: blue,
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Tooltip(
-                                message: '${tower['name']}',
-                                child: Text(
-                                  '${tower['name']}',
+                                    const Spacer(),
+                                    if (owner && place['id'] != '')
+                                      PopupMenuButton<String>(
+                                        tooltip: 'Place actions',
+                                        onSelected: (action) {
+                                          if (action == 'edit') {
+                                            edit(
+                                              'places',
+                                              existing:
+                                                  Map<String, dynamic>.from(
+                                                    place,
+                                                  ),
+                                            );
+                                          } else {
+                                            remove('places', place);
+                                          }
+                                        },
+                                        itemBuilder: (_) => const [
+                                          PopupMenuItem(
+                                            value: 'edit',
+                                            child: AppText('Edit place'),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: AppText('Delete place'),
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                                Text(
+                                  place['name'],
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 20,
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                (tower['location']?.toString().isNotEmpty ??
-                                        false)
-                                    ? tower['location']
-                                    : 'No location set',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: muted),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                tower['management_ip']?.toString() ??
-                                    'No management IP',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: muted, fontSize: 12),
-                              ),
-                              const Spacer(),
-                              Divider(
-                                color: themeColor(0xff20334e, 0xffd6dfeb),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  for (final stat in [
-                                    (
-                                      count,
-                                      'Devices',
-                                      themeColor(0xffffffff, 0xff172b4d),
-                                    ),
-                                    (online, 'Online', green),
-                                    (offline, 'Offline', red),
-                                  ])
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            '${stat.$1}',
-                                            style: TextStyle(
-                                              color: stat.$3,
-                                              fontSize: 20,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Text(
-                                            stat.$2,
-                                            style: TextStyle(
-                                              color: muted,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
+                                const Spacer(),
+                                Text(
+                                  '${place['tower_count'] ?? 0} towers',
+                                  style: TextStyle(color: muted),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  );
-                }).toList(),
-              );
-            },
+                  )
+                  .toList(),
+            )
+          else
+            AppText(
+              'Add a place to group your towers.',
+              style: TextStyle(color: muted),
+            ),
+        ] else ...[
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                placeFilter = null;
+                search = '';
+              }),
+              icon: const Icon(Icons.arrow_back),
+              label: const AppText('Back to places'),
+            ),
           ),
+          Text(
+            placeFilter == ''
+                ? 'Unassigned towers'
+                : nameOf('places', placeFilter),
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (placeFilter != null) ...[
+          toolbar('towers'),
+          Text(
+            '${towers.length} ${towers.length == 1 ? 'tower' : 'towers'}',
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          AppText(
+            'Click a tower to view all its devices.',
+            style: TextStyle(color: muted),
+          ),
+          const SizedBox(height: 20),
+          if (towers.isEmpty)
+            card(
+              Text(
+                search.isEmpty
+                    ? 'No towers to display yet.'
+                    : 'No towers match your search.',
+                style: TextStyle(color: muted),
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final size = constraints.maxWidth.clamp(0.0, 240.0).toDouble();
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: towers.map((tower) {
+                    final color = switch (tower['status']) {
+                      'online' => green,
+                      'offline' => red,
+                      'warning' => orange,
+                      _ => muted,
+                    };
+                    final count = deviceCounts[tower['id']] ?? 0;
+                    final online = onlineCounts[tower['id']] ?? 0;
+                    final offline = offlineCounts[tower['id']] ?? 0;
+                    return SizedBox(
+                      key: ValueKey('tower-card-${tower['id']}'),
+                      width: size,
+                      height: size,
+                      child: Material(
+                        color: panel,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(color: color.withValues(alpha: .35)),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => openTowerDevices(tower['id']),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    TowerMarker(statusColor: color),
+                                    const Spacer(),
+                                    badge(tower['status']),
+                                    if (inventoryWriter)
+                                      SizedBox(
+                                        width: 32,
+                                        height: 36,
+                                        child: PopupMenuButton<String>(
+                                          tooltip: 'Tower actions',
+                                          padding: EdgeInsets.zero,
+                                          icon: Icon(
+                                            Icons.more_vert,
+                                            size: 20,
+                                            color: muted,
+                                          ),
+                                          onSelected: (action) {
+                                            if (action == 'discover') {
+                                              discoverTower(
+                                                Map<String, dynamic>.from(
+                                                  tower,
+                                                ),
+                                              );
+                                            } else if (action == 'edit') {
+                                              edit(
+                                                'towers',
+                                                existing:
+                                                    Map<String, dynamic>.from(
+                                                      tower,
+                                                    ),
+                                              );
+                                            } else if (action == 'delete') {
+                                              remove('towers', tower);
+                                            }
+                                          },
+                                          itemBuilder: (_) => [
+                                            const PopupMenuItem(
+                                              value: 'discover',
+                                              child: AppText(
+                                                'Discover devices',
+                                              ),
+                                            ),
+                                            const PopupMenuItem(
+                                              value: 'edit',
+                                              child: AppText('Edit tower'),
+                                            ),
+                                            if (owner)
+                                              const PopupMenuItem(
+                                                value: 'delete',
+                                                child: AppText('Delete tower'),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Tooltip(
+                                  message: '${tower['name']}',
+                                  child: Text(
+                                    '${tower['name']}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  (tower['location']?.toString().isNotEmpty ??
+                                          false)
+                                      ? tower['location']
+                                      : 'No location set',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: muted),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  tower['management_ip']?.toString() ??
+                                      'No management IP',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: muted, fontSize: 12),
+                                ),
+                                const Spacer(),
+                                Divider(
+                                  color: themeColor(0xff20334e, 0xffd6dfeb),
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    for (final stat in [
+                                      (
+                                        count,
+                                        'Devices',
+                                        themeColor(0xffffffff, 0xff172b4d),
+                                      ),
+                                      (online, 'Online', green),
+                                      (offline, 'Offline', red),
+                                    ])
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '${stat.$1}',
+                                              style: TextStyle(
+                                                color: stat.$3,
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            Text(
+                                              stat.$2,
+                                              style: TextStyle(
+                                                color: muted,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+        ],
       ],
     );
   }
@@ -1331,7 +1654,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         SizedBox(
           width: 300,
           child: TextField(
-            key: ValueKey('$resource:$towerFilter'),
+            key: ValueKey('$resource:$towerFilter:$placeFilter'),
             decoration: InputDecoration(
               prefixIcon: Icon(Icons.search),
               hintText: tr('Search inventory'),
@@ -1340,8 +1663,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           ),
         ),
         if ((resource == 'users' && owner) ||
-            (resource == 'towers' && owner) ||
-            (['devices', 'sectors'].contains(resource) && writer))
+            (resource == 'towers' &&
+                owner &&
+                placeFilter != null &&
+                placeFilter != '') ||
+            (['devices', 'sectors'].contains(resource) && inventoryWriter))
           FilledButton.icon(
             onPressed: () => edit(resource),
             icon: const Icon(Icons.add, size: 18),
@@ -1358,7 +1684,20 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       'towers' => ['Name', 'Location', 'Management IP', 'Sectors', 'Status'],
       'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
       'users' => ['Username', 'Role', 'Active', 'Created'],
-      _ => ['Device', 'IP address', 'Vendor', 'Tower', 'Status', 'SNMP status'],
+      _ => [
+        'Device',
+        'IP address',
+        'Vendor',
+        'Tower',
+        'Status',
+        'SNMP status',
+        'API status',
+        'Ethernet speed',
+        'Wireless',
+        'CPU',
+        'Memory',
+        'Uptime',
+      ],
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1370,7 +1709,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               TextButton.icon(
-                onPressed: () => navigate(towerOrigin),
+                onPressed: () {
+                  final place = placeFilter;
+                  navigate(towerOrigin);
+                  if (towerOrigin == pages.indexOf('Towers')) {
+                    setState(() => placeFilter = place);
+                  }
+                },
                 icon: const Icon(Icons.arrow_back),
                 label: Text(
                   towerOrigin == pages.indexOf('NOC Screen')
@@ -1442,6 +1787,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           nameOf('towers', row['tower_id']),
                           badge(row['status']),
                           snmpStatus(row),
+                          deviceApiStatus(row),
+                          deviceReading(row, 'ethernet_links'),
+                          deviceReading(row, 'wireless'),
+                          deviceReading(row, 'cpu_percent'),
+                          deviceReading(row, 'memory_percent'),
+                          deviceReading(row, 'uptime_seconds'),
                         ],
                       };
                       return DataRow(
@@ -1468,7 +1819,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       color: blue,
                                     ),
                                   ),
-                                if (resource == 'devices')
+                                if (resource == 'devices' &&
+                                    hasSection(api.user!, 'monitoring'))
                                   IconButton(
                                     tooltip: 'Monitoring history',
                                     onPressed: () {
@@ -1480,7 +1832,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       size: 19,
                                     ),
                                   ),
-                                if (resource != 'users' && writer)
+                                if (resource != 'users' && inventoryWriter)
                                   IconButton(
                                     tooltip: 'Edit',
                                     onPressed: () => edit(
@@ -1495,6 +1847,30 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                 if (resource == 'users' &&
                                     owner &&
                                     row['role'] != 'owner') ...[
+                                  if (row['role'] == 'manager')
+                                    TextButton.icon(
+                                      label: const AppText('Section access'),
+                                      icon: const Icon(
+                                        Icons.admin_panel_settings_outlined,
+                                        size: 19,
+                                      ),
+                                      onPressed: () async {
+                                        final saved = await showDialog<bool>(
+                                          context: context,
+                                          barrierDismissible: false,
+                                          builder: (_) => SectionAccessDialog(
+                                            api: api,
+                                            account: Map<String, dynamic>.from(
+                                              row,
+                                            ),
+                                          ),
+                                        );
+                                        if (saved == true && mounted) {
+                                          await reload();
+                                          toast('Section access saved');
+                                        }
+                                      },
+                                    ),
                                   IconButton(
                                     tooltip: 'Edit username, password or role',
                                     onPressed: () => editAccount(row),
@@ -1533,7 +1909,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   ),
                                 if (resource != 'users' &&
                                     ((resource == 'towers' && owner) ||
-                                        (resource != 'towers' && writer)))
+                                        (resource != 'towers' &&
+                                            inventoryWriter)))
                                   IconButton(
                                     tooltip: 'Delete',
                                     onPressed: () => remove(resource, row),
@@ -1583,8 +1960,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'Confirm new password',
             kind: 'password',
           ),
+          managerPlacesField(),
         ],
-        initial: {'username': row['username'], 'role': row['role']},
+        initial: {
+          'username': row['username'],
+          'role': row['role'],
+          'place_ids': row['place_ids'] ?? [],
+        },
         save: (data) async {
           if (data['password'] != data['confirm_password']) {
             throw const FormatException('New passwords do not match.');
@@ -1596,6 +1978,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               'username': data['username'],
               'password': data['password'],
               'role': data['role'],
+              if (data.containsKey('place_ids')) 'place_ids': data['place_ids'],
             },
           );
         },
@@ -1736,10 +2119,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         ),
     ];
     Map<String, dynamic>? savedTower;
+    String? savedPlace;
     bool discover = false;
     final initial = <String, dynamic>{
       for (final f in specs) f.key: existing?[f.key] ?? f.initial,
     };
+    if (resource == 'towers' && existing == null) {
+      initial['place_id'] = placeFilter;
+    }
     if (resource == 'towers' &&
         existing?['latitude'] != null &&
         existing?['longitude'] != null) {
@@ -1749,7 +2136,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       context: context,
       builder: (context) => ResourceDialog(
         title:
-            '${existing == null ? 'Add' : 'Edit'} ${resource == 'users' ? 'account' : resource}',
+            '${existing == null ? 'Add' : 'Edit'} ${resource == 'users'
+                ? 'account'
+                : resource == 'places'
+                ? 'place'
+                : resource}',
         fields: specs,
         initial: initial,
         save: (data) async {
@@ -1786,6 +2177,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             method: existing == null ? 'POST' : 'PUT',
             body: payload,
           );
+          if (resource == 'places') savedPlace = saved['id'];
           if (resource == 'towers') {
             savedTower = Map<String, dynamic>.from(saved);
           }
@@ -1794,11 +2186,30 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
     if (result != null) {
       await reload();
+      if (mounted &&
+          resource == 'places' &&
+          existing == null &&
+          savedPlace != null) {
+        setState(() {
+          placeFilter = savedPlace;
+          search = '';
+        });
+      }
       if (mounted && discover && savedTower != null) {
         await discoverTower(savedTower!);
       }
     }
   }
+
+  FieldSpec managerPlacesField() => FieldSpec(
+    'place_ids',
+    'Assigned places',
+    kind: 'multiselect',
+    initial: const <String>[],
+    options: list(
+      'places',
+    ).map((place) => Option(place['id'], place['name'])).toList(),
+  );
 
   List<FieldSpec> fields(String resource) {
     List<Option> options(String kind, {bool nullable = false}) => [
@@ -1807,25 +2218,58 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     ];
     final towers = options('towers');
     switch (resource) {
+      case 'places':
+        return [FieldSpec('name', 'Place name', required: true)];
       case 'towers':
         return [
           FieldSpec('name', 'Tower name', required: true),
+          if (owner)
+            FieldSpec(
+              'place_id',
+              'Place',
+              options: options('places', nullable: true),
+            ),
           FieldSpec('location', 'Location', initial: ''),
           FieldSpec('gps', 'GPS (latitude, longitude)'),
           FieldSpec('management_ip', 'Management IP'),
-          if (owner)
+          if (owner) ...[
             FieldSpec(
-              'manager_id',
-              'Assigned manager',
+              'api_enabled',
+              'Monitor tower devices using API (RouterOS REST / airOS)',
+              kind: 'bool',
+              initial: false,
+            ),
+            FieldSpec(
+              'api_username',
+              'Device API username (all devices in this tower)',
+              initial: '',
+            ),
+            FieldSpec(
+              'api_password',
+              'Device API password (blank keeps saved password)',
+              kind: 'password',
+            ),
+            FieldSpec(
+              'api_protocol',
+              'Device API connection',
+              initial: 'https',
               options: [
-                const Option('', 'Unassigned'),
-                ...list('users')
-                    .where((u) => u['role'] == 'manager' && u['active'] == true)
-                    .map((u) => Option(u['id'], u['username'])),
+                const Option('https', 'HTTPS'),
+                const Option('http', 'HTTP (unencrypted)'),
               ],
-            )
-          else
-            FieldSpec('manager_id', 'Assigned manager ID'),
+            ),
+            FieldSpec(
+              'api_port',
+              'Device API port (blank uses 443 / 80)',
+              kind: 'int',
+            ),
+            FieldSpec(
+              'api_verify_tls',
+              'Verify device HTTPS certificate',
+              kind: 'bool',
+              initial: true,
+            ),
+          ],
         ];
       case 'sectors':
         return [
@@ -1862,6 +2306,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               Option('owner', 'Owner'),
             ],
           ),
+          managerPlacesField(),
         ];
       default:
         return [
@@ -2055,7 +2500,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                             : 'Open'}',
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
-                      trailing: role != 'viewer' && a['acknowledged_by'] == null
+                      trailing:
+                          role != 'viewer' &&
+                              (role == 'technician' ||
+                                  canEditSection(api.user!, 'alerts')) &&
+                              a['acknowledged_by'] == null
                           ? TextButton(
                               onPressed: () async {
                                 try {
@@ -2353,7 +2802,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         'Session & permissions',
         'Signed in as ${api.user!['username']} ($role). Access is enforced by the server on every request.',
       ),
-      if (owner) ...[
+      if (canManageSettings) ...[
         const SizedBox(height: 24),
         card(PaymentSettings(api: api, initiallyExpanded: true)),
         const SizedBox(height: 24),
@@ -2374,7 +2823,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   subtitle: Text('SNMP v${p['version'] ?? '3'}'),
                 ),
               FilledButton.icon(
-                onPressed: () => edit('snmp-profiles'),
+                onPressed: canEditSection(api.user!, 'settings')
+                    ? () => edit('snmp-profiles')
+                    : null,
                 icon: const Icon(Icons.add),
                 label: const AppText('Add SNMP profile'),
               ),
@@ -2471,6 +2922,7 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
   final form = GlobalKey<FormState>();
   final controls = <String, TextEditingController>{};
   final values = <String, dynamic>{};
+  final changedSelections = <String>{};
   bool busy = false;
   String? error;
   @override
@@ -2500,7 +2952,12 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
     try {
       final data = <String, dynamic>{};
       for (final f in widget.fields) {
-        if (f.kind == 'bool' || f.options != null) {
+        if (f.kind == 'multiselect') {
+          if (values['role'] == 'manager' &&
+              changedSelections.contains(f.key)) {
+            data[f.key] = values[f.key];
+          }
+        } else if (f.kind == 'bool' || f.options != null) {
           data[f.key] = values[f.key] == '' ? null : values[f.key];
         } else {
           final text = controls[f.key]!.text;
@@ -2534,60 +2991,101 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final f in widget.fields)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: f.kind == 'bool'
-                      ? SwitchListTile(
-                          title: AppText(f.label),
-                          value: values[f.key] == true,
-                          onChanged: (v) => setState(() => values[f.key] = v),
-                        )
-                      : f.options != null
-                      ? DropdownButtonFormField<String>(
-                          initialValue:
-                              f.options!.any((o) => o.value == values[f.key])
-                              ? values[f.key]
-                              : null,
-                          isExpanded: true,
-                          decoration: InputDecoration(labelText: tr(f.label)),
-                          items: f.options!
-                              .map(
-                                (o) => DropdownMenuItem(
-                                  value: o.value,
-                                  child: Text(o.label),
+                if (f.kind != 'multiselect' || values['role'] == 'manager')
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: f.kind == 'multiselect'
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AppText(
+                                f.label,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
                                 ),
-                              )
-                              .toList(),
-                          validator: (v) =>
-                              f.required && (v == null || v.isEmpty)
-                              ? 'Required'
-                              : null,
-                          onChanged: (v) => values[f.key] = v,
-                        )
-                      : TextFormField(
-                          controller: controls[f.key],
-                          obscureText: f.kind == 'password',
-                          decoration: InputDecoration(labelText: tr(f.label)),
-                          validator: (v) {
-                            if (f.required && (v == null || v.isEmpty)) {
-                              return 'Required';
-                            }
-                            if (v != null &&
-                                v.isNotEmpty &&
-                                f.kind == 'number' &&
-                                double.tryParse(v) == null) {
-                              return 'Enter a number';
-                            }
-                            if (v != null &&
-                                v.isNotEmpty &&
-                                f.kind == 'int' &&
-                                int.tryParse(v) == null) {
-                              return 'Enter an integer';
-                            }
-                            return null;
-                          },
-                        ),
-                ),
+                              ),
+                              const AppText(
+                                'Includes all current and future towers in each selected place. Changing this selection replaces previous individual tower assignments.',
+                              ),
+                              if (f.options!.isEmpty)
+                                const AppText('Add places in Towers first.'),
+                              for (final option in f.options!)
+                                CheckboxListTile(
+                                  title: Text(option.label),
+                                  contentPadding: EdgeInsets.zero,
+                                  controlAffinity:
+                                      ListTileControlAffinity.leading,
+                                  value: (values[f.key] as List? ?? [])
+                                      .contains(option.value),
+                                  onChanged: busy
+                                      ? null
+                                      : (selected) => setState(() {
+                                          final selection = List<String>.from(
+                                            values[f.key] ?? [],
+                                          );
+                                          if (selected == true) {
+                                            selection.add(option.value);
+                                          } else {
+                                            selection.remove(option.value);
+                                          }
+                                          values[f.key] = selection;
+                                          changedSelections.add(f.key);
+                                        }),
+                                ),
+                            ],
+                          )
+                        : f.kind == 'bool'
+                        ? SwitchListTile(
+                            title: AppText(f.label),
+                            value: values[f.key] == true,
+                            onChanged: (v) => setState(() => values[f.key] = v),
+                          )
+                        : f.options != null
+                        ? DropdownButtonFormField<String>(
+                            initialValue:
+                                f.options!.any((o) => o.value == values[f.key])
+                                ? values[f.key]
+                                : null,
+                            isExpanded: true,
+                            decoration: InputDecoration(labelText: tr(f.label)),
+                            items: f.options!
+                                .map(
+                                  (o) => DropdownMenuItem(
+                                    value: o.value,
+                                    child: Text(o.label),
+                                  ),
+                                )
+                                .toList(),
+                            validator: (v) =>
+                                f.required && (v == null || v.isEmpty)
+                                ? 'Required'
+                                : null,
+                            onChanged: (v) => setState(() => values[f.key] = v),
+                          )
+                        : TextFormField(
+                            controller: controls[f.key],
+                            obscureText: f.kind == 'password',
+                            decoration: InputDecoration(labelText: tr(f.label)),
+                            validator: (v) {
+                              if (f.required && (v == null || v.isEmpty)) {
+                                return 'Required';
+                              }
+                              if (v != null &&
+                                  v.isNotEmpty &&
+                                  f.kind == 'number' &&
+                                  double.tryParse(v) == null) {
+                                return 'Enter a number';
+                              }
+                              if (v != null &&
+                                  v.isNotEmpty &&
+                                  f.kind == 'int' &&
+                                  int.tryParse(v) == null) {
+                                return 'Enter an integer';
+                              }
+                              return null;
+                            },
+                          ),
+                  ),
               if (error != null) Text(error!, style: TextStyle(color: red)),
             ],
           ),
@@ -2616,6 +3114,7 @@ class NetworkSettings extends StatefulWidget {
 
 class _NetworkSettingsState extends State<NetworkSettings>
     with LanguageRebuild {
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'settings');
   final fields = {
     for (final x in [
       'interface',
@@ -2733,7 +3232,7 @@ class _NetworkSettingsState extends State<NetworkSettings>
                 child: AppText('Manual static IPv4'),
               ),
             ],
-            onChanged: (v) => setState(() => method = v!),
+            onChanged: canEdit ? (v) => setState(() => method = v!) : null,
             decoration: InputDecoration(labelText: tr('Address method')),
           ),
           const SizedBox(height: 16),
@@ -2756,6 +3255,7 @@ class _NetworkSettingsState extends State<NetworkSettings>
                   width: 250,
                   child: TextField(
                     controller: fields[key],
+                    readOnly: !canEdit,
                     decoration: InputDecoration(labelText: tr(key)),
                   ),
                 ),
@@ -2776,7 +3276,8 @@ class _NetworkSettingsState extends State<NetworkSettings>
               ])
                 OutlinedButton(
                   onPressed:
-                      busy ||
+                      !canEdit ||
+                          busy ||
                           (['confirm', 'restore'].contains(pair[0]) &&
                               checkpoint == null)
                       ? null

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from types import SimpleNamespace
+import pytest
 
 from airlink.client_telemetry import attach_telemetry
 from airlink.db import SessionLocal
@@ -7,9 +8,17 @@ from airlink.models import Device, Metric, now
 from test_api import user, tower, device
 
 
-def test_online_customer_telemetry_is_scoped_and_fresh(client, owner):
+@pytest.mark.parametrize('assignment', ['tower', 'place'])
+def test_online_customer_telemetry_is_scoped_and_fresh(client, owner, assignment):
     manager_id, _ = user(client, owner, 'manager')
     own = tower(client, owner, 'Own', manager=manager_id)
+    if assignment == 'place':
+        from test_places import place
+        pid = place(client, owner)
+        assert client.put('/api/towers/' + own, headers=owner,
+                          json={'name': 'Own', 'place_id': pid}).status_code == 200
+        assert client.put('/api/users/' + manager_id, headers=owner,
+                          json={'username': 'manager', 'place_ids': [pid]}).status_code == 200
     other = tower(client, owner, 'Other')
     did = device(client, owner, own)
     other_id = device(client, owner, other, '192.0.2.2')

@@ -5,9 +5,10 @@ import jwt
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import VerificationError, InvalidHashError
 from cryptography.fernet import Fernet
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .config import settings
+from .section_access import enforce_request, require_any
 from .db import get_db
 from .models import User, LoginSession, RefreshToken, now
 
@@ -65,16 +66,33 @@ def resolve_user(token, db):
         raise HTTPException(401, "Session expired; sign in again")
 
 
-def current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer), db=Depends(get_db)):
+def current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(bearer), db=Depends(get_db)):
     if not credentials:
         raise HTTPException(401, "Sign in required")
-    return resolve_user(credentials.credentials, db)
+    user = resolve_user(credentials.credentials, db)
+    enforce_request(user, request.method, request.url.path)
+    return user
 
 
 def owner(user=Depends(current_user)):
     if user.role != "owner":
         raise HTTPException(403, "Owner access required")
     return user
+
+
+def delegated_section(section):
+    def access(user=Depends(current_user)):
+        if user.role == 'owner':
+            return user
+        if user.role != 'manager':
+            raise HTTPException(403, 'Owner or authorized manager access required')
+        require_any(user, (section,))
+        return user
+    return access
+
+
+settings_access = delegated_section('settings')
+updates_access = delegated_section('software_updates')
 
 
 def cipher():

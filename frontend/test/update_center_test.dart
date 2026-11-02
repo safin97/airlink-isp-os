@@ -8,6 +8,7 @@ import 'package:airlink_isp_os/update_center.dart';
 
 void main() {
   Future<void> mount(WidgetTester tester, Api api) async {
+    api.user ??= {'role': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(

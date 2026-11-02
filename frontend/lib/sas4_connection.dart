@@ -2,6 +2,7 @@ import 'app_theme.dart';
 import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'section_access.dart';
 
 class Sas4Connection extends StatefulWidget {
   final Api api;
@@ -11,6 +12,9 @@ class Sas4Connection extends StatefulWidget {
 }
 
 class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
+  bool get canEdit =>
+      canEditSection(widget.api.user ?? {}, 'isp_card') ||
+      canEditSection(widget.api.user ?? {}, 'noc');
   final username = TextEditingController();
   final password = TextEditingController();
   final form = GlobalKey<FormState>();
@@ -48,6 +52,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
   }
 
   Future<void> save() async {
+    if (!canEdit) return;
     if (!form.currentState!.validate()) return;
     setState(() {
       busy = true;
@@ -69,13 +74,17 @@ class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
         password.clear();
         message = 'Connection saved. Checking SAS4…';
       });
+      final clientsAllowed = hasSection(widget.api.user!, 'isp_card');
       final data = await widget.api.request(
-        '/integrations/sas4/clients?page=1',
+        clientsAllowed
+            ? '/integrations/sas4/clients?page=1'
+            : '/integrations/sas4/online-count',
       );
       if (mounted) {
         setState(
-          () => message =
-              'Connected. ${data['total']} clients available in ISP Card.',
+          () => message = clientsAllowed
+              ? 'Connected. ${data['total']} clients available in ISP Card.'
+              : 'Connected. Online users: ${data['online_users'] ?? 'Unavailable'}.',
         );
       }
     } catch (e) {
@@ -108,7 +117,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
         const SizedBox(height: 16),
         TextFormField(
           controller: username,
-          enabled: !busy,
+          enabled: !busy && canEdit,
           decoration: InputDecoration(labelText: tr('SAS4 manager username')),
           validator: (value) =>
               value == null || value.trim().isEmpty ? 'Required' : null,
@@ -116,7 +125,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
         const SizedBox(height: 16),
         TextFormField(
           controller: password,
-          enabled: !busy,
+          enabled: !busy && canEdit,
           obscureText: true,
           decoration: InputDecoration(
             labelText: tr('SAS4 manager password'),
@@ -130,7 +139,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          onPressed: busy ? null : save,
+          onPressed: busy || !canEdit ? null : save,
           icon: const Icon(Icons.link),
           label: const AppText('Save SAS4 connection'),
         ),

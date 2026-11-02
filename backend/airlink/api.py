@@ -11,19 +11,20 @@ from datetime import timedelta
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select, func, text, delete, update
+from sqlalchemy import select, func, text, delete, update, or_
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import __version__, discovery, sas4, payments
+from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places
 from .customer_probes import service as customer_probe_service
+from .system_stats import service as system_stats_service
 from .config import settings
 from .db import get_db, SessionLocal
-from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Sector, Device,
-                     DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
+from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device,
+                     UserSectionAccess, UserSectionEdits, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
-                       current_user, owner, resolve_user, cipher, bearer)
-from .schemas import Login, Setup, UserInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange
+                       current_user, owner, settings_access, updates_access, resolve_user, cipher, bearer)
+from .schemas import Login, Setup, UserInput, PlaceInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange, SectionAccessInput
 
 cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
 
@@ -34,10 +35,12 @@ async def lifespan(app):
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
     if os.environ.get('AIRLINK_TESTING') != 'true':
         customer_probe_service.start()
+        system_stats_service.start()
     try:
         yield
     finally:
         customer_probe_service.stop()
+        system_stats_service.stop()
         if task:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -76,7 +79,12 @@ def limited(key, limit=8, seconds=300):
 
 def public(obj):
     hidden = {"password_hash", "encrypted_credentials"}
-    return {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in hidden}
+    result = {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in hidden}
+    if isinstance(obj, User):
+        result['sections'] = section_access.effective(obj)
+        result['editable_sections'] = section_access.editable(obj)
+        result['place_ids'] = manager_places.public_places(obj)
+    return result
 
 
 def commit(db, user, action, target=None):
@@ -95,7 +103,7 @@ def tower_ids(db, user):
     if user.role in ("owner", "viewer"):
         return select(Tower.id)
     if user.role == "manager":
-        return select(Tower.id).where(Tower.manager_id == user.id)
+        return manager_places.managed_towers(user.id)
     return select(Device.tower_id).join(DeviceAssignment, DeviceAssignment.device_id == Device.id).where(DeviceAssignment.user_id == user.id)
 
 
@@ -244,6 +252,7 @@ def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
     obj = User(username=data.username, password_hash=hasher.hash(data.password), role=data.role)
     db.add(obj)
     db.flush()
+    manager_places.save(db, obj, data.place_ids)
     commit(db, user, "user.create", obj.id)
     return public(obj)
 
@@ -260,16 +269,43 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
         previous_role = obj.role
         if previous_role == 'manager':
             db.execute(update(Tower).where(Tower.manager_id == obj.id).values(manager_id=None))
+            db.execute(delete(ManagerPlace).where(ManagerPlace.user_id == obj.id))
         if previous_role == 'technician':
             db.execute(delete(DeviceAssignment).where(DeviceAssignment.user_id == obj.id))
         obj.role = next_role
         audit(db, user, 'user.role_change', f'{obj.id}:{previous_role}->{next_role}')
+    manager_places.save(db, obj, data.place_ids)
     obj.username = data.username
     if data.password is not None:
         obj.password_hash = hasher.hash(data.password)
     if changed:
         db.execute(update(LoginSession).where(LoginSession.user_id == obj.id).values(revoked=True))
     commit(db, user, "user.update", obj.id)
+    return public(obj)
+
+
+@app.put("/api/users/{user_id}/sections")
+def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner), db=Depends(get_db)):
+    obj = get(db, User, user_id)
+    if obj.role == 'owner':
+        raise HTTPException(409, 'Owner accounts always have full access')
+    if obj.role != 'manager':
+        raise HTTPException(422, 'Section permissions apply to manager accounts')
+    row = db.get(UserSectionAccess, obj.id)
+    if row is None:
+        row = UserSectionAccess(user_id=obj.id)
+        db.add(row)
+    row.sections = [key for key in section_access.ASSIGNABLE if key in data.sections]
+    edits = db.get(UserSectionEdits, obj.id)
+    if data.editable_sections is not None:
+        if edits is None:
+            edits = UserSectionEdits(user_id=obj.id)
+            db.add(edits)
+        edits.sections = [key for key in row.sections if key in data.editable_sections]
+    elif edits is not None:
+        edits.sections = [key for key in row.sections if key in edits.sections]
+    commit(db, user, 'user.sections', obj.id + ':view=' + ','.join(row.sections)
+           + ';edit=' + ','.join(edits.sections if edits is not None else row.sections))
     return public(obj)
 
 
@@ -313,11 +349,74 @@ def assign_device(user_id: str, device_id: str, user=Depends(owner), db=Depends(
     return {"ok": True}
 
 
+@app.get("/api/places")
+def places(user=Depends(current_user), db=Depends(get_db)):
+    counts = (select(TowerPlace.place_id, func.count().label('total'))
+              .where(TowerPlace.tower_id.in_(tower_ids(db, user)))
+              .group_by(TowerPlace.place_id).subquery())
+    query = select(Place, counts.c.total).outerjoin(counts, counts.c.place_id == Place.id)
+    if user.role == 'manager':
+        query = query.where(or_(counts.c.total > 0, Place.id.in_(manager_places.assigned_places(user.id))))
+    elif user.role not in ('owner', 'viewer'):
+        query = query.where(counts.c.total > 0)
+    return [{**public(place), 'tower_count': count or 0} for place, count in db.execute(query.order_by(Place.name))]
+
+
+@app.post("/api/places", status_code=201)
+def add_place(data: PlaceInput, user=Depends(owner), db=Depends(get_db)):
+    obj = Place(name=data.name)
+    db.add(obj)
+    db.flush()
+    commit(db, user, 'place.create', obj.id)
+    return {**public(obj), 'tower_count': 0}
+
+
+@app.put("/api/places/{place_id}")
+def edit_place(place_id: str, data: PlaceInput, user=Depends(owner), db=Depends(get_db)):
+    obj = get(db, Place, place_id)
+    obj.name = data.name
+    commit(db, user, 'place.update', obj.id)
+    return public(obj)
+
+
+@app.delete("/api/places/{place_id}", status_code=204)
+def delete_place(place_id: str, user=Depends(owner), db=Depends(get_db)):
+    obj = get(db, Place, place_id)
+    if db.scalar(select(TowerPlace.tower_id).where(TowerPlace.place_id == place_id).limit(1)):
+        raise HTTPException(409, 'Move or remove the towers in this place first')
+    db.delete(obj)
+    commit(db, user, 'place.delete', place_id)
+
+
+def tower_place(db, tower_id):
+    membership = db.get(TowerPlace, tower_id)
+    return membership.place_id if membership else None
+
+
+def save_tower_place(db, tower_id, data, user):
+    if 'place_id' not in data.model_fields_set:
+        return
+    membership = db.get(TowerPlace, tower_id)
+    previous = membership.place_id if membership else None
+    if previous == data.place_id:
+        return
+    if user.role != 'owner':
+        raise HTTPException(403, 'Only owner can move towers between places')
+    if data.place_id:
+        get(db, Place, data.place_id)
+        if membership:
+            membership.place_id = data.place_id
+        else:
+            db.add(TowerPlace(tower_id=tower_id, place_id=data.place_id))
+    elif membership:
+        db.delete(membership)
+
+
 @app.get("/api/towers")
 def towers(user=Depends(current_user), db=Depends(get_db)):
     result = []
     for tower in db.scalars(select(Tower).where(Tower.id.in_(tower_ids(db, user))).order_by(Tower.name)):
-        item = public(tower)
+        item = {**public(tower), "place_id": tower_place(db, tower.id), **tower_api.public_settings(db, tower.id, user)}
         devices = db.scalars(devices_query(db, user).where(Device.tower_id == tower.id)).all()
         statuses = [effective_status(d) for d in devices]
         item.update(sector_count=db.scalar(select(func.count()).select_from(Sector).where(Sector.tower_id == tower.id)),
@@ -336,11 +435,13 @@ def manager_check(db, manager_id):
 @app.post("/api/towers", status_code=201)
 def add_tower(data: TowerInput, user=Depends(owner), db=Depends(get_db)):
     manager_check(db, data.manager_id)
-    obj = Tower(**data.model_dump())
+    obj = Tower(**data.model_dump(exclude=tower_api.FIELDS | {"place_id"}))
     db.add(obj)
     db.flush()
+    save_tower_place(db, obj.id, data, user)
+    tower_api.save(db, obj.id, data, user)
     commit(db, user, "tower.create", obj.id)
-    return public(obj)
+    return {**public(obj), "place_id": tower_place(db, obj.id), **tower_api.public_settings(db, obj.id, user)}
 
 
 @app.post("/api/towers/{tower_id}/discover")
@@ -377,13 +478,19 @@ def discover_tower(tower_id: str, data: DiscoveryInput, user=Depends(current_use
 @app.put("/api/towers/{tower_id}")
 def edit_tower(tower_id: str, data: TowerInput, user=Depends(current_user), db=Depends(get_db)):
     obj = check_tower(db, user, tower_id, write=True)
-    if user.role != "owner" and data.manager_id != obj.manager_id:
-        raise HTTPException(403, "Only owner can reassign towers")
-    manager_check(db, data.manager_id)
-    for key, value in data.model_dump().items():
+    if 'manager_id' in data.model_fields_set:
+        if user.role != "owner" and data.manager_id != obj.manager_id:
+            raise HTTPException(403, "Only owner can reassign towers")
+        manager_check(db, data.manager_id)
+    save_tower_place(db, obj.id, data, user)
+    tower_api.save(db, obj.id, data, user)
+    excluded = tower_api.FIELDS | {"place_id"}
+    if 'manager_id' not in data.model_fields_set:
+        excluded = excluded | {'manager_id'}
+    for key, value in data.model_dump(exclude=excluded).items():
         setattr(obj, key, value)
     commit(db, user, "tower.update", obj.id)
-    return public(obj)
+    return {**public(obj), "place_id": tower_place(db, obj.id), **tower_api.public_settings(db, obj.id, user)}
 
 
 @app.delete("/api/towers/{tower_id}", status_code=204)
@@ -455,8 +562,29 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
     latest = (select(Metric.id).where(Metric.device_id == Device.id)
               .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1).correlate(Device).scalar_subquery())
     query = devices_query(db, user).add_columns(Metric).outerjoin(Metric, Metric.id == latest).order_by(Device.name)
-    return [{**public(device), "status": effective_status(device), "snmp_status": snmp_status(device, metric)}
-            for device, metric in db.execute(query)]
+    result = []
+    configs = {}
+    for device, metric in db.execute(query):
+        if device.tower_id not in configs:
+            configs[device.tower_id] = tower_api.configuration(db, device.tower_id)['enabled']
+        status = 'not_configured'
+        fresh = bool(device.enabled and device.last_poll and metric and
+                     (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
+        if configs[device.tower_id]:
+            status = ('disabled' if not device.enabled else 'pending' if not device.last_poll or not metric
+                      else 'stale' if not fresh else metric.values.get('api_status', 'pending'))
+        values = metric.values if fresh else {}
+        telemetry = {key: values[key] for key in ('cpu_percent', 'memory_percent', 'uptime_seconds',
+            'ethernet_links', 'signal_dbm', 'weakest_signal_dbm', 'wireless_clients',
+            'radio_frequencies_mhz', 'firmware_version', 'device_model', 'telemetry_source') if key in values}
+        if not telemetry.get('ethernet_links'):
+            telemetry['ethernet_links'] = [{'name': port.get('name', index), 'speed_mbps': port['speed_mbps']}
+                for index, port in values.get('interfaces', {}).items()
+                if port.get('type') == 6 and port.get('status') == 1 and port.get('speed_mbps', 0) > 0]
+        result.append({**public(device), 'status': effective_status(device), 'snmp_status': snmp_status(device, metric),
+                       'api_status': status, 'telemetry': telemetry,
+                       'telemetry_at': metric.collected_at if fresh else None})
+    return result
 
 
 def device_validate(db, user, data, existing=None):
@@ -486,7 +614,7 @@ def edit_device(device_id: str, data: DeviceInput, user=Depends(current_user), d
     obj = check_device(db, user, device_id)
     check_tower(db, user, obj.tower_id, write=True)
     device_validate(db, user, data, obj)
-    if (obj.ip_address, obj.snmp_profile_id, obj.enabled) != (data.ip_address, data.snmp_profile_id, data.enabled):
+    if (obj.ip_address, obj.snmp_profile_id, obj.enabled, obj.tower_id, obj.vendor) != (data.ip_address, data.snmp_profile_id, data.enabled, data.tower_id, data.vendor):
         obj.last_poll = None
         obj.status = "unknown"
         obj.failures = 0
@@ -505,7 +633,7 @@ def delete_device(device_id: str, user=Depends(current_user), db=Depends(get_db)
 
 
 @app.get("/api/snmp-profiles")
-def profiles(user=Depends(owner), db=Depends(get_db)):
+def profiles(user=Depends(settings_access), db=Depends(get_db)):
     result = []
     for profile in db.scalars(select(SNMPProfile)):
         item = public(profile)
@@ -518,7 +646,7 @@ def profiles(user=Depends(owner), db=Depends(get_db)):
 
 
 @app.post("/api/snmp-profiles", status_code=201)
-def add_profile(data: ProfileInput, user=Depends(owner), db=Depends(get_db)):
+def add_profile(data: ProfileInput, user=Depends(settings_access), db=Depends(get_db)):
     secret = cipher().encrypt(json.dumps(data.model_dump(exclude={"name"}, exclude_none=True)).encode()).decode()
     obj = SNMPProfile(name=data.name, encrypted_credentials=secret)
     db.add(obj)
@@ -570,7 +698,7 @@ def summary(db, user):
             "unknown": len(ids) - online - offline, "connected_clients": None,
             "active_alerts": db.scalar(select(func.count()).select_from(Alert).where(Alert.device_id.in_(ids), Alert.resolved_at.is_(None))),
             "availability_24h": round(100 * sum(availability) / len(availability), 2) if availability else None,
-            "sample_count": len(availability), "observed_at": now()}
+            "sample_count": len(availability), "observed_at": now(), "system": system_stats_service.read()}
 
 
 @app.get("/api/dashboard")
@@ -612,7 +740,7 @@ def report(user=Depends(current_user), db=Depends(get_db)):
 
 
 @app.get("/api/audit")
-def logs(user=Depends(owner), db=Depends(get_db)):
+def logs(user=Depends(settings_access), db=Depends(get_db)):
     return [public(x) for x in db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(500))]
 
 
@@ -632,12 +760,12 @@ def broker(action, payload=None):
 
 
 @app.get("/api/system")
-def system(user=Depends(owner)):
+def system(user=Depends(settings_access)):
     return broker("status")
 
 
 @app.post("/api/system/restart", status_code=202)
-def restart_system(payload: dict, user=Depends(owner), db=Depends(get_db)):
+def restart_system(payload: dict, user=Depends(updates_access), db=Depends(get_db)):
     if payload.get("confirm") is not True:
         raise HTTPException(422, "Confirm the system restart first")
     result = broker("system.restart", {"confirm": True})
@@ -646,12 +774,12 @@ def restart_system(payload: dict, user=Depends(owner), db=Depends(get_db)):
 
 
 @app.get("/api/network")
-def network(user=Depends(owner)):
+def network(user=Depends(settings_access)):
     return broker("network.status")
 
 
 @app.post("/api/network/{action}")
-def network_action(action: str, payload: dict, user=Depends(owner), db=Depends(get_db)):
+def network_action(action: str, payload: dict, user=Depends(settings_access), db=Depends(get_db)):
     if action not in {"save", "apply", "confirm", "restore", "test", "dns"}:
         raise HTTPException(404, "Unknown network action")
     result = broker("network." + action, payload)
@@ -660,13 +788,13 @@ def network_action(action: str, payload: dict, user=Depends(owner), db=Depends(g
 
 
 @app.get("/api/updates")
-def updates(user=Depends(owner), db=Depends(get_db)):
+def updates(user=Depends(updates_access), db=Depends(get_db)):
     return {"current_version": __version__, "state": broker("updates.status"),
             "history": [public(x) for x in db.scalars(select(UpdateHistory).order_by(UpdateHistory.created_at.desc()).limit(100))]}
 
 
 @app.post("/api/updates/{action}")
-def update_action(action: str, payload: dict, user=Depends(owner), db=Depends(get_db)):
+def update_action(action: str, payload: dict, user=Depends(updates_access), db=Depends(get_db)):
     if action not in {"check", "download", "verify", "install", "schedule"}:
         raise HTTPException(409, "Unsupported update action; rollback is disabled until validated")
     result = broker("updates." + action, payload)
@@ -686,6 +814,7 @@ async def live(websocket: WebSocket):
             def read():
                 with SessionLocal() as db:
                     user = resolve_user(token, db)
+                    section_access.require_any(user, ("dashboard", "noc"), db)
                     return jsonable_encoder(summary(db, user))
             result = await asyncio.to_thread(read)
             await websocket.send_json(result)

@@ -2,6 +2,7 @@ import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_recharge.dart';
+import 'section_access.dart';
 
 class Sas4UserDetails extends StatefulWidget {
   final Api api;
@@ -13,6 +14,7 @@ class Sas4UserDetails extends StatefulWidget {
 
 class _Sas4UserDetailsState extends State<Sas4UserDetails>
     with LanguageRebuild {
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'isp_card');
   final form = GlobalKey<FormState>();
   final controllers = <String, TextEditingController>{};
   final values = <String, dynamic>{};
@@ -91,6 +93,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
   }
 
   Future<bool> save() async {
+    if (!canEdit) return false;
     if (!form.currentState!.validate()) return false;
     final changes = <String, dynamic>{};
     for (final field in details!['fields']) {
@@ -143,6 +146,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
   }
 
   Future<void> rechargeCard() async {
+    if (!canEdit) return;
     if (saving) return;
     setState(() => saving = true);
     final recharged = await showDialog<bool>(
@@ -167,7 +171,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
 
   Widget rechargeSquare() {
     final allowed = details?['can_recharge'] == true;
-    final enabled = allowed && !saving;
+    final enabled = canEdit && allowed && !saving;
     return SizedBox(
       width: 160,
       height: 160,
@@ -204,7 +208,9 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
                 ),
                 const SizedBox(height: 8),
                 AppText(
-                  !allowed
+                  !canEdit
+                      ? 'Read-only access'
+                      : !allowed
                       ? 'SAS4 permission required'
                       : changed
                       ? 'Your edits stay unsaved'
@@ -223,7 +229,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
   Widget fieldWidget(Map<String, dynamic> field) {
     final key = field['key'] as String;
     final kind = field['kind'];
-    final editable = field['editable'] == true;
+    final editable = canEdit && field['editable'] == true;
     final label = field['label'] as String;
     final help = !editable
         ? field['reason'] as String?
@@ -337,7 +343,8 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
             padding: const EdgeInsets.only(right: 16),
             child: FilledButton.icon(
               onPressed:
-                  loading ||
+                  !canEdit ||
+                      loading ||
                       saving ||
                       details == null ||
                       (editing && !changed) ||

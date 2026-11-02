@@ -1,6 +1,7 @@
 import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'section_access.dart';
 
 class PaymentSettings extends StatefulWidget {
   final Api api;
@@ -16,6 +17,9 @@ class PaymentSettings extends StatefulWidget {
 
 class _PaymentSettingsState extends State<PaymentSettings>
     with LanguageRebuild {
+  bool get canEdit =>
+      canEditSection(widget.api.user ?? {}, 'settings') ||
+      canEditSection(widget.api.user ?? {}, 'isp_card');
   final merchants = {
     for (final p in ['fib', 'fastpay']) p: TextEditingController(),
   };
@@ -65,6 +69,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
   }
 
   Future<void> save(String provider) async {
+    if (!canEdit) return;
     setState(() {
       busy = true;
       message = null;
@@ -151,7 +156,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
                       child: AppText('Production — real payments'),
                     ),
                   ],
-                  onChanged: busy
+                  onChanged: busy || !canEdit
                       ? null
                       : (value) =>
                             setState(() => environments[provider] = value!),
@@ -159,7 +164,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: merchants[provider],
-                  enabled: !busy,
+                  enabled: !busy && canEdit,
                   decoration: InputDecoration(
                     labelText: tr(
                       provider == 'fib' ? 'FIB client ID' : 'FastPay store ID',
@@ -169,7 +174,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
                 const SizedBox(height: 12),
                 TextFormField(
                   controller: secrets[provider],
-                  enabled: !busy,
+                  enabled: !busy && canEdit,
                   obscureText: true,
                   autocorrect: false,
                   enableSuggestions: false,
@@ -191,7 +196,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
                 ),
                 const SizedBox(height: 12),
                 FilledButton(
-                  onPressed: busy ? null : () => save(provider),
+                  onPressed: busy || !canEdit ? null : () => save(provider),
                   child: const AppText('Save merchant settings'),
                 ),
               ],

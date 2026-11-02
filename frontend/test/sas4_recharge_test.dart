@@ -71,6 +71,7 @@ void main() {
             );
           }),
         );
+        api.user = {'role': 'owner'};
         await tester.pumpWidget(
           MaterialApp(home: Sas4UserDetails(api: api, userId: 7)),
         );

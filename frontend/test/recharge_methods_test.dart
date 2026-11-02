@@ -74,6 +74,7 @@ void main() {
             );
           }),
         );
+        api.user = {'role': 'owner'};
         await tester.pumpWidget(
           MaterialApp(
             home: Builder(

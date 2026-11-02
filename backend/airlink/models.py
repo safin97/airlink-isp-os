@@ -27,6 +27,18 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class UserSectionAccess(Base):
+    __tablename__ = "user_section_access"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    sections = Column(JSON, nullable=False)
+
+
+class UserSectionEdits(Base):
+    __tablename__ = "user_section_edits"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    sections = Column(JSON, nullable=False)
+
+
 class Initialization(Base):
     __tablename__ = "initialization"
     id = Column(Integer, primary_key=True)
@@ -58,6 +70,30 @@ class Tower(Base):
     location = Column(String(250), default="")
     management_ip = Column(String(45))
     manager_id = Column(String(36), ForeignKey("users.id"))
+
+
+class Place(Base):
+    __tablename__ = "places"
+    id = Column(String(36), primary_key=True, default=uid)
+    name = Column(String(120), nullable=False, unique=True)
+
+
+class TowerPlace(Base):
+    __tablename__ = "tower_places"
+    tower_id = Column(String(36), ForeignKey("towers.id", ondelete="CASCADE"), primary_key=True)
+    place_id = Column(String(36), ForeignKey("places.id", ondelete="RESTRICT"), nullable=False, index=True)
+
+
+class ManagerPlace(Base):
+    __tablename__ = "manager_places"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    place_id = Column(String(36), ForeignKey("places.id", ondelete="CASCADE"), primary_key=True)
+
+
+class TowerAPISettings(Base):
+    __tablename__ = "tower_api_settings"
+    tower_id = Column(String(36), ForeignKey("towers.id", ondelete="CASCADE"), primary_key=True)
+    encrypted_credentials = Column(Text, nullable=False)
 
 
 class Sector(Base):

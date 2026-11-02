@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'section_access.dart';
 
 class Sas4Recharge extends StatefulWidget {
   final Api api;
@@ -37,6 +38,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
   Map get methods => info?['methods'] as Map? ?? {'card': true};
   bool get permitted => methods[bank ? 'credit' : method] == true;
   bool get ready =>
+      canEditSection(widget.api.user ?? {}, 'isp_card') &&
       error == null &&
       permitted &&
       (!bank || gateways[method]?['configured'] == true) &&

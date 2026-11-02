@@ -5,6 +5,7 @@ import 'api.dart';
 import 'sas4_connection.dart';
 import 'payment_settings.dart';
 import 'customer_device_access.dart';
+import 'section_access.dart';
 
 class AccountPanel extends StatefulWidget {
   final Api api;
@@ -200,13 +201,17 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
                         padding: const EdgeInsets.only(top: 12),
                         child: Text(message!),
                       ),
-                    if (['owner', 'manager'].contains(user['role'])) ...[
+                    if (['owner', 'manager'].contains(user['role']) &&
+                        (hasSection(user, 'isp_card') ||
+                            hasSection(user, 'noc'))) ...[
                       const Divider(height: 40),
                       Sas4Connection(api: widget.api),
-                      const Divider(height: 32),
-                      CustomerDeviceAccess(api: widget.api),
-                      const Divider(height: 32),
-                      PaymentSettings(api: widget.api),
+                      if (hasSection(user, 'isp_card')) ...[
+                        const Divider(height: 32),
+                        CustomerDeviceAccess(api: widget.api),
+                        const Divider(height: 32),
+                        PaymentSettings(api: widget.api),
+                      ],
                     ],
                   ],
                 ),
