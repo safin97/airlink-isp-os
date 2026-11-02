@@ -18,6 +18,9 @@ from redis.exceptions import RedisError
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
+from .wireless_clients import public_clients
+from . import snmp_discovery
+from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
@@ -506,6 +509,41 @@ def discover_tower(tower_id: str, data: DiscoveryInput, user=Depends(current_use
             pass
 
 
+@app.post('/api/towers/{tower_id}/discover-snmp')
+def discover_tower_snmp(tower_id: str, data: SNMPDiscoveryInput, user=Depends(owner), db=Depends(get_db)):
+    tower = check_tower(db, user, tower_id, write=True)
+    try:
+        network = discovery.management_network(tower.management_ip, data.prefix)
+        profiles = snmp_discovery.candidates(db, data.profile_id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    addresses = [str(address) for address in network.hosts()]
+    batch = addresses[data.offset:data.offset + snmp_discovery.BATCH_SIZE]
+    try:
+        lock = cache.lock('discovery:' + tower_id, timeout=45, blocking=False)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(409, 'Discovery is already running for this tower')
+    except RedisError as exc:
+        raise HTTPException(503, 'Discovery coordination is unavailable') from exc
+    try:
+        if data.offset == 0:
+            commit(db, user, 'tower.discover_snmp', f'{tower_id}:{network}')
+        hosts, timed_out = asyncio.run(snmp_discovery.scan_batch(batch, profiles))
+        existing = set(db.scalars(select(Device.ip_address).where(Device.ip_address.in_([h['ip_address'] for h in hosts]))))
+        for host in hosts:
+            host['already_added'] = host['ip_address'] in existing
+        scanned = min(data.offset + len(batch), len(addresses))
+        return {'network': str(network), 'scanned': scanned, 'total': len(addresses),
+                'next_offset': scanned if scanned < len(addresses) else None,
+                'hosts': hosts, 'timed_out': timed_out}
+    finally:
+        try:
+            if lock.owned():
+                lock.release()
+        except RedisError:
+            pass
+
+
 @app.put("/api/towers/{tower_id}")
 def edit_tower(tower_id: str, data: TowerInput, user=Depends(current_user), db=Depends(get_db)):
     obj = check_tower(db, user, tower_id, write=True)
@@ -611,7 +649,7 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
         values = metric.values if fresh else {}
         telemetry = {key: values[key] for key in ('cpu_percent', 'memory_percent', 'uptime_seconds',
             'ethernet_links', 'signal_dbm', 'weakest_signal_dbm', 'wireless_clients',
-            'radio_frequencies_mhz', 'firmware_version', 'device_model', 'telemetry_source') if key in values}
+            'radio_frequencies_mhz', 'wireless_ssids', 'firmware_version', 'device_model', 'telemetry_source') if key in values}
         if not telemetry.get('ethernet_links'):
             telemetry['ethernet_links'] = [{'name': port.get('name', index), 'speed_mbps': port['speed_mbps']}
                 for index, port in values.get('interfaces', {}).items()
@@ -673,6 +711,23 @@ def delete_device(device_id: str, user=Depends(current_user), db=Depends(get_db)
     commit(db, user, "device.delete", device_id)
 
 
+@app.post('/api/snmp-profiles/discovery-public')
+def discovery_public_profile(data: SNMPPublicProfileInput, user=Depends(owner), db=Depends(get_db)):
+    for profile in db.scalars(select(SNMPProfile)):
+        try:
+            credentials = json.loads(cipher().decrypt(profile.encrypted_credentials.encode()))
+        except Exception:
+            continue
+        if credentials.get('version') == data.version and credentials.get('community') == 'public':
+            return {**public(profile), 'version': data.version}
+    profile = SNMPProfile(name=f'Discovery public v{data.version} {secrets.token_hex(3)}',
+        encrypted_credentials=cipher().encrypt(json.dumps({'version':data.version, 'community':'public'}).encode()).decode())
+    db.add(profile)
+    db.flush()
+    commit(db, user, 'snmp.create', profile.id)
+    return {**public(profile), 'version': data.version}
+
+
 @app.get("/api/snmp-profiles")
 def profiles(user=Depends(settings_access), db=Depends(get_db)):
     result = []
@@ -708,6 +763,23 @@ def metrics(device_id: str, hours: int = Query(24, ge=1, le=720), user=Depends(c
 def interfaces(device_id: str, user=Depends(current_user), db=Depends(get_db)):
     check_device(db, user, device_id)
     return [public(x) for x in db.scalars(select(Interface).where(Interface.device_id == device_id))]
+
+
+@app.get('/api/devices/{device_id}/wireless-clients')
+def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_db)):
+    device = check_device(db, user, device_id)
+    metric = db.scalar(select(Metric).where(Metric.device_id == device_id)
+                       .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1))
+    fresh = bool(device.enabled and device.last_poll and metric and
+                 (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
+    values = metric.values if fresh else {}
+    clients = public_clients(values.get('wireless_registrations'))
+    total = values.get('wireless_clients')
+    available = bool(clients) or (values.get('wireless_registration_source') and total == 0)
+    return {'clients': clients, 'total': total, 'status': 'available' if available else
+            'stale' if metric and not fresh else 'unavailable',
+            'source': values.get('wireless_registration_source'),
+            'collected_at': metric.collected_at if fresh else None}
 
 
 @app.get("/api/alerts")

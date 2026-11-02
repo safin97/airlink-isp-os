@@ -117,6 +117,8 @@ def enforce_request(user, method, path):
         return require(('isp_card',))
     if path.startswith('/api/reports/'):
         return require(('reports',))
+    if path.startswith('/api/devices/') and path.endswith('/wireless-clients'):
+        return require(('towers', 'noc'))
     if path.startswith('/api/devices/') and path.endswith(('/metrics', '/interfaces')):
         return require(('monitoring',))
     resource = path.removeprefix('/api/').split('/')[0]

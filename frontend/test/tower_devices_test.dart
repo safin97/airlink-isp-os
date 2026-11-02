@@ -16,6 +16,24 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final fixtures = {
+        '/api/devices/1/wireless-clients': {
+          'status': 'available',
+          'total': 2,
+          'clients': [
+            {
+              'mac_address': 'AA:BB:CC:DD:EE:01',
+              'interface': 'wlan1',
+              'ssid': 'AirLink North',
+              'signal_dbm': -60,
+            },
+            {
+              'mac_address': 'AA:BB:CC:DD:EE:02',
+              'interface': 'wlan1',
+              'ssid': 'AirLink North',
+              'signal_dbm': -72,
+            },
+          ],
+        },
         '/api/dashboard': {
           'devices': 4,
           'online': 2,
@@ -37,8 +55,11 @@ void main() {
             'telemetry': {
               'ethernet_links': [
                 {'name': 'ether1', 'speed_mbps': 1000},
+                {'name': 'ether2', 'speed_mbps': 100},
               ],
               'signal_dbm': -62,
+              'wireless_ssids': ['AirLink North'],
+              'wireless_clients': 2,
               'cpu_percent': 23,
               'memory_percent': 48,
               'uptime_seconds': 90060,
@@ -103,9 +124,20 @@ void main() {
       expect(find.text('Connected'), findsNWidgets(2));
       expect(find.text('API status'), findsOneWidget);
       expect(find.text('ether1: 1000 Mbps'), findsOneWidget);
-      expect(find.text('-62 dBm'), findsOneWidget);
-      expect(find.text('23%'), findsOneWidget);
-      expect(find.text('48%'), findsOneWidget);
+      expect(find.text('AirLink North'), findsOneWidget);
+      expect(find.text('ether2: 100 Mbps'), findsNothing);
+      expect(find.text('CPU'), findsNothing);
+      expect(find.text('Memory'), findsNothing);
+      expect(find.text('Registration clients'), findsOneWidget);
+      final clients = find.byKey(const ValueKey('wireless-clients-1'));
+      await tester.ensureVisible(clients);
+      await tester.tap(clients);
+      await tester.pumpAndSettle();
+      expect(find.text('AA:BB:CC:DD:EE:01'), findsOneWidget);
+      expect(find.text('AA:BB:CC:DD:EE:02'), findsOneWidget);
+      expect(find.text('-60 dBm'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
       expect(find.text('1d 1h 1m'), findsOneWidget);
       expect(find.text('Failed'), findsOneWidget);
       expect(find.text('Waiting for poll'), findsOneWidget);

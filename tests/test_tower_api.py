@@ -75,7 +75,10 @@ def test_routeros_inventory_resources_and_ap_signal(client):
             return httpx.Response(200, json=[{'status':'link-ok', 'rate':'1Gbps'}])
         assert request.method == 'GET'
         if path == '/rest/interface/wireless/registration-table':
-            return httpx.Response(200, json=[{'signal-strength':'-60dBm'}, {'signal-strength':'-72dBm'}])
+            return httpx.Response(200, json=[{'mac-address':'AA:BB:CC:DD:EE:01', 'interface':'wlan1', 'signal-strength':'-60dBm', 'password':'must-not-leak'}, {'mac-address':'AA:BB:CC:DD:EE:02', 'interface':'wlan1', 'signal-strength':'-72dBm'}])
+        if path == '/rest/interface/wireless':
+            assert request.url.params['.proplist'] == 'name,ssid,configuration.ssid'
+            return httpx.Response(200, json=[{'name':'wlan1','ssid':'AirLink North'}])
         if path == '/rest/system/resource':
             return httpx.Response(200, json={'cpu-load':'18', 'free-memory':'256', 'total-memory':'1024',
                 'uptime':'1w2d3h4m5s', 'version':'7.20', 'board-name':'RouterBoard'})
@@ -89,6 +92,9 @@ def test_routeros_inventory_resources_and_ap_signal(client):
     assert values['ethernet_links'] == [{'name':'ether1','speed_mbps':1000}]
     assert values['signal_dbm'] is None  # AP readings aren't attributed to a single client.
     assert values['weakest_signal_dbm'] == -72 and values['wireless_clients'] == 2
+    assert values['wireless_ssids'] == ['AirLink North']
+    assert values['wireless_registrations'][0] == {'mac_address':'AA:BB:CC:DD:EE:01', 'interface':'wlan1', 'ssid':'AirLink North', 'signal_dbm':-60}
+    assert 'must-not-leak' not in json.dumps(values)
     assert requests[0].headers.get('authorization') is None
 
 

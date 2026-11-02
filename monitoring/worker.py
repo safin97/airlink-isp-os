@@ -60,7 +60,7 @@ async def poll(device_id, semaphore):
                             api_values['detected_vendor'] = detected
                         # Empty API fields must not replace useful SNMP readings.
                         values.update({key: value for key, value in api_values.items()
-                                       if value is not None and value != [] and
+                                       if value is not None and (value != [] or key == 'wireless_registrations') and
                                        (key != 'uptime_seconds' or key not in values)})
                         values.update(api_up=True, api_status='connected')
                     except PermissionError:

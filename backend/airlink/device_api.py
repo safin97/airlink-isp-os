@@ -5,6 +5,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 import httpx
 from .vendor_identity import identify_vendor
+from .wireless_clients import public_clients, ssids
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -104,6 +105,16 @@ async def routeros(client, base, credentials, inventory=False):
                         ('interface/wifi/registration-table', 'signal'),
                         ('interface/wifiwave2/registration-table', 'signal')):
         data = await read(path)
+        if inventory and isinstance(data, list):
+            radios = await read(path.rsplit('/', 1)[0] + '?.proplist=name,ssid,configuration.ssid')
+            names = {str(row.get('name', '')): row.get('ssid') or row.get('configuration.ssid')
+                     for row in radios if isinstance(row, dict)} if isinstance(radios, list) else {}
+            wireless_values['wireless_ssids'] = ssids(names.values())
+            wireless_values['wireless_registrations'] = public_clients([
+                {'mac_address': row.get('mac-address'), 'interface': row.get('interface'),
+                 'ssid': row.get('ssid') or names.get(str(row.get('interface', ''))),
+                 'signal_dbm': signal(row.get(field))} for row in data[:256] if isinstance(row, dict)])
+            wireless_values['wireless_registration_source'] = 'RouterOS API'
         if isinstance(data, list) and data:
             # More than one station cannot be attributed to this customer's link.
             strength = signal(data[0].get(field)) if len(data) == 1 and isinstance(data[0], dict) else None
@@ -154,6 +165,15 @@ def airos_values(data, inventory=False):
               'vendor_detection_source': 'API'}
     if inventory:
         host = data.get('host') if isinstance(data.get('host'), dict) else {}
+        result['wireless_ssids'] = ssids([wireless.get('essid') or wireless.get('ssid')])
+        stations = data.get('sta')
+        if isinstance(stations, list):
+            result['wireless_registrations'] = public_clients([
+                {'mac_address': row.get('mac'), 'interface': row.get('ifname'),
+                 'ssid': wireless.get('essid') or wireless.get('ssid'),
+                 'signal_dbm': signal(row.get('signal'))} for row in stations[:256] if isinstance(row, dict)])
+            result['wireless_registration_source'] = 'airOS API'
+            result['wireless_clients'] = len(stations)
         for key, raw in (('cpu_percent', numeric(host.get('cpuload'), 0, 100)),
                          ('uptime_seconds', numeric(host.get('uptime'))),
                          ('wireless_clients', numeric(wireless.get('count'), 0, 100000))):

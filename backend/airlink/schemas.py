@@ -147,6 +147,15 @@ class DiscoveryInput(Strict):
     prefix: int = Field(default=24, ge=24, le=32)
 
 
+class SNMPDiscoveryInput(DiscoveryInput):
+    offset: int = Field(default=0, ge=0, le=254)
+    profile_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
+
+
+class SNMPPublicProfileInput(Strict):
+    version: Literal['1', '2c']
+
+
 class SectionAccessInput(Strict):
     sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
     editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)

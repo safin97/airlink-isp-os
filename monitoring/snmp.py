@@ -1,5 +1,6 @@
 """Read-only SNMP v1/v2c/v3 with bounded standard and verified vendor MIB walks."""
 from airlink.vendor_identity import identify_vendor
+from airlink.wireless_clients import ssids
 from pysnmp.proto.rfc1905 import NoSuchObject, NoSuchInstance, EndOfMibView
 from pysnmp.hlapi.v3arch.asyncio import (SnmpEngine, CommunityData, UsmUserData, UdpTransportTarget, ContextData,
     ObjectType, ObjectIdentity, get_cmd, walk_cmd, bulk_walk_cmd, USM_AUTH_HMAC192_SHA256, USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5, USM_PRIV_CFB128_AES, USM_PRIV_CBC56_DES)
@@ -201,6 +202,32 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
             values["weakest_signal_dbm"] = min(wireless["signal_dbm"].values())
         if "frequency_mhz" in wireless:
             values["radio_frequencies_mhz"] = sorted(set(wireless["frequency_mhz"].values()))
+        if not link_only:
+            names = dict(wireless.get('ssid', {}))
+            if family == 'mikrotik':
+                names.update(await read_table(engine, auth, target,
+                    '1.3.6.1.4.1.14988.1.1.1.3.1.4', textual=True))
+            values['wireless_ssids'] = ssids(names.values())
+            registrations = wireless.get('signal_dbm', {}) if family == 'mikrotik' else (
+                await read_table(engine, auth, target, '1.3.6.1.4.1.41112.1.4.7.1.3')
+                if family == 'ubiquiti' else {})
+            clients = []
+            for index, strength in registrations.items():
+                parts = index.split('.')
+                if len(parts) != 7 or not all(part.isdecimal() for part in parts):
+                    continue
+                octets, interface = (parts[:6], parts[6]) if family == 'mikrotik' else (parts[1:], parts[0])
+                if any(int(part) > 255 for part in octets):
+                    continue
+                clients.append({'mac_address': ':'.join(f'{int(part):02X}' for part in octets),
+                    'interface': interfaces.get(interface, {}).get('name', interface),
+                    'ssid': names.get(interface, ''),
+                    'signal_dbm': strength if -150 <= strength < 0 else None})
+            if clients or values.get('wireless_clients') == 0:
+                values['wireless_registrations'] = clients
+                values['wireless_registration_source'] = 'SNMP'
+            if clients and 'wireless_clients' not in values:
+                values['wireless_clients'] = len(clients)
         return values
     finally:
         engine.close_dispatcher()

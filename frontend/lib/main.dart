@@ -23,6 +23,7 @@ import 'snmp_profile_dialog.dart';
 import 'system_performance.dart';
 import 'section_access.dart';
 import 'role_management.dart';
+import 'wireless_clients_dialog.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -1222,6 +1223,19 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
+  Widget wirelessClientCount(Map<String, dynamic> device) {
+    final count = device['telemetry']?['wireless_clients'];
+    if (count is! num) return const AppText('Unavailable');
+    return TextButton(
+      key: ValueKey('wireless-clients-${device['id']}'),
+      onPressed: () => showDialog<void>(
+        context: context,
+        builder: (_) => WirelessClientsDialog(api: api, device: device),
+      ),
+      child: Text(count.toInt().toString()),
+    );
+  }
+
   Widget deviceReading(Map<String, dynamic> device, String field) {
     final data = Map<String, dynamic>.from(device['telemetry'] ?? {});
     String reading = 'Unavailable';
@@ -1229,28 +1243,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         ? value.toInt().toString()
         : value.toStringAsFixed(1);
     if (field == 'ethernet_links') {
-      final links = (data[field] as List? ?? []).whereType<Map>();
+      final links = (data[field] as List? ?? []).whereType<Map>().where(
+        (port) => port['name']?.toString().toLowerCase() == 'ether1',
+      );
       if (links.isNotEmpty) {
         reading = links
             .map((p) => '${p['name']}: ${number(p['speed_mbps'] as num)} Mbps')
             .join(' · ');
       }
     } else if (field == 'wireless') {
-      final parts = <String>[];
-      final signal = data['signal_dbm'] ?? data['weakest_signal_dbm'];
-      if (signal is num) {
-        parts.add(
-          '${data['signal_dbm'] == null ? 'Weakest: ' : ''}${number(signal)} dBm',
-        );
-      }
-      if (data['wireless_clients'] is num) {
-        parts.add('${number(data['wireless_clients'])} clients');
-      }
-      if (data['radio_frequencies_mhz'] is List &&
-          (data['radio_frequencies_mhz'] as List).isNotEmpty) {
-        parts.add('${(data['radio_frequencies_mhz'] as List).join(', ')} MHz');
-      }
-      if (parts.isNotEmpty) reading = parts.join(' · ');
+      final names = (data['wireless_ssids'] as List?) ?? [];
+      if (names.isNotEmpty) reading = names.join(' · ');
     } else if (field == 'uptime_seconds' && data[field] is num) {
       final seconds = (data[field] as num).toInt();
       reading =
@@ -1558,7 +1561,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                             color: muted,
                                           ),
                                           onSelected: (action) {
-                                            if (action == 'discover') {
+                                            if (action == 'discover_snmp') {
+                                              discoverTower(
+                                                Map<String, dynamic>.from(
+                                                  tower,
+                                                ),
+                                                snmp: true,
+                                              );
+                                            } else if (action == 'discover') {
                                               discoverTower(
                                                 Map<String, dynamic>.from(
                                                   tower,
@@ -1577,6 +1587,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                             }
                                           },
                                           itemBuilder: (_) => [
+                                            if (owner)
+                                              const PopupMenuItem(
+                                                value: 'discover_snmp',
+                                                child: AppText(
+                                                  'Discovery SNMP',
+                                                ),
+                                              ),
                                             if (inventoryWriter)
                                               const PopupMenuItem(
                                                 value: 'discover',
@@ -1734,10 +1751,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         'Status',
         'SNMP status',
         'API status',
-        'Ethernet speed',
-        'Wireless',
-        'CPU',
-        'Memory',
+        'ether1 speed',
+        'Wireless SSID',
+        'Registration clients',
         'Uptime',
       ],
     };
@@ -1834,8 +1850,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           deviceApiStatus(row),
                           deviceReading(row, 'ethernet_links'),
                           deviceReading(row, 'wireless'),
-                          deviceReading(row, 'cpu_percent'),
-                          deviceReading(row, 'memory_percent'),
+                          wirelessClientCount(row),
                           deviceReading(row, 'uptime_seconds'),
                         ],
                       };
@@ -2136,17 +2151,30 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
-  Future<void> discoverTower(Map<String, dynamic> tower) async {
+  Future<void> discoverTower(
+    Map<String, dynamic> tower, {
+    bool snmp = false,
+  }) async {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => TowerDiscoveryDialog(api: api, tower: tower),
+      builder: (_) => TowerDiscoveryDialog(api: api, tower: tower, snmp: snmp),
     );
     if (mounted) await reload();
   }
 
   Future<void> edit(String resource, {Map<String, dynamic>? existing}) async {
     if (resource == 'users' && !await refreshAccountRoles()) return;
+    if (resource == 'devices' && owner) {
+      try {
+        final profiles = await api.request('/snmp-profiles');
+        if (!mounted) return;
+        setState(() => rows['snmp-profiles'] = profiles as List);
+      } catch (e) {
+        if (mounted) toast(e.toString());
+        return;
+      }
+    }
     if (!mounted) return;
     if (resource == 'snmp-profiles') {
       final saved = await showDialog<bool>(
@@ -2195,6 +2223,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         save: (data) async {
           final payload = Map<String, dynamic>.from(data);
           discover = payload.remove('discover_after_save') == true;
+          if (resource == 'devices') {
+            final profile = payload['snmp_profile_id'];
+            if (profile is String && profile.startsWith('preset:')) {
+              final savedProfile = await api.request(
+                '/snmp-profiles/discovery-public',
+                method: 'POST',
+                body: {'version': profile.split(':').last},
+              );
+              payload['snmp_profile_id'] = savedProfile['id'];
+            }
+          }
           if (resource == 'towers') {
             final gps = (payload.remove('gps') as String? ?? '').trim();
             double? latitude;
@@ -2451,7 +2490,30 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           FieldSpec(
             'snmp_profile_id',
             'SNMP profile',
-            options: owner ? options('snmp-profiles', nullable: true) : null,
+            helperText: owner
+                ? 'Presets use community public. For another community or SNMP v3, choose a saved profile from Settings. Works with SNMP-enabled models; the device credentials must match.'
+                : null,
+            options: owner
+                ? [
+                    const Option('', 'None'),
+                    for (final vendor in const {
+                      'mikrotik': 'MikroTik (all models)',
+                      'ubiquiti': 'UBNT (M5 / AC / other models)',
+                      'mimosa': 'Mimosa (all models)',
+                    }.entries)
+                      for (final version in ['2c', '1'])
+                        Option(
+                          'preset:${vendor.key}:$version',
+                          '${vendor.value} — SNMP v${version == '2c' ? '2' : version} / public',
+                        ),
+                    ...list('snmp-profiles').map(
+                      (profile) => Option(
+                        profile['id'],
+                        '${profile['name']} — SNMP v${profile['version'] == '2c' ? '2' : profile['version'] ?? '?'}',
+                      ),
+                    ),
+                  ]
+                : null,
           ),
           FieldSpec(
             'poll_interval',
@@ -3012,6 +3074,7 @@ class FieldSpec {
   final bool required;
   final dynamic initial;
   final List<Option>? options;
+  final String? helperText;
   FieldSpec(
     this.key,
     this.label, {
@@ -3019,6 +3082,7 @@ class FieldSpec {
     this.required = false,
     this.initial,
     this.options,
+    this.helperText,
   });
 }
 
@@ -3190,7 +3254,11 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                                 ? values[f.key]
                                 : null,
                             isExpanded: true,
-                            decoration: InputDecoration(labelText: tr(f.label)),
+                            decoration: InputDecoration(
+                              labelText: tr(f.label),
+                              helperText: f.helperText,
+                              helperMaxLines: 4,
+                            ),
                             items: f.options!
                                 .map(
                                   (o) => DropdownMenuItem(
