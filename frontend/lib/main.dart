@@ -17,6 +17,7 @@ import 'account_panel.dart';
 import 'payment_settings.dart';
 import 'fullscreen.dart' as fullscreen;
 import 'tower_marker.dart';
+import 'snmp_profile_dialog.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -933,6 +934,50 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   String value(dynamic x, {String suffix = ''}) =>
       x == null ? 'Unavailable' : '$x$suffix';
+
+  Widget snmpStatus(Map<String, dynamic> device) {
+    final status = device['snmp_status'] ?? 'pending';
+    final (label, hint, color) = switch (status) {
+      'connected' => ('Connected', 'The latest SNMP poll succeeded.', green),
+      'failed' => (
+        'Failed',
+        'The latest SNMP poll failed. Check the version, community or credentials, and UDP 161 access.',
+        red,
+      ),
+      'not_configured' => (
+        'Not configured',
+        'Assign an SNMP profile to this device.',
+        muted,
+      ),
+      'disabled' => (
+        'Disabled',
+        'Monitoring is disabled for this device.',
+        muted,
+      ),
+      'stale' => (
+        'Stale',
+        'SNMP results are out of date. Check the monitoring service.',
+        orange,
+      ),
+      _ => (
+        'Waiting for poll',
+        'No SNMP result yet. The monitoring service must be running.',
+        muted,
+      ),
+    };
+    return Tooltip(
+      message: tr(hint),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.square_rounded, size: 10, color: color),
+          const SizedBox(width: 7),
+          AppText(label, style: TextStyle(color: color, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
   Widget dashboard() {
     final cards = [
       ['Total towers', 'towers', Icons.cell_tower],
@@ -1313,7 +1358,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       'towers' => ['Name', 'Location', 'Management IP', 'Sectors', 'Status'],
       'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
       'users' => ['Username', 'Role', 'Active', 'Created'],
-      _ => ['Device', 'IP address', 'Vendor', 'Tower', 'Status'],
+      _ => ['Device', 'IP address', 'Vendor', 'Tower', 'Status', 'SNMP status'],
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1396,6 +1441,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           row['vendor'],
                           nameOf('towers', row['tower_id']),
                           badge(row['status']),
+                          snmpStatus(row),
                         ],
                       };
                       return DataRow(
@@ -1670,6 +1716,15 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   }
 
   Future<void> edit(String resource, {Map<String, dynamic>? existing}) async {
+    if (resource == 'snmp-profiles') {
+      final saved = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => SnmpProfileDialog(api: api),
+      );
+      if (saved == true && mounted) await reload();
+      return;
+    }
     final specs = [
       ...fields(resource),
       if (resource == 'towers' && existing == null)
@@ -1808,23 +1863,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             ],
           ),
         ];
-      case 'snmp-profiles':
-        return [
-          FieldSpec('name', 'Profile name', required: true),
-          FieldSpec('username', 'SNMPv3 username', required: true),
-          FieldSpec(
-            'auth_key',
-            'SHA-256 authentication key (12+ characters)',
-            required: true,
-            kind: 'password',
-          ),
-          FieldSpec(
-            'priv_key',
-            'AES-128 privacy key (12+ characters)',
-            required: true,
-            kind: 'password',
-          ),
-        ];
       default:
         return [
           FieldSpec('name', 'Device name', required: true),
@@ -1842,14 +1880,16 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             options: const [
               Option('generic', 'Generic SNMP'),
               Option('mikrotik', 'MikroTik'),
-              Option('ubiquiti', 'Ubiquiti'),
+              Option('ubiquiti', 'Ubiquiti (other airMAX)'),
+              Option('ubiquiti_m5', 'Ubiquiti airMAX M5'),
+              Option('ubiquiti_ac', 'Ubiquiti airMAX AC'),
               Option('mimosa', 'Mimosa'),
             ],
           ),
           FieldSpec('model', 'Model', initial: ''),
           FieldSpec(
             'snmp_profile_id',
-            'SNMPv3 profile',
+            'SNMP profile',
             options: owner ? options('snmp-profiles', nullable: true) : null,
           ),
           FieldSpec(
@@ -1951,6 +1991,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   'uptime_seconds',
                   'icmp_up',
                   'snmp_up',
+                  'wireless_clients',
+                  'weakest_signal_dbm',
+                  'radio_frequencies_mhz',
                 ])
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1960,7 +2003,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
                       Text(
-                        value(samples.last['values'][field]),
+                        samples.last['values'][field] is List
+                            ? (samples.last['values'][field] as List).join(', ')
+                            : value(samples.last['values'][field]),
                         style: const TextStyle(fontSize: 20),
                       ),
                     ],
@@ -2313,12 +2358,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         card(PaymentSettings(api: api, initiallyExpanded: true)),
         const SizedBox(height: 24),
         section(
-          'SNMPv3 credential profiles',
+          'SNMP credential profiles',
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppText(
-                'SHA-256 authentication • AES-128 privacy. Secrets are encrypted on the server and cannot be read back.',
+                'SNMP v1 / v2c communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
                 style: TextStyle(color: muted),
               ),
               const SizedBox(height: 16),
@@ -2326,12 +2371,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 ListTile(
                   leading: const Icon(Icons.key),
                   title: Text(p['name']),
-                  subtitle: Text(p['id']),
+                  subtitle: Text('SNMP v${p['version'] ?? '3'}'),
                 ),
               FilledButton.icon(
                 onPressed: () => edit('snmp-profiles'),
                 icon: const Icon(Icons.add),
-                label: const AppText('Add SNMPv3 profile'),
+                label: const AppText('Add SNMP profile'),
               ),
             ],
           ),

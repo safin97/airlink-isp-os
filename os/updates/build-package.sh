@@ -25,7 +25,11 @@ if [ "$1" = configure ] && [ -f /etc/airlink/installed ]; then
   bash /opt/airlink/os/branding/install-boot-theme.sh
 fi
 if [ "$1" = configure ] && [ -d /run/systemd/system ]; then
+  /opt/airlink/venv/bin/python /opt/airlink/deployment/dashboard_https.py
+  nginx -t
   systemctl daemon-reload
+  systemctl enable airlink-https.service
+  systemctl reload nginx
   # The previous updater restarts API/workers; reload long-lived control code too.
   systemctl try-restart airlink-controller.service airlink-console.service
 fi
@@ -33,7 +37,7 @@ POSTINST
 chmod 0755 "$stage/DEBIAN/postinst"
 # System integration files are installed by the signed package, under fixed paths.
 mkdir -p "$stage/etc/systemd/system"
-cp /opt/airlink/deployment/systemd/airlink-{api,monitor,alerts,controller,console,health,update-job}.service "$stage/etc/systemd/system/"
+cp /opt/airlink/deployment/systemd/airlink-{api,monitor,alerts,controller,console,health,update-job,https}.service "$stage/etc/systemd/system/"
 cp /opt/airlink/deployment/systemd/airlink-health.timer "$stage/etc/systemd/system/"
 mkdir -p "$output"
 dpkg-deb --root-owner-group --build "$stage" "$output/airlink-isp-os_${version}_amd64.deb"

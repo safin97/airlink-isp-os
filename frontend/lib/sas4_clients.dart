@@ -272,6 +272,60 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
 
   String text(dynamic value) =>
       value == null || value.toString().isEmpty ? '—' : value.toString();
+
+  Widget telemetryCell(Map<String, dynamic> row, {required bool ethernet}) {
+    final links = (row['ethernet_links'] as List?) ?? [];
+    String speed(num mbps) {
+      final amount = mbps >= 1000 ? mbps / 1000 : mbps;
+      return '${amount.toString().replaceFirst(RegExp(r'\.0$'), '')} ${mbps >= 1000 ? 'Gbps' : 'Mbps'}';
+    }
+
+    final String? reading = ethernet
+        ? (links.isEmpty
+              ? null
+              : links
+                    .map(
+                      (link) =>
+                          '${links.length > 1 ? '${link['name']}: ' : ''}${speed(link['speed_mbps'] as num)}',
+                    )
+                    .join(' · '))
+        : (row['signal_dbm'] == null ? null : '${row['signal_dbm']} dBm');
+    final hint = reading != null
+        ? (ethernet
+              ? 'Reported Ethernet link speed from the customer device.'
+              : 'Reported signal from the customer device.')
+        : switch (row['telemetry_status']) {
+            'checking' =>
+              'Checking SNMP and supported device APIs at this user IP. Results refresh automatically.',
+            'credentials_required' =>
+              'Add SNMP or device API credentials in My account → Customer device access.',
+            'authentication_failed' =>
+              'The device rejected the API login. Check Customer device access in My account.',
+            'unreachable' =>
+              'No authenticated SNMP or supported API response. Check device credentials, services and network access.',
+            'invalid_address' =>
+              'This session does not have a usable customer device IP address.',
+            'pending' =>
+              'Waiting for the customer device SNMP poll. The monitoring service must be running.',
+            'stale' => 'The customer device SNMP readings are out of date.',
+            'failed' => 'The customer device SNMP poll failed.',
+            'available' =>
+              'The device did not report an unambiguous reading for this link.',
+            _ =>
+              'Add the customer device with this IP address to your monitored devices and assign an SNMP profile.',
+          };
+    return Tooltip(
+      message: tr(hint),
+      child: reading == null
+          ? AppText(
+              row['telemetry_status'] == 'checking'
+                  ? 'Checking…'
+                  : 'Unavailable',
+            )
+          : Text(reading),
+    );
+  }
+
   String statusLabel(dynamic row) {
     final status = text(row['status']);
     if (row['online'] == false && (status == 'active' || status == 'expired')) {
@@ -458,7 +512,12 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                     'Username',
                     'Name',
                     'Profile',
-                    if (onlineOnly) 'IP address',
+                    if (onlineOnly) ...[
+                      'IP address',
+                      'Ethernet speed',
+                      'Signal',
+                      'Connection',
+                    ],
                     'Expiration',
                     'SAS4 manager',
                   ])
@@ -504,6 +563,25 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                           DataCell(Text(text(row['profile']))),
                           if (onlineOnly)
                             DataCell(SelectableText(text(row['ip_address']))),
+                          if (onlineOnly) ...[
+                            DataCell(telemetryCell(row, ethernet: true)),
+                            DataCell(telemetryCell(row, ethernet: false)),
+                            DataCell(
+                              Text(
+                                row['telemetry_source']?.toString() ??
+                                    tr(switch (row['telemetry_status']) {
+                                      'checking' => 'Checking…',
+                                      'credentials_required' =>
+                                        'Credentials needed',
+                                      'authentication_failed' =>
+                                        'Login rejected',
+                                      'unreachable' => 'No response',
+                                      'invalid_address' => 'Invalid IP',
+                                      _ => '—',
+                                    }),
+                              ),
+                            ),
+                          ],
                           DataCell(Text(text(row['expiration']))),
                           DataCell(Text(text(row['manager']))),
                         ],

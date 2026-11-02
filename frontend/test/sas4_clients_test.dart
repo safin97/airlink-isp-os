@@ -50,6 +50,12 @@ void main() {
                     'name': 'Client $page',
                     'profile': '20 Mbps',
                     'status': 'online',
+                    'ethernet_links': page == 1
+                        ? [
+                            {'name': 'eth0', 'speed_mbps': 1000},
+                          ]
+                        : [],
+                    'signal_dbm': page == 1 ? -62 : null,
                   },
                 ],
                 'total': 2,
@@ -153,6 +159,8 @@ void main() {
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text('client-2'), findsOneWidget);
+      expect(find.text('Ethernet speed'), findsNothing);
+      expect(find.text('Signal'), findsNothing);
       expect(find.text('Page 2 of 2'), findsOneWidget);
       final beforeRefresh = requests
           .where((r) => r.url.path.endsWith('/clients'))
@@ -165,6 +173,8 @@ void main() {
       );
       expect(requests.last.url.queryParameters['page'], '2');
       expect(find.text('client-2'), findsOneWidget);
+      expect(find.text('Ethernet speed'), findsNothing);
+      expect(find.text('Signal'), findsNothing);
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -181,6 +191,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('online-1'), findsOneWidget);
+      expect(find.text('Ethernet speed'), findsOneWidget);
+      expect(find.text('Signal'), findsOneWidget);
+      expect(find.text('1 Gbps'), findsOneWidget);
+      expect(find.text('-62 dBm'), findsOneWidget);
       expect(find.text('client-2'), findsNothing);
       await tester.enterText(find.byType(TextField), 'Ali');
       await tester.tap(find.text('Search'));

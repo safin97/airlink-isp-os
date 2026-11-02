@@ -64,6 +64,9 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(actions, ['/api/updates/check']);
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pumpAndSettle();
+      expect(actions, ['/api/updates/check', '/api/updates/check']);
       await tester.pumpWidget(const SizedBox());
     },
   );

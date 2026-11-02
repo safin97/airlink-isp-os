@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import __version__, discovery, sas4, payments
+from .customer_probes import service as customer_probe_service
 from .config import settings
 from .db import get_db, SessionLocal
 from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Sector, Device,
@@ -31,9 +32,12 @@ cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect
 async def lifespan(app):
     settings.validate()
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
+    if os.environ.get('AIRLINK_TESTING') != 'true':
+        customer_probe_service.start()
     try:
         yield
     finally:
+        customer_probe_service.stop()
         if task:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -433,9 +437,26 @@ def effective_status(device):
     return device.status
 
 
+def snmp_status(device, metric):
+    if not device.snmp_profile_id:
+        return "not_configured"
+    if not device.enabled:
+        return "disabled"
+    if not device.last_poll or not metric:
+        return "pending"
+    if (now() - aware(metric.collected_at)).total_seconds() > device.poll_interval * 3 + 30:
+        return "stale"
+    result = metric.values.get("snmp_up")
+    return "connected" if result is True else "failed" if result is False else "pending"
+
+
 @app.get("/api/devices")
 def devices(user=Depends(current_user), db=Depends(get_db)):
-    return [{**public(x), "status": effective_status(x)} for x in db.scalars(devices_query(db, user).order_by(Device.name))]
+    latest = (select(Metric.id).where(Metric.device_id == Device.id)
+              .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1).correlate(Device).scalar_subquery())
+    query = devices_query(db, user).add_columns(Metric).outerjoin(Metric, Metric.id == latest).order_by(Device.name)
+    return [{**public(device), "status": effective_status(device), "snmp_status": snmp_status(device, metric)}
+            for device, metric in db.execute(query)]
 
 
 def device_validate(db, user, data, existing=None):
@@ -465,6 +486,10 @@ def edit_device(device_id: str, data: DeviceInput, user=Depends(current_user), d
     obj = check_device(db, user, device_id)
     check_tower(db, user, obj.tower_id, write=True)
     device_validate(db, user, data, obj)
+    if (obj.ip_address, obj.snmp_profile_id, obj.enabled) != (data.ip_address, data.snmp_profile_id, data.enabled):
+        obj.last_poll = None
+        obj.status = "unknown"
+        obj.failures = 0
     for key, value in data.model_dump().items():
         setattr(obj, key, value)
     commit(db, user, "device.update", obj.id)
@@ -481,17 +506,25 @@ def delete_device(device_id: str, user=Depends(current_user), db=Depends(get_db)
 
 @app.get("/api/snmp-profiles")
 def profiles(user=Depends(owner), db=Depends(get_db)):
-    return [public(x) for x in db.scalars(select(SNMPProfile))]
+    result = []
+    for profile in db.scalars(select(SNMPProfile)):
+        item = public(profile)
+        try:
+            item['version'] = json.loads(cipher().decrypt(profile.encrypted_credentials.encode())).get('version', '3')
+        except Exception:
+            item['version'] = 'unknown'
+        result.append(item)
+    return result
 
 
 @app.post("/api/snmp-profiles", status_code=201)
 def add_profile(data: ProfileInput, user=Depends(owner), db=Depends(get_db)):
-    secret = cipher().encrypt(json.dumps(data.model_dump(exclude={"name"})).encode()).decode()
+    secret = cipher().encrypt(json.dumps(data.model_dump(exclude={"name"}, exclude_none=True)).encode()).decode()
     obj = SNMPProfile(name=data.name, encrypted_credentials=secret)
     db.add(obj)
     db.flush()
     commit(db, user, "snmp.create", obj.id)
-    return public(obj)
+    return {**public(obj), "version": data.version}
 
 
 @app.get("/api/devices/{device_id}/metrics")

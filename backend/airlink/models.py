@@ -189,6 +189,13 @@ class SAS4UserConnection(Base):
     updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class CustomerProbeSettings(Base):
+    __tablename__ = "customer_probe_settings"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    encrypted_settings = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
 class PaymentGateway(Base):
     __tablename__ = 'payment_gateways'
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)

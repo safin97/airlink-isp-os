@@ -33,3 +33,7 @@ Use a configured HTTPS DNS name and a trusted certificate, or route access over 
 Use a dedicated 40 GiB virtual target disk and a separate protected disk; never pass host block devices through to the VM. The explicit QA harness checks the VM SMBIOS identity and disk serials before selecting a target. It does not bypass the installer identity/mount checks. Boot-menu and graphical review are separate from the unattended install exercise. Consult the test-results directory and PROGRESS.md for actual outcomes.
 
 Unconfirmed network profiles have autoconnect disabled. A reboot during the confirmation window therefore leaves the previous automatic connection eligible to start. Autoconnect is enabled for the new profile only after the owner explicitly confirms it.
+
+## Local-IP HTTPS after application update 0.1.8
+
+Open `https://YOUR-AIRLINK-PC-IP`. HTTP redirects to HTTPS. The device's self-signed certificate contains current IP addresses and is maintained on startup/update; browsers must trust the device certificate or explicitly accept it after verifying the PC. A private IP cannot obtain a public-domain certificate through this feature. Operator-installed certificates are preserved. After changing the PC's IP, restart it to refresh its managed certificate. HTTPS dashboard assets revalidate so a browser refresh loads the installed version.

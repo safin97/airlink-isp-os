@@ -30,10 +30,7 @@ PY
   chown root:airlink /etc/airlink/airlink.env
   chmod 0640 /etc/airlink/airlink.env
 fi
-if [ ! -f /etc/airlink/tls.key ]; then
-  openssl req -x509 -nodes -newkey rsa:3072 -days 365 -keyout /etc/airlink/tls.key -out /etc/airlink/tls.crt \
-    -subj '/CN=airlink.local/O=AirLink ISP OS' -addext 'subjectAltName=DNS:airlink.local,DNS:airlink'
-fi
+/opt/airlink/venv/bin/python /opt/airlink/deployment/dashboard_https.py
 # PostgreSQL uses local peer authentication; no database passwords are embedded.
 cluster=$(pg_lsclusters --no-header | awk 'NR==1 {print $1 " " $2}')
 read -r pgversion pgname <<< "$cluster"
@@ -47,6 +44,6 @@ if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='
 fi
 /bin/bash /opt/airlink/deployment/migrate.sh
 nginx -t
-systemctl enable postgresql redis-server nginx NetworkManager nftables airlink-api airlink-monitor airlink-alerts airlink-controller airlink-console airlink-health.timer
+systemctl enable postgresql redis-server nginx NetworkManager nftables airlink-api airlink-monitor airlink-alerts airlink-controller airlink-console airlink-health.timer airlink-https.service
 pg_ctlcluster --skip-systemctl-redirect "$pgversion" "$pgname" stop
 touch /etc/airlink/provisioned

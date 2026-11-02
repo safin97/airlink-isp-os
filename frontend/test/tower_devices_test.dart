@@ -32,6 +32,7 @@ void main() {
           {
             'id': '1',
             'name': 'North online',
+            'snmp_status': 'connected',
             'tower_id': 'north',
             'ip_address': '192.0.2.1',
             'status': 'online',
@@ -39,6 +40,7 @@ void main() {
           {
             'id': '2',
             'name': 'North offline',
+            'snmp_status': 'failed',
             'tower_id': 'north',
             'ip_address': '192.0.2.2',
             'status': 'offline',
@@ -46,6 +48,7 @@ void main() {
           {
             'id': '3',
             'name': 'North unknown',
+            'snmp_status': 'pending',
             'tower_id': 'north',
             'ip_address': '192.0.2.3',
             'status': 'unknown',
@@ -81,6 +84,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Devices at North'), findsOneWidget);
       expect(find.text('3 devices'), findsOneWidget);
+      expect(find.text('SNMP status'), findsOneWidget);
+      expect(find.text('Connected'), findsOneWidget);
+      expect(find.text('Failed'), findsOneWidget);
+      expect(find.text('Waiting for poll'), findsOneWidget);
       for (final name in ['North online', 'North offline', 'North unknown']) {
         expect(find.text(name), findsOneWidget);
       }

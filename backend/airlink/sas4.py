@@ -16,8 +16,10 @@ from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .db import get_db
-from .models import SAS4UserConnection, now, audit
+from .models import SAS4UserConnection, CustomerProbeSettings, now, audit
 from .security import cipher, current_user
+from .client_telemetry import attach_telemetry
+from .customer_probes import configuration as probe_configuration, service as customer_probe_service
 
 router = APIRouter(prefix='/api/integrations/sas4', tags=['SAS4'])
 DEFAULT_SERVER = 'http://airlinkcom.online'
@@ -230,6 +232,54 @@ def sas4_access(user=Depends(current_user)):
     return user
 
 
+class ProbeSettingsInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: bool = True
+    community: Optional[str] = Field(default=None, max_length=255)
+    api_username: str = Field(default='', max_length=128)
+    api_password: Optional[str] = Field(default=None, max_length=1024)
+    verify_tls: bool = True
+    allow_http: bool = False
+
+
+def public_probe_settings(config):
+    return {key: config[key] for key in ('enabled', 'api_username', 'verify_tls', 'allow_http')} | {
+        'has_community': bool(config['community']), 'has_api_password': bool(config['api_password']),
+        'saved_snmp_profiles': len(config['snmp_candidates'])}
+
+
+@router.get('/device-access')
+def get_probe_settings(user=Depends(sas4_access), db=Depends(get_db)):
+    return public_probe_settings(probe_configuration(db, user))
+
+
+@router.put('/device-access')
+def save_probe_settings(data: ProbeSettingsInput, user=Depends(sas4_access), db=Depends(get_db)):
+    config = probe_configuration(db, user)
+    if data.api_username and data.api_username != config['api_username'] and not data.api_password:
+        raise HTTPException(422, 'Enter the device API password when changing the username')
+    if data.community is not None and data.community and not data.community.strip():
+        raise HTTPException(422, 'Enter a valid SNMP community')
+    for key in ('enabled', 'api_username', 'verify_tls', 'allow_http'):
+        config[key] = getattr(data, key)
+    if data.community is not None:
+        config['community'] = data.community
+    if data.api_password:
+        config['api_password'] = data.api_password
+    if not data.api_username:
+        config['api_password'] = ''
+    config.pop('snmp_candidates', None)
+    obj = db.get(CustomerProbeSettings, user.id)
+    if obj is None:
+        obj = CustomerProbeSettings(user_id=user.id)
+        db.add(obj)
+    obj.encrypted_settings = cipher().encrypt(json.dumps(config).encode()).decode()
+    obj.updated_at = now()
+    audit(db, user, 'customer_probe.configure', user.id)
+    db.commit()
+    return public_probe_settings(probe_configuration(db, user))
+
+
 @router.get('')
 def get_connection(user=Depends(sas4_access), db=Depends(get_db)):
     return connection_status(db.get(SAS4UserConnection, user.id))
@@ -289,7 +339,8 @@ def get_online_users(page: int = Query(1, ge=1, le=1000000), search: str = Query
         raise HTTPException(409, 'Configure the SAS4 connection first')
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
-        return fetch_clients(connection, password, page, search, online=True)
+        result = attach_telemetry(db, user, fetch_clients(connection, password, page, search, online=True))
+        return customer_probe_service.enrich(db, user, result)
     except InvalidToken as exc:
         raise HTTPException(503, 'SAS4 credentials cannot be decrypted. Save the password again.') from exc
     except SAS4Error as exc:

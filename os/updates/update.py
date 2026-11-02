@@ -81,7 +81,8 @@ def download(url, destination, limit, progress=None):
     total = 0
     last_progress = 0
     temp = destination.with_suffix(".partial")
-    with opener.open(url, timeout=30) as source, open(temp, "wb") as out:
+    request = urllib.request.Request(url, headers={"Cache-Control": "no-cache", "Pragma": "no-cache"})
+    with opener.open(request, timeout=30) as source, open(temp, "wb") as out:
         while True:
             chunk = source.read(1024 * 1024)
             if not chunk:

@@ -71,7 +71,7 @@ class DeviceInput(Strict):
     sector_id: Optional[str] = None
     name: str = Field(min_length=1, max_length=120)
     ip_address: str
-    vendor: Literal["generic", "mikrotik", "ubiquiti", "mimosa"] = "generic"
+    vendor: Literal["generic", "mikrotik", "ubiquiti", "ubiquiti_m5", "ubiquiti_ac", "mimosa"] = "generic"
     model: str = Field(default="", max_length=120)
     snmp_profile_id: Optional[str] = None
     poll_interval: int = Field(default=60, ge=15, le=86400)
@@ -90,9 +90,20 @@ class DeviceInput(Strict):
 
 class ProfileInput(Strict):
     name: str = Field(min_length=1, max_length=120)
-    username: str = Field(min_length=1, max_length=32)
-    auth_key: str = Field(min_length=12, max_length=128)
-    priv_key: str = Field(min_length=12, max_length=128)
+    version: Literal["1", "2c", "3"] = "3"
+    community: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    username: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    auth_key: Optional[str] = Field(default=None, min_length=12, max_length=128)
+    priv_key: Optional[str] = Field(default=None, min_length=12, max_length=128)
+
+    @model_validator(mode="after")
+    def credentials_for_version(self):
+        if self.version == "3":
+            if not all((self.username, self.auth_key, self.priv_key)) or self.community is not None:
+                raise ValueError("SNMPv3 requires username, authentication and privacy keys")
+        elif not self.community or not self.community.strip() or any((self.username, self.auth_key, self.priv_key)):
+            raise ValueError("SNMPv1/v2c requires a community string only")
+        return self
 
 
 class LinkInput(Strict):

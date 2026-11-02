@@ -1,5 +1,7 @@
 // UI copy: English key → Kurdish Badini (Arabic script), Arabic.
 const translations = <String, List<String>>{
+  "Ethernet speed": ["خێراییا ئێتەرنێتێ", "سرعة الإيثرنت"],
+  "Signal": ["ئیشارەت", "الإشارة"],
   "Language": ["زمان", "اللغة"],
   "Dashboard": ["داشبۆرد", "لوحة التحكم"],
   "NOC Screen": ["شاشەیا چاڤدێریێ", "شاشة مركز العمليات"],

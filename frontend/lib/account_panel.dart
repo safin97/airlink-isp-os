@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_connection.dart';
 import 'payment_settings.dart';
+import 'customer_device_access.dart';
 
 class AccountPanel extends StatefulWidget {
   final Api api;
@@ -202,6 +203,8 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
                     if (['owner', 'manager'].contains(user['role'])) ...[
                       const Divider(height: 40),
                       Sas4Connection(api: widget.api),
+                      const Divider(height: 32),
+                      CustomerDeviceAccess(api: widget.api),
                       const Divider(height: 32),
                       PaymentSettings(api: widget.api),
                     ],

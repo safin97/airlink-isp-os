@@ -4,6 +4,7 @@ import sys
 import secrets
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 sys.path.insert(0,str(ROOT/'backend'))
 os.environ['DATABASE_URL']='sqlite:////tmp/airlink-browser-qa.sqlite'
 os.environ['AIRLINK_JWT_SECRET']=secrets.token_urlsafe(64)

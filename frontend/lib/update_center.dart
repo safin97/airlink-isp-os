@@ -23,7 +23,6 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   bool checking = false;
   bool busy = false;
   bool fetching = false;
-  DateTime? lastAutomaticCheck;
   Timer? timer;
 
   Map get service => snapshot?['state'] as Map? ?? {};
@@ -36,10 +35,6 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       const {'queued', 'installing'}.contains(installation['status']);
   bool get restartPending => service['restart']?['pending'] == true;
   bool get restartSupported => service['restart_supported'] == true;
-  bool get autoCheckDue =>
-      lastAutomaticCheck == null ||
-      DateTime.now().difference(lastAutomaticCheck!) >=
-          const Duration(minutes: 5);
 
   @override
   void initState() {
@@ -47,7 +42,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
     refresh(check: true);
     timer = Timer.periodic(const Duration(seconds: 3), (tick) {
       if (busy || installing || restartPending || tick.tick % 10 == 0) {
-        refresh(check: !busy && !installing && !restartPending && autoCheckDue);
+        refresh(check: !busy && !installing && !restartPending);
       }
     });
   }
@@ -71,7 +66,6 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       if (check &&
           data['state']?['configured'] == true &&
           data['state']?['state']?['status'] != 'installing') {
-        lastAutomaticCheck = DateTime.now();
         await widget.api.request('/updates/check', method: 'POST', body: {});
         data = Map<String, dynamic>.from(await widget.api.request('/updates'));
       }

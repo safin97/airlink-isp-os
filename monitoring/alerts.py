@@ -13,7 +13,7 @@ def evaluate(db, device, metric):
     conditions = {
         "unreachable": (bool(fresh and device.status == "offline"), "critical", "Device failed its availability threshold"),
         "cpu_high": (bool(fresh and metric and metric.values.get("cpu_percent", 0) >= device.cpu_threshold), "warning", "CPU usage exceeds configured threshold"),
-        "snmp_failed": (bool(fresh and metric and metric.values.get("snmp_up") is False), "warning", "SNMPv3 polling failed"),
+        "snmp_failed": (bool(fresh and metric and metric.values.get("snmp_up") is False), "warning", "SNMP polling failed"),
         "stale": (bool(not fresh), "warning", "Monitoring data is stale or has not arrived"),
     }
     for kind, (active, severity, message) in conditions.items():
