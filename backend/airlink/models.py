@@ -169,3 +169,51 @@ class AuditLog(Base):
 
 def audit(db, user, action, target=None):
     db.add(AuditLog(user_id=user.id if user else None, action=action, target=target))
+
+
+class SAS4Connection(Base):
+    __tablename__ = "sas4_connection"
+    id = Column(Integer, primary_key=True)
+    server_url = Column(String(500), nullable=False)
+    username = Column(String(128), nullable=False)
+    encrypted_password = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    __table_args__ = (CheckConstraint("id = 1"),)
+
+
+class SAS4UserConnection(Base):
+    __tablename__ = "sas4_user_connections"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    username = Column(String(128), nullable=False)
+    encrypted_password = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class PaymentGateway(Base):
+    __tablename__ = 'payment_gateways'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    provider = Column(String(16), primary_key=True)
+    environment = Column(String(16), nullable=False, default='sandbox')
+    encrypted_credentials = Column(Text, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class RechargePayment(Base):
+    __tablename__ = 'recharge_payments'
+    __table_args__ = (UniqueConstraint('provider', 'environment', 'provider_id', name='uq_recharge_provider_payment'),)
+    id = Column(String(32), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    sas4_user_id = Column(Integer, nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    provider = Column(String(16), nullable=False)
+    environment = Column(String(16), nullable=False)
+    encrypted_credentials = Column(Text, nullable=False)
+    status = Column(String(32), nullable=False, index=True)
+    amount = Column(String(40), nullable=False)
+    currency = Column(String(8), nullable=False)
+    provider_id = Column(String(128), nullable=True)
+    quote = Column(JSON, nullable=False)
+    checkout = Column(JSON, nullable=True)
+    detail = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, nullable=False)

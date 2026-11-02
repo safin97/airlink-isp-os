@@ -99,3 +99,31 @@ class LinkInput(Strict):
     source_id: str
     target_id: str
     evidence: str = Field(min_length=10, max_length=500)
+
+
+class DiscoveryInput(Strict):
+    prefix: int = Field(default=24, ge=24, le=32)
+
+
+class ManagerUpdate(Strict):
+    role: Optional[Literal["manager", "technician", "viewer"]] = None
+    username: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_.-]+$")
+    password: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def optional_password(cls, value):
+        return None if value in (None, "") else password_valid(value)
+
+
+class PasswordChange(Strict):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=14, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+    _strong = field_validator('new_password')(password_valid)
+
+    @model_validator(mode='after')
+    def matches(self):
+        if self.new_password != self.confirm_password:
+            raise ValueError('New passwords do not match')
+        return self

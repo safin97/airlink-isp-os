@@ -5,23 +5,24 @@ import json
 import secrets
 import socket
 import jwt
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import os
 from datetime import timedelta
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select, func, text, delete
+from sqlalchemy import select, func, text, delete, update
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import __version__
+from . import __version__, discovery, sas4, payments
 from .config import settings
 from .db import get_db, SessionLocal
 from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Sector, Device,
                      DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
                        current_user, owner, resolve_user, cipher, bearer)
-from .schemas import Login, Setup, UserInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput
+from .schemas import Login, Setup, UserInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange
 
 cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
 
@@ -29,10 +30,19 @@ cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect
 @asynccontextmanager
 async def lifespan(app):
     settings.validate()
-    yield
+    task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
+app.include_router(sas4.router)
+app.include_router(payments.router)
 
 
 @app.middleware("http")
@@ -206,6 +216,20 @@ def me(user=Depends(current_user)):
     return public(user)
 
 
+@app.put("/api/auth/password")
+def change_password(data: PasswordChange, credentials=Depends(bearer), user=Depends(current_user), db=Depends(get_db)):
+    limited("password-change:" + user.id, limit=8)
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(403, "Current password is incorrect")
+    claims = jwt.decode(credentials.credentials, settings.secret, algorithms=["HS256"],
+                        audience="airlink-dashboard", issuer="airlink")
+    user.password_hash = hasher.hash(data.new_password)
+    db.execute(update(LoginSession).where(LoginSession.user_id == user.id,
+        LoginSession.id != claims['sid']).values(revoked=True))
+    commit(db, user, "auth.password_change", user.id)
+    return {"ok": True}
+
+
 @app.get("/api/users")
 def users(user=Depends(owner), db=Depends(get_db)):
     return [public(x) for x in db.scalars(select(User).order_by(User.username))]
@@ -218,6 +242,48 @@ def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
     db.flush()
     commit(db, user, "user.create", obj.id)
     return public(obj)
+
+
+@app.put("/api/users/{user_id}")
+def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depends(get_db)):
+    obj = get(db, User, user_id)
+    if obj.role == "owner":
+        raise HTTPException(409, "Owner accounts cannot be edited here")
+    next_role = data.role or obj.role
+    role_changed = next_role != obj.role
+    changed = obj.username != data.username or data.password is not None or role_changed
+    if role_changed:
+        previous_role = obj.role
+        if previous_role == 'manager':
+            db.execute(update(Tower).where(Tower.manager_id == obj.id).values(manager_id=None))
+        if previous_role == 'technician':
+            db.execute(delete(DeviceAssignment).where(DeviceAssignment.user_id == obj.id))
+        obj.role = next_role
+        audit(db, user, 'user.role_change', f'{obj.id}:{previous_role}->{next_role}')
+    obj.username = data.username
+    if data.password is not None:
+        obj.password_hash = hasher.hash(data.password)
+    if changed:
+        db.execute(update(LoginSession).where(LoginSession.user_id == obj.id).values(revoked=True))
+    commit(db, user, "user.update", obj.id)
+    return public(obj)
+
+
+@app.delete("/api/users/{user_id}", status_code=204)
+def delete_account(user_id: str, user=Depends(owner), db=Depends(get_db)):
+    obj = get(db, User, user_id)
+    if obj.role == "owner":
+        raise HTTPException(409, "Owner accounts cannot be deleted here")
+    # Preserve inventory and audit history while removing credentials and sessions.
+    db.execute(update(Tower).where(Tower.manager_id == obj.id).values(manager_id=None))
+    db.execute(delete(DeviceAssignment).where(DeviceAssignment.user_id == obj.id))
+    db.execute(delete(RefreshToken).where(RefreshToken.session_id.in_(
+        select(LoginSession.id).where(LoginSession.user_id == obj.id))))
+    db.execute(delete(LoginSession).where(LoginSession.user_id == obj.id))
+    db.execute(update(AuditLog).where(AuditLog.user_id == obj.id).values(user_id=None))
+    target = f"{obj.id}:{obj.username}"
+    db.delete(obj)
+    commit(db, user, "user.delete", target)
 
 
 @app.post("/api/users/{user_id}/disable")
@@ -271,6 +337,37 @@ def add_tower(data: TowerInput, user=Depends(owner), db=Depends(get_db)):
     db.flush()
     commit(db, user, "tower.create", obj.id)
     return public(obj)
+
+
+@app.post("/api/towers/{tower_id}/discover")
+def discover_tower(tower_id: str, data: DiscoveryInput, user=Depends(current_user), db=Depends(get_db)):
+    tower = check_tower(db, user, tower_id, write=True)
+    try:
+        network = discovery.management_network(tower.management_ip, data.prefix)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    # One scan at a time per tower, including across API workers.
+    try:
+        lock = cache.lock("discovery:" + tower_id, timeout=60, blocking=False)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(409, "Discovery is already running for this tower")
+    except RedisError as exc:
+        raise HTTPException(503, "Discovery coordination is unavailable") from exc
+    try:
+        commit(db, user, "tower.discover", f"{tower_id}:{network}")
+        try:
+            addresses = discovery.scan(network)
+        except (RuntimeError, OSError) as exc:
+            raise HTTPException(503, str(exc)) from exc
+        existing = set(db.scalars(select(Device.ip_address).where(Device.ip_address.in_(addresses))))
+        return {"network": str(network), "scanned": len(list(network.hosts())),
+                "hosts": [{"ip_address": ip, "already_added": ip in existing} for ip in addresses]}
+    finally:
+        try:
+            if lock.owned():
+                lock.release()
+        except RedisError:
+            pass
 
 
 @app.put("/api/towers/{tower_id}")
