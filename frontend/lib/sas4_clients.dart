@@ -1,3 +1,5 @@
+import 'app_theme.dart';
+import 'app_language.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -18,7 +20,7 @@ class Sas4Clients extends StatefulWidget {
   State<Sas4Clients> createState() => _Sas4ClientsState();
 }
 
-class _Sas4ClientsState extends State<Sas4Clients> {
+class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   final search = TextEditingController();
   Timer? refreshTimer;
   bool busy = true;
@@ -154,38 +156,43 @@ class _Sas4ClientsState extends State<Sas4Clients> {
         'Total users',
         'total_users',
         Icons.people_outline,
-        const Color(0xff438fff),
+        themeColor(0xff438fff, 0xff2455ca),
       ),
       (
         'Active users',
         'active_users',
         Icons.verified_user_outlined,
-        const Color(0xff34d399),
+        themeColor(0xff34d399, 0xff087f5b),
       ),
-      ('Online users', 'online_users', Icons.wifi, const Color(0xff38bdf8)),
+      (
+        'Online users',
+        'online_users',
+        Icons.wifi,
+        themeColor(0xff38bdf8, 0xff00749b),
+      ),
       (
         'Expired users',
         'expired_users',
         Icons.event_busy_outlined,
-        const Color(0xffff7385),
+        themeColor(0xffff7385, 0xffbb253e),
       ),
       (
         'About to expire',
         'about_to_expire',
         Icons.schedule,
-        const Color(0xffffb454),
+        themeColor(0xffffb454, 0xff995000),
       ),
       (
         'Balance',
         'balance',
         Icons.account_balance_wallet_outlined,
-        const Color(0xffa78bfa),
+        themeColor(0xffa78bfa, 0xff7144be),
       ),
       (
         'Reward points',
         'reward_points',
         Icons.stars_outlined,
-        const Color(0xfffacc15),
+        themeColor(0xfffacc15, 0xff8a6500),
       ),
     ];
     return LayoutBuilder(
@@ -215,7 +222,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                     children: [
                       Icon(card.$3, color: card.$4, size: 26),
                       const Spacer(),
-                      Text(
+                      AppText(
                         card.$1,
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
@@ -239,7 +246,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      Text(
+                      AppText(
                         value == null
                             ? (busy ? 'Loading…' : 'Unavailable')
                             : card.$2 == 'about_to_expire'
@@ -247,9 +254,9 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                             : ['balance', 'reward_points'].contains(card.$2)
                             ? 'Your SAS4 account'
                             : 'From SAS4',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xff99acc6),
+                          color: themeColor(0xff99acc6, 0xff52627a),
                         ),
                       ),
                     ],
@@ -274,25 +281,25 @@ class _Sas4ClientsState extends State<Sas4Clients> {
   }
 
   Color statusColor(dynamic status) => switch (status) {
-    'online' => const Color(0xff38bdf8),
-    'active • online' => const Color(0xff438fff),
-    'active • offline' => const Color(0xff34d399),
-    'expired' || 'expired • offline' => const Color(0xffff7385),
-    'expired • online' => const Color(0xffffb454),
+    'online' => themeColor(0xff38bdf8, 0xff00749b),
+    'active • online' => themeColor(0xff438fff, 0xff2455ca),
+    'active • offline' => themeColor(0xff34d399, 0xff087f5b),
+    'expired' || 'expired • offline' => themeColor(0xffff7385, 0xffbb253e),
+    'expired • online' => themeColor(0xffffb454, 0xff995000),
     'limited' ||
     'limited • online' ||
-    'expired / limited • online' => const Color(0xfffacc15),
-    'disabled • online' => const Color(0xffb09acb),
-    'active' => const Color(0xff99acc6),
-    'disabled' => const Color(0xffff7385),
-    'expired / limited' => const Color(0xffffb454),
-    _ => const Color(0xff99acc6),
+    'expired / limited • online' => themeColor(0xfffacc15, 0xff8a6500),
+    'disabled • online' => themeColor(0xffb09acb, 0xff795391),
+    'active' => themeColor(0xff99acc6, 0xff52627a),
+    'disabled' => themeColor(0xffff7385, 0xffbb253e),
+    'expired / limited' => themeColor(0xffffb454, 0xff995000),
+    _ => themeColor(0xff99acc6, 0xff52627a),
   };
 
   @override
   Widget build(BuildContext context) {
     if (!canConnect) {
-      return const Text(
+      return const AppText(
         'Manager access is required to connect and view SAS4 clients.',
       );
     }
@@ -302,7 +309,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
+        AppText(
           viewingDashboard
               ? 'ISP Card • Dashboard'
               : onlineOnly
@@ -314,7 +321,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
           ),
         ),
         const SizedBox(height: 8),
-        Text(
+        AppText(
           'Your SAS4 account • Refreshes every 30 seconds',
           style: TextStyle(fontSize: viewingDashboard ? null : 13),
         ),
@@ -322,8 +329,8 @@ class _Sas4ClientsState extends State<Sas4Clients> {
         if (!busy && !configured)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 20),
-            child: Text(
-              'Open My account at the top right to set up your SAS4 connection.',
+            child: AppText(
+              'Open My account below Settings in the sidebar to set up your SAS4 connection.',
             ),
           ),
         if (error != null)
@@ -347,7 +354,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(
                 '$warning',
-                style: const TextStyle(color: Color(0xffffb454)),
+                style: TextStyle(color: themeColor(0xffffb454, 0xff995000)),
               ),
             ),
           if (dashboard?['fetched_at'] != null)
@@ -355,7 +362,10 @@ class _Sas4ClientsState extends State<Sas4Clients> {
               padding: const EdgeInsets.only(top: 12),
               child: Text(
                 'Fetched ${DateTime.tryParse(dashboard!['fetched_at'])?.toLocal().toString().split('.').first ?? 'now'}',
-                style: const TextStyle(fontSize: 12, color: Color(0xff99acc6)),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: themeColor(0xff99acc6, 0xff52627a),
+                ),
               ),
             ),
         ],
@@ -372,7 +382,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                   controller: search,
                   style: const TextStyle(fontSize: 14),
                   enabled: !busy,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(
                       horizontal: 10,
@@ -383,7 +393,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                       minHeight: 34,
                     ),
                     prefixIcon: Icon(Icons.search, size: 18),
-                    hintText: 'Search users',
+                    hintText: tr('Search users'),
                   ),
                   onSubmitted: (_) => fetch(newSearch: true),
                 ),
@@ -396,7 +406,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                   visualDensity: VisualDensity.compact,
                 ),
                 onPressed: busy ? null : () => fetch(newSearch: true),
-                child: const Text('Search'),
+                child: const AppText('Search'),
               ),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
@@ -407,7 +417,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                 ),
                 onPressed: busy ? null : () => fetch(page: page),
                 icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Refresh users'),
+                label: const AppText('Refresh users'),
               ),
             ],
           ),
@@ -421,7 +431,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
           if (rows.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
-              child: Text('No users match this search.'),
+              child: AppText('No users match this search.'),
             )
           else
             SingleChildScrollView(
@@ -444,25 +454,45 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                 ),
                 columns: [
                   for (final label in [
+                    'Status',
                     'Username',
                     'Name',
                     'Profile',
-                    'Status',
                     if (onlineOnly) 'IP address',
                     'Expiration',
                     'SAS4 manager',
                   ])
-                    DataColumn(label: Text(label)),
+                    DataColumn(label: AppText(label)),
                 ],
                 rows: rows
                     .map(
                       (row) => DataRow(
                         cells: [
                           DataCell(
+                            Tooltip(
+                              message: statusLabel(
+                                row,
+                              ).split(' • ').map(tr).join(' • '),
+                              child: Semantics(
+                                label: statusLabel(
+                                  row,
+                                ).split(' • ').map(tr).join(' • '),
+                                child: Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: statusColor(statusLabel(row)),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          DataCell(
                             Text(
                               text(row['username']),
-                              style: TextStyle(
-                                color: statusColor(statusLabel(row)),
+                              style: const TextStyle(
+                                color: Colors.black,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -472,14 +502,6 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                           ),
                           DataCell(Text(text(row['name']))),
                           DataCell(Text(text(row['profile']))),
-                          DataCell(
-                            Text(
-                              statusLabel(row),
-                              style: TextStyle(
-                                color: statusColor(statusLabel(row)),
-                              ),
-                            ),
-                          ),
                           if (onlineOnly)
                             DataCell(SelectableText(text(row['ip_address']))),
                           DataCell(Text(text(row['expiration']))),
@@ -506,7 +528,7 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                     ? null
                     : () => fetch(page: page - 1),
                 icon: const Icon(Icons.chevron_left, size: 16),
-                label: const Text('Previous'),
+                label: const AppText('Previous'),
               ),
               Text(
                 'Page $page of $lastPage',
@@ -523,11 +545,14 @@ class _Sas4ClientsState extends State<Sas4Clients> {
                     ? null
                     : () => fetch(page: page + 1),
                 icon: const Icon(Icons.chevron_right, size: 16),
-                label: const Text('Next'),
+                label: const AppText('Next'),
               ),
               Text(
                 'Fetched ${DateTime.tryParse(result!['fetched_at'] ?? '')?.toLocal().toString().split('.').first ?? 'now'}',
-                style: const TextStyle(fontSize: 12, color: Color(0xff99acc6)),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: themeColor(0xff99acc6, 0xff52627a),
+                ),
               ),
             ],
           ),

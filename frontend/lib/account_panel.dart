@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -11,7 +12,7 @@ class AccountPanel extends StatefulWidget {
   State<AccountPanel> createState() => _AccountPanelState();
 }
 
-class _AccountPanelState extends State<AccountPanel> {
+class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
   final current = TextEditingController();
   final next = TextEditingController();
   final confirm = TextEditingController();
@@ -89,7 +90,7 @@ class _AccountPanelState extends State<AccountPanel> {
           children: [
             const Padding(
               padding: EdgeInsets.all(20),
-              child: Text(
+              child: AppText(
                 'My account',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
               ),
@@ -120,7 +121,7 @@ class _AccountPanelState extends State<AccountPanel> {
                         'Account created: ${user['created_at'].toString().split('T').first}',
                       ),
                     const Divider(height: 32),
-                    const Text(
+                    const AppText(
                       'Change password',
                       style: TextStyle(
                         fontSize: 20,
@@ -137,8 +138,8 @@ class _AccountPanelState extends State<AccountPanel> {
                             controller: current,
                             obscureText: true,
                             enabled: !busy,
-                            decoration: const InputDecoration(
-                              labelText: 'Current password',
+                            decoration: InputDecoration(
+                              labelText: tr('Current password'),
                             ),
                             validator: (v) =>
                                 v == null || v.isEmpty ? 'Required' : null,
@@ -148,8 +149,8 @@ class _AccountPanelState extends State<AccountPanel> {
                             controller: next,
                             obscureText: true,
                             enabled: !busy,
-                            decoration: const InputDecoration(
-                              labelText: 'New password',
+                            decoration: InputDecoration(
+                              labelText: tr('New password'),
                               helperText:
                                   '14–128 characters, with at least 8 different characters.',
                             ),
@@ -166,8 +167,8 @@ class _AccountPanelState extends State<AccountPanel> {
                             controller: confirm,
                             obscureText: true,
                             enabled: !busy,
-                            decoration: const InputDecoration(
-                              labelText: 'Confirm new password',
+                            decoration: InputDecoration(
+                              labelText: tr('Confirm new password'),
                             ),
                             validator: (v) => v != next.text
                                 ? 'Passwords do not match'
@@ -176,7 +177,9 @@ class _AccountPanelState extends State<AccountPanel> {
                           const SizedBox(height: 16),
                           FilledButton(
                             onPressed: busy ? null : changePassword,
-                            child: Text(busy ? 'Saving…' : 'Change password'),
+                            child: AppText(
+                              busy ? 'Saving…' : 'Change password',
+                            ),
                           ),
                         ],
                       ),
@@ -213,7 +216,7 @@ class _AccountPanelState extends State<AccountPanel> {
                 alignment: Alignment.centerRight,
                 child: TextButton(
                   onPressed: busy ? null : () => Navigator.pop(context),
-                  child: const Text('Done'),
+                  child: const AppText('Done'),
                 ),
               ),
             ),

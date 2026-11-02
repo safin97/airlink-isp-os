@@ -92,12 +92,11 @@ void main() {
         await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
         expect(writes, isEmpty);
+        for (final type in ['credit', 'fib', 'fastpay', 'extend', 'card']) {
+          expect(find.byKey(ValueKey('recharge-method-$type')), findsOneWidget);
+        }
         if (method != 'credit') {
-          await tester.tap(find.byType(DropdownButtonFormField<String>));
-          await tester.pumpAndSettle();
-          await tester.tap(
-            find.text(method == 'extend' ? 'Extend service' : 'FIB Bank').last,
-          );
+          await tester.tap(find.byKey(ValueKey('recharge-method-$method')));
           await tester.pumpAndSettle();
         }
         if (method == 'extend') {

@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
@@ -14,7 +15,8 @@ class TowerDiscoveryDialog extends StatefulWidget {
   State<TowerDiscoveryDialog> createState() => _TowerDiscoveryDialogState();
 }
 
-class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
+class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
+    with LanguageRebuild {
   int prefix = 24;
   bool busy = false;
   String? error;
@@ -93,13 +95,13 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
                   'Management IP: ${widget.tower['management_ip'] ?? 'Not set'}',
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                const AppText(
                   'Ping the subnet containing this IP from the AirLink server. Choose the prefix that matches your network. Devices that block ping will not appear.',
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<int>(
                   initialValue: prefix,
-                  decoration: const InputDecoration(labelText: 'Subnet prefix'),
+                  decoration: InputDecoration(labelText: tr('Subnet prefix')),
                   items: [
                     for (int p = 24; p <= 32; p++)
                       DropdownMenuItem(
@@ -122,7 +124,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
                 FilledButton.icon(
                   onPressed: busy ? null : scan,
                   icon: const Icon(Icons.radar),
-                  label: const Text('Discover with ping'),
+                  label: const AppText('Discover with ping'),
                 ),
                 if (busy) ...[
                   const SizedBox(height: 16),
@@ -142,7 +144,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
                   const SizedBox(height: 16),
                   Text(summary!),
                   if (hosts.isEmpty)
-                    const Text(
+                    const AppText(
                       'No ping replies. Check the subnet, routing, and ICMP firewall rules.',
                     ),
                 ],
@@ -159,7 +161,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
                         ? const Icon(Icons.check)
                         : TextButton(
                             onPressed: busy ? null : () => addHosts([host]),
-                            child: const Text('Add'),
+                            child: const AppText('Add'),
                           ),
                   ),
               ],
@@ -174,7 +176,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog> {
             ),
           TextButton(
             onPressed: busy ? null : () => Navigator.pop(context),
-            child: const Text('Done'),
+            child: const AppText('Done'),
           ),
         ],
       ),

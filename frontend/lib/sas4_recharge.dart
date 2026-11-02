@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -17,7 +18,7 @@ class Sas4Recharge extends StatefulWidget {
   State<Sas4Recharge> createState() => _Sas4RechargeState();
 }
 
-class _Sas4RechargeState extends State<Sas4Recharge> {
+class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
   final pin = TextEditingController();
   final form = GlobalKey<FormState>();
   Map<String, dynamic>? info;
@@ -240,10 +241,10 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         if (order!['environment'] == 'sandbox')
-          const Text('Sandbox payment: no real service will be recharged.'),
+          const AppText('Sandbox payment: no real service will be recharged.'),
         const SizedBox(height: 12),
         if (status == 'pending') ...[
-          const Text(
+          const AppText(
             'Scan with the banking app to pay. Payment is verified automatically before service is recharged.',
           ),
           const SizedBox(height: 12),
@@ -253,7 +254,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                 base64Decode((checkout['qr_data'] as String).split(',').last),
                 width: 240,
                 height: 240,
-                errorBuilder: (_, _, _) => const Text(
+                errorBuilder: (_, _, _) => const AppText(
                   'QR image unavailable. Use the payment code below.',
                 ),
               ),
@@ -265,7 +266,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                 width: 240,
                 height: 240,
                 webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
-                errorBuilder: (_, _, _) => const Text(
+                errorBuilder: (_, _, _) => const AppText(
                   'QR image unavailable. Check merchant setup before retrying.',
                 ),
               ),
@@ -294,10 +295,89 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
           'Reference: ${order!['id']}',
           style: const TextStyle(fontSize: 12),
         ),
-        const Text(
+        const AppText(
           'You can close this window. Payment checks continue on the server.',
           style: TextStyle(fontSize: 12),
         ),
+      ],
+    );
+  }
+
+  Widget rechargeMethods() {
+    final colors = Theme.of(context).colorScheme;
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final type in const [
+          ('credit', 'Manager balance', Icons.account_balance_wallet_outlined),
+          ('fib', 'FIB Bank', Icons.account_balance_outlined),
+          ('fastpay', 'FastPay', Icons.payments_outlined),
+          ('extend', 'Extend service', Icons.more_time),
+          ('card', 'Card PIN', Icons.credit_card_outlined),
+        ])
+          SizedBox(
+            width: 104,
+            height: 104,
+            child: Semantics(
+              selected: method == type.$1,
+              child: Material(
+                color: method == type.$1
+                    ? colors.primaryContainer
+                    : colors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: method == type.$1
+                        ? colors.primary
+                        : colors.outlineVariant,
+                    width: method == type.$1 ? 2 : 1,
+                  ),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  key: ValueKey('recharge-method-${type.$1}'),
+                  onTap: loading || submitted
+                      ? null
+                      : () => setState(() {
+                          method = type.$1;
+                          error = null;
+                        }),
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          type.$3,
+                          size: 28,
+                          color: method == type.$1
+                              ? colors.onPrimaryContainer
+                              : colors.onSurfaceVariant,
+                        ),
+                        const SizedBox(height: 8),
+                        Flexible(
+                          child: AppText(
+                            type.$2,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: method == type.$1
+                                  ? colors.onPrimaryContainer
+                                  : colors.onSurface,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -306,7 +386,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
   Widget build(BuildContext context) => PopScope(
     canPop: !submitting,
     child: AlertDialog(
-      title: const Text('Recharge card'),
+      title: const AppText('Recharge card'),
       content: SizedBox(
         width: 460,
         child: SingleChildScrollView(
@@ -327,7 +407,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                   Text('Current expiry: ${info!['expiration'] ?? '—'}'),
                   if (widget.hasUnsavedEdits) ...[
                     const SizedBox(height: 12),
-                    const Text(
+                    const AppText(
                       'Your edits will stay unsaved. Recharge uses the current SAS4 profile and expiry shown above.',
                     ),
                   ],
@@ -335,47 +415,14 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                   if (order != null)
                     paymentView()
                   else ...[
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(method),
-                      initialValue: method,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Recharge type',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'credit',
-                          child: Text('Manager balance'),
-                        ),
-                        DropdownMenuItem(value: 'fib', child: Text('FIB Bank')),
-                        DropdownMenuItem(
-                          value: 'fastpay',
-                          child: Text('FastPay'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'extend',
-                          child: Text('Extend service'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'card',
-                          child: Text('Card PIN'),
-                        ),
-                      ],
-                      onChanged: loading || submitted
-                          ? null
-                          : (value) => setState(() {
-                              method = value!;
-                              error = null;
-                            }),
-                    ),
+                    rechargeMethods(),
                     const SizedBox(height: 16),
                     if (!permitted)
-                      const Text(
+                      const AppText(
                         'Your SAS4 account does not have permission for this method.',
                       ),
                     if (bank && gateways[method]?['configured'] != true)
-                      const Text(
+                      const AppText(
                         'Set up this merchant account in My account → Payment setup to enable automatic payments.',
                       ),
                     if (bank && gateways[method]?['configured'] == true) ...[
@@ -399,7 +446,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                         'Recharge cost: ${info!['manager_cost'] ?? 'Unavailable'} ${info!['currency'] ?? ''}',
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      const Text(
+                      const AppText(
                         'One activation will be charged to your SAS4 manager balance.',
                       ),
                     ],
@@ -408,8 +455,8 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                         key: ValueKey(extensionId),
                         initialValue: extensionId,
                         isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Select extension',
+                        decoration: InputDecoration(
+                          labelText: tr('Select extension'),
                           border: OutlineInputBorder(),
                         ),
                         items: [
@@ -430,13 +477,13 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                       ),
                       const SizedBox(height: 12),
                       if (extensionId == null)
-                        const Text(
+                        const AppText(
                           'Test is not available for this profile. Select an allowed extension.',
                         ),
                       Text(
                         'Extension cost: ${info?['extension']?['cost'] ?? 'Unavailable'} ${info!['currency'] ?? ''}',
                       ),
-                      const Text(
+                      const AppText(
                         'Extension is charged to your SAS4 manager balance.',
                       ),
                       if (info!['warning'] != null) Text(info!['warning']),
@@ -449,8 +496,8 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                         autocorrect: false,
                         enableSuggestions: false,
                         maxLength: 128,
-                        decoration: const InputDecoration(
-                          labelText: 'Card PIN',
+                        decoration: InputDecoration(
+                          labelText: tr('Card PIN'),
                           counterText: '',
                           border: OutlineInputBorder(),
                         ),
@@ -461,7 +508,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
                       ),
                     if (history.isNotEmpty) ...[
                       const Divider(height: 28),
-                      const Text('Recent payments'),
+                      const AppText('Recent payments'),
                       for (final payment in history.take(3))
                         ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -499,7 +546,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> {
       actions: [
         TextButton(
           onPressed: submitting ? null : () => Navigator.pop(context, false),
-          child: const Text('Close'),
+          child: const AppText('Close'),
         ),
         if (order == null)
           FilledButton.icon(

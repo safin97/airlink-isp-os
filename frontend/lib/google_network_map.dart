@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'google_map_frame.dart';
 import 'tower_map_view.dart';
@@ -21,7 +22,8 @@ class GoogleNetworkMap extends StatefulWidget {
   State<GoogleNetworkMap> createState() => _GoogleNetworkMapState();
 }
 
-class _GoogleNetworkMapState extends State<GoogleNetworkMap> {
+class _GoogleNetworkMapState extends State<GoogleNetworkMap>
+    with LanguageRebuild {
   int fitRevision = 0;
 
   @override
@@ -43,7 +45,7 @@ class _GoogleNetworkMapState extends State<GoogleNetworkMap> {
                 TextButton.icon(
                   onPressed: () => setState(() => fitRevision++),
                   icon: const Icon(Icons.fit_screen),
-                  label: const Text('Fit all towers'),
+                  label: const AppText('Fit all towers'),
                 ),
               TextButton.icon(
                 onPressed: widget.toggleExpanded,

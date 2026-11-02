@@ -1,14 +1,18 @@
+import 'app_theme.dart';
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'tower_marker.dart';
 
-const _muted = Color(0xff99acc6);
-const _green = Color(0xff34d399);
-const _red = Color(0xffff7385);
-const _orange = Color(0xffffb454);
+Color get _muted => themeColor(0xff99acc6, 0xff52627a);
+Color get _green => themeColor(0xff34d399, 0xff087f5b);
+Color get _red => themeColor(0xffff7385, 0xffbb253e);
+Color get _orange => themeColor(0xffffb454, 0xff995000);
 
 /// Read-only wallboard. All data comes from the signed-in user's API scope.
 class NocScreen extends StatelessWidget {
   final Map<String, dynamic> summary;
+  final int? onlineUsers;
+  final String? onlineUsersMessage;
   final List<dynamic> towers, devices, alerts;
   final bool hasData, expanded;
   final VoidCallback toggleExpanded, openAlerts, openMonitoring;
@@ -17,6 +21,8 @@ class NocScreen extends StatelessWidget {
   const NocScreen({
     super.key,
     required this.summary,
+    this.onlineUsers,
+    this.onlineUsersMessage,
     required this.towers,
     required this.devices,
     required this.alerts,
@@ -64,7 +70,7 @@ class NocScreen extends StatelessWidget {
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
       ),
-      TextButton(onPressed: action, child: Text(label)),
+      TextButton(onPressed: action, child: AppText(label)),
     ],
   );
 
@@ -100,6 +106,7 @@ class NocScreen extends StatelessWidget {
         );
     final metrics = [
       ('Online devices', 'online', _green),
+      ('Online users', 'online_users', themeColor(0xff438fff, 0xff2455ca)),
       ('Offline devices', 'offline', _red),
       ('Unknown devices', 'unknown', _muted),
       ('Active alerts', 'active_alerts', _orange),
@@ -113,28 +120,27 @@ class NocScreen extends StatelessWidget {
           spacing: 24,
           runSpacing: 12,
           children: [
-            const Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                AppText(
                   'Network operations center',
                   style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                 ),
                 SizedBox(height: 8),
-                Text(
+                AppText(
                   'Live network health • Unknown means no recent telemetry',
                   style: TextStyle(color: _muted),
                 ),
               ],
             ),
-            if (MediaQuery.sizeOf(context).width >= 1050)
-              OutlinedButton.icon(
-                onPressed: toggleExpanded,
-                icon: Icon(
-                  expanded ? Icons.close_fullscreen : Icons.open_in_full,
-                ),
-                label: Text(expanded ? 'Show sidebar' : 'Expand NOC'),
+            OutlinedButton.icon(
+              onPressed: toggleExpanded,
+              icon: Icon(
+                expanded ? Icons.close_fullscreen : Icons.open_in_full,
               ),
+              label: AppText(expanded ? 'Exit fullscreen' : 'Expand NOC'),
+            ),
           ],
         ),
         const SizedBox(height: 24),
@@ -145,16 +151,25 @@ class NocScreen extends StatelessWidget {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(metric.$1, style: const TextStyle(color: _muted)),
+                      AppText(metric.$1, style: TextStyle(color: _muted)),
                       const SizedBox(height: 12),
                       Text(
-                        hasData ? '${summary[metric.$2] ?? '—'}' : '—',
+                        metric.$2 == 'online_users'
+                            ? '${onlineUsers ?? '—'}'
+                            : hasData
+                            ? '${summary[metric.$2] ?? '—'}'
+                            : '—',
                         style: TextStyle(
                           fontSize: 46,
                           fontWeight: FontWeight.w700,
                           color: metric.$3,
                         ),
                       ),
+                      if (metric.$2 == 'online_users')
+                        AppText(
+                          onlineUsersMessage ?? 'From SAS4',
+                          style: TextStyle(fontSize: 12, color: _muted),
+                        ),
                     ],
                   ),
                 ),
@@ -180,7 +195,7 @@ class NocScreen extends StatelessWidget {
                   hasData
                       ? 'No towers in your authorized inventory yet.'
                       : 'Waiting for network data…',
-                  style: const TextStyle(color: _muted),
+                  style: TextStyle(color: _muted),
                 )
               else
                 grid(
@@ -197,7 +212,7 @@ class NocScreen extends StatelessWidget {
                           ).withValues(alpha: .5),
                         ),
                       ),
-                      color: const Color(0xff071426),
+                      color: themeColor(0xff071426, 0xfff2f5fa),
                       clipBehavior: Clip.antiAlias,
                       child: InkWell(
                         onTap: () => openTowerDevices(tower['id']),
@@ -225,10 +240,10 @@ class NocScreen extends StatelessWidget {
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              const Text(
+                              AppText(
                                 'View devices →',
                                 style: TextStyle(
-                                  color: Color(0xff438fff),
+                                  color: themeColor(0xff438fff, 0xff2455ca),
                                   fontSize: 12,
                                 ),
                               ),
@@ -237,7 +252,7 @@ class NocScreen extends StatelessWidget {
                               const SizedBox(height: 8),
                               Text(
                                 '${members.length} devices · ${members.where((d) => d['status'] == 'offline').length} offline',
-                                style: const TextStyle(color: _muted),
+                                style: TextStyle(color: _muted),
                               ),
                             ],
                           ),
@@ -265,7 +280,7 @@ class NocScreen extends StatelessWidget {
                         : (summary['active_alerts'] ?? 0) > 0
                         ? 'Active alerts are reported outside the latest alert records.'
                         : 'No active alerts reported.',
-                    style: const TextStyle(color: _muted),
+                    style: TextStyle(color: _muted),
                   ),
                 )
               else
@@ -281,7 +296,7 @@ class NocScreen extends StatelessWidget {
                         title: Text('${alert['message'] ?? 'Network alert'}'),
                         subtitle: Text(
                           '${devicesById[alert['device_id']]?['name'] ?? 'Device'} · ${alert['acknowledged_by'] == null ? 'Open' : 'Acknowledged'}',
-                          style: const TextStyle(color: _muted),
+                          style: TextStyle(color: _muted),
                         ),
                         trailing: status(alert['severity']),
                       ),
@@ -289,7 +304,7 @@ class NocScreen extends StatelessWidget {
               if (active.length > 8)
                 Text(
                   'Showing 8 of ${active.length} loaded active incidents.',
-                  style: const TextStyle(color: _muted),
+                  style: TextStyle(color: _muted),
                 ),
             ],
           ),
@@ -313,7 +328,7 @@ class NocScreen extends StatelessWidget {
                         : devices.isEmpty
                         ? 'No monitored devices yet.'
                         : 'All monitored devices report online.',
-                    style: const TextStyle(color: _muted),
+                    style: TextStyle(color: _muted),
                   ),
                 )
               else
@@ -329,7 +344,7 @@ class NocScreen extends StatelessWidget {
                         title: Text('${device['name']}'),
                         subtitle: Text(
                           '${device['ip_address'] ?? 'No address'}',
-                          style: const TextStyle(color: _muted),
+                          style: TextStyle(color: _muted),
                         ),
                         trailing: status(device['status']),
                       ),
@@ -337,7 +352,7 @@ class NocScreen extends StatelessWidget {
               if (attention.length > 12)
                 Text(
                   'Showing 12 of ${attention.length} devices needing attention.',
-                  style: const TextStyle(color: _muted),
+                  style: TextStyle(color: _muted),
                 ),
             ],
           ),

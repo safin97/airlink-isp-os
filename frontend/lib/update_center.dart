@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +15,7 @@ class UpdateCenter extends StatefulWidget {
   State<UpdateCenter> createState() => _UpdateCenterState();
 }
 
-class _UpdateCenterState extends State<UpdateCenter> {
+class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   Map<String, dynamic>? snapshot;
   String? error;
   String? message;
@@ -98,18 +99,18 @@ class _UpdateCenterState extends State<UpdateCenter> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Restart AirLink system?'),
-        content: const Text(
+        title: const AppText('Restart AirLink system?'),
+        content: const AppText(
           'This restarts the entire AirLink PC. Monitoring and the dashboard will be unavailable briefly. The page will reconnect when the server returns.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const AppText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Restart system'),
+            child: const AppText('Restart system'),
           ),
         ],
       ),
@@ -176,17 +177,17 @@ class _UpdateCenterState extends State<UpdateCenter> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Update to ${release['version']}?'),
-        content: const Text(
+        content: const AppText(
           'The server will download and verify the signed package, back up the database, and install the update. Monitoring pauses briefly while services restart.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const AppText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Update now'),
+            child: const AppText('Update now'),
           ),
         ],
       ),
@@ -207,15 +208,15 @@ class _UpdateCenterState extends State<UpdateCenter> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            const AppText(
               'The signed package will be downloaded and verified now. Monitoring pauses at the scheduled installation time.',
             ),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
-              decoration: const InputDecoration(
-                labelText: 'Date and time with timezone',
-                hintText: '2026-12-01T02:00:00+01:00',
+              decoration: InputDecoration(
+                labelText: tr('Date and time with timezone'),
+                hintText: tr('2026-12-01T02:00:00+01:00'),
               ),
             ),
           ],
@@ -223,11 +224,11 @@ class _UpdateCenterState extends State<UpdateCenter> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const AppText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Schedule'),
+            child: const AppText('Schedule'),
           ),
         ],
       ),
@@ -392,18 +393,18 @@ class _UpdateCenterState extends State<UpdateCenter> {
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 12),
-        const Text(
+        const AppText(
           'Releases are fetched automatically from GitHub. Signed updates download and install here without opening another tab.',
         ),
         if (service['preview'] == true) ...[
           const SizedBox(height: 12),
-          const Text(
+          const AppText(
             'Local preview: release checks are live. Install updates or restart from the dashboard hosted on your AirLink PC.',
           ),
         ],
         if (snapshot != null && !configured) ...[
           const SizedBox(height: 12),
-          const Text(
+          const AppText(
             'Install the trusted publisher configuration on this appliance before checking for updates.',
           ),
         ],
@@ -439,9 +440,9 @@ class _UpdateCenterState extends State<UpdateCenter> {
           ),
         ] else if (error == null &&
             service['last_check']?['up_to_date'] == true)
-          const Text('You are up to date.'),
+          const AppText('You are up to date.'),
         if (recovering)
-          Text(
+          AppText(
             'The last installation failed. Review local recovery before retrying.',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
@@ -464,7 +465,7 @@ class _UpdateCenterState extends State<UpdateCenter> {
             FilledButton.icon(
               onPressed: canInstall ? updateNow : null,
               icon: const Icon(Icons.system_update_alt),
-              label: const Text('Update now'),
+              label: const AppText('Update now'),
             ),
             OutlinedButton(
               onPressed:
@@ -474,16 +475,16 @@ class _UpdateCenterState extends State<UpdateCenter> {
                       !installing
                   ? () => refresh(check: true)
                   : null,
-              child: const Text('Check again'),
+              child: const AppText('Check again'),
             ),
             OutlinedButton(
               onPressed: canInstall ? scheduleUpdate : null,
-              child: const Text('Schedule update'),
+              child: const AppText('Schedule update'),
             ),
             OutlinedButton.icon(
               onPressed: canRestart ? restartSystem : null,
               icon: const Icon(Icons.restart_alt),
-              label: const Text('Restart system'),
+              label: const AppText('Restart system'),
             ),
           ],
         ),
@@ -491,7 +492,7 @@ class _UpdateCenterState extends State<UpdateCenter> {
         if (release != null)
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
-            title: const Text('Release notes'),
+            title: const AppText('Release notes'),
             children: [
               Align(
                 alignment: Alignment.centerLeft,
@@ -503,7 +504,7 @@ class _UpdateCenterState extends State<UpdateCenter> {
           ),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
-          title: const Text('Update source'),
+          title: const AppText('Update source'),
           children: [
             const SelectableText(updateFeedUrl),
             TextButton.icon(
@@ -513,20 +514,23 @@ class _UpdateCenterState extends State<UpdateCenter> {
                 );
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Update URL copied')),
+                    const SnackBar(content: AppText('Update URL copied')),
                   );
                 }
               },
               icon: const Icon(Icons.copy_outlined),
-              label: const Text('Copy URL'),
+              label: const AppText('Copy URL'),
             ),
           ],
         ),
         const SizedBox(height: 20),
-        Text('Update history', style: Theme.of(context).textTheme.titleMedium),
+        AppText(
+          'Update history',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
         const SizedBox(height: 8),
         if ((snapshot?['history'] as List? ?? []).isEmpty)
-          const Text('No update actions recorded.'),
+          const AppText('No update actions recorded.'),
         for (final item in (snapshot?['history'] as List? ?? []))
           ListTile(
             title: Text('${item['version']} · ${item['status']}'),

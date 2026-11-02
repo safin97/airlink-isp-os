@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -25,7 +26,7 @@ class NetworkMap extends StatefulWidget {
   State<NetworkMap> createState() => _NetworkMapState();
 }
 
-class _NetworkMapState extends State<NetworkMap> {
+class _NetworkMapState extends State<NetworkMap> with LanguageRebuild {
   final controller = MapController();
   bool ready = false;
 
@@ -110,7 +111,7 @@ class _NetworkMapState extends State<NetworkMap> {
             children: [
               const Chip(
                 avatar: Icon(Icons.layers_outlined, size: 18),
-                label: Text('Map type: Default'),
+                label: AppText('Map type: Default'),
               ),
               Text(
                 '${towers.length} ${towers.length == 1 ? 'tower' : 'towers'} on map',
@@ -119,19 +120,21 @@ class _NetworkMapState extends State<NetworkMap> {
               if (missing > 0)
                 Text(
                   '$missing without GPS',
-                  style: const TextStyle(color: Color(0xff99acc6)),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               TextButton.icon(
                 onPressed: fitAll,
                 icon: const Icon(Icons.fit_screen),
-                label: const Text('Fit all towers'),
+                label: const AppText('Fit all towers'),
               ),
               TextButton.icon(
                 onPressed: () {
                   if (ready) controller.move(zakhoCenter, 13);
                 },
                 icon: const Icon(Icons.location_city_outlined),
-                label: const Text('Zakho'),
+                label: const AppText('Zakho'),
               ),
               TextButton.icon(
                 onPressed: widget.toggleExpanded,
@@ -244,7 +247,7 @@ class _NetworkMapState extends State<NetworkMap> {
                     alignment: Alignment.bottomRight,
                     child: SafeArea(
                       child: Material(
-                        color: const Color(0xff10233d),
+                        color: Theme.of(context).colorScheme.surface,
                         child: InkWell(
                           onTap: () => launchUrl(
                             Uri.parse(
@@ -256,7 +259,7 @@ class _NetworkMapState extends State<NetworkMap> {
                               horizontal: 6,
                               vertical: 3,
                             ),
-                            child: Text(
+                            child: AppText(
                               '© OpenStreetMap contributors',
                               style: TextStyle(fontSize: 11),
                             ),
@@ -272,7 +275,7 @@ class _NetworkMapState extends State<NetworkMap> {
                 top: 16,
                 child: Material(
                   elevation: 4,
-                  color: const Color(0xff10233d),
+                  color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(12),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,

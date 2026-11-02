@@ -55,3 +55,7 @@ The owner's stacked and horizontal logos now appear on login/setup, dashboard na
 ## 0.1.3-dev — Restart system
 
 Added an owner-confirmed Restart system action beside Schedule update. It works independently of release availability, shares the update lock, rejects conflicting/duplicate requests, and waits for a new boot identity before declaring success. The Mac preview cannot restart its host. Validation: 92 Python tests (one Linux-only skip), 13 Flutter tests, clean analyzer, actual signed upgrade and owner-API reboot/reconnection in QEMU with data/audit preservation. This is an application-only GitHub release; the local ISO and preview bundle remain unchanged. See [restart verification](docs/releases/0.1.3-dev-verification.md).
+
+## 0.1.6-dev — Dashboard and NOC application update
+
+Adds Kurdish Badini/Arabic language selection, day/night styles, sidebar account access, visible owner payment setup, compact user-status indicators, recharge method squares, NOC fullscreen and scoped SAS4 online-user counts. GPU detection/status is included; NVIDIA driver installation remains a separate ISO/base-system operation. This release is an application-only GitHub update and leaves the 0.1.5-dev installer unchanged. Local validation: 181 Python tests passed with one Linux-only skip, 39 Flutter tests passed, and the analyzer is clean. See [release notes](docs/releases/0.1.6-dev.md); package/upgrade verification is attached to the GitHub release.

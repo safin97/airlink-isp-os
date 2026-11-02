@@ -1,6 +1,9 @@
+import 'app_theme.dart';
+import 'app_language.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'api.dart';
@@ -11,52 +14,45 @@ import 'tower_discovery.dart';
 import 'network_map.dart';
 import 'sas4_clients.dart';
 import 'account_panel.dart';
+import 'payment_settings.dart';
+import 'fullscreen.dart' as fullscreen;
 import 'tower_marker.dart';
 
-const navy = Color(0xff071426);
-const panel = Color(0xff10233d);
-const blue = Color(0xff438fff);
-const muted = Color(0xff99acc6);
-const green = Color(0xff34d399);
-const red = Color(0xffff7385);
-const orange = Color(0xffffb454);
+Color get navy => themeColor(0xff071426, 0xfff2f5fa);
+Color get panel => themeColor(0xff10233d, 0xffffffff);
+Color get blue => themeColor(0xff438fff, 0xff2455ca);
+Color get muted => themeColor(0xff99acc6, 0xff52627a);
+Color get green => themeColor(0xff34d399, 0xff087f5b);
+Color get red => themeColor(0xffff7385, 0xffbb253e);
+Color get orange => themeColor(0xffffb454, 0xff995000);
 
 void main() => runApp(const AirLinkApp());
 
 class AirLinkApp extends StatelessWidget {
-  const AirLinkApp({super.key});
+  const AirLinkApp({super.key, this.home = const SessionGate()});
+  final Widget home;
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'AirLink ISP OS',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: navy,
-      colorScheme: const ColorScheme.dark(
-        primary: blue,
-        surface: panel,
-        secondary: green,
-      ),
-      useMaterial3: true,
-      fontFamily: 'sans-serif',
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: navy,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        contentPadding: const EdgeInsets.all(16),
-      ),
-      cardTheme: CardThemeData(
-        color: panel,
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
+  Widget build(BuildContext context) => ValueListenableBuilder<AppLanguage>(
+    valueListenable: appLanguage,
+    builder: (context, language, child) => ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeMode,
+      builder: (context, mode, child) => MaterialApp(
+        // Badini uses Arabic Material controls; application copy is Badini.
+        locale: Locale(language.rtl ? 'ar' : 'en'),
+        supportedLocales: const [Locale('en'), Locale('ar')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        builder: (context, child) => Directionality(
+          textDirection: language.rtl ? TextDirection.rtl : TextDirection.ltr,
+          child: child!,
         ),
+        title: 'AirLink ISP OS',
+        debugShowCheckedModeBanner: false,
+        theme: airLinkTheme(Brightness.light),
+        darkTheme: airLinkTheme(Brightness.dark),
+        themeMode: mode,
+        home: home,
       ),
     ),
-    home: const SessionGate(),
   );
 }
 
@@ -66,7 +62,7 @@ class SessionGate extends StatefulWidget {
   State<SessionGate> createState() => _SessionGateState();
 }
 
-class _SessionGateState extends State<SessionGate> {
+class _SessionGateState extends State<SessionGate> with LanguageRebuild {
   final api = Api();
   bool loading = true;
   bool initialized = true;
@@ -119,9 +115,9 @@ class _SessionGateState extends State<SessionGate> {
               children: [
                 const AirLinkLogo(width: 280),
                 const SizedBox(height: 20),
-                const Icon(Icons.cloud_off, size: 32, color: orange),
+                Icon(Icons.cloud_off, size: 32, color: orange),
                 const SizedBox(height: 20),
-                const Text('AirLink server is unavailable'),
+                const AppText('AirLink server is unavailable'),
                 Padding(padding: const EdgeInsets.all(20), child: Text(error!)),
                 FilledButton(
                   onPressed: () {
@@ -131,7 +127,7 @@ class _SessionGateState extends State<SessionGate> {
                     });
                     restore();
                   },
-                  child: const Text('Retry'),
+                  child: const AppText('Retry'),
                 ),
               ],
             ),
@@ -170,7 +166,7 @@ class LoginView extends StatefulWidget {
   State<LoginView> createState() => _LoginViewState();
 }
 
-class _LoginViewState extends State<LoginView> {
+class _LoginViewState extends State<LoginView> with LanguageRebuild {
   final username = TextEditingController();
   final password = TextEditingController();
   final confirm = TextEditingController();
@@ -214,6 +210,20 @@ class _LoginViewState extends State<LoginView> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+    appBar: PreferredSize(
+      preferredSize: const Size.fromHeight(kToolbarHeight),
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: AppBar(
+          automaticallyImplyLeading: false,
+          actions: const [
+            ThemeToggle(),
+            LanguageSelector(),
+            SizedBox(width: 12),
+          ],
+        ),
+      ),
+    ),
     body: Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -224,19 +234,19 @@ class _LoginViewState extends State<LoginView> {
             children: [
               const Center(child: AirLinkLogo(width: 156, stacked: true)),
               const SizedBox(height: 24),
-              const Text(
+              const AppText(
                 'AirLink ISP OS',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
-              const Text(
+              AppText(
                 'NETWORK OPERATIONS',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: muted, letterSpacing: 3),
               ),
               const SizedBox(height: 40),
-              Text(
+              AppText(
                 widget.initialized
                     ? 'Sign in to your network'
                     : 'Create the first owner',
@@ -245,14 +255,14 @@ class _LoginViewState extends State<LoginView> {
               const SizedBox(height: 24),
               TextField(
                 controller: username,
-                decoration: const InputDecoration(labelText: 'Username'),
+                decoration: InputDecoration(labelText: tr('Username')),
                 autofillHints: const [AutofillHints.username],
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: password,
                 obscureText: true,
-                decoration: const InputDecoration(labelText: 'Password'),
+                decoration: InputDecoration(labelText: tr('Password')),
                 onSubmitted: (_) => busy ? null : submit(),
               ),
               if (!widget.initialized) ...[
@@ -260,21 +270,21 @@ class _LoginViewState extends State<LoginView> {
                 TextField(
                   controller: confirm,
                   obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirm password',
+                  decoration: InputDecoration(
+                    labelText: tr('Confirm password'),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: setupToken,
                   obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Local setup token',
+                  decoration: InputDecoration(
+                    labelText: tr('Local setup token'),
                   ),
                 ),
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Text(
+                  child: AppText(
                     'Complete setup on the server console, or enter its local setup token. Use at least 14 password characters.',
                     style: TextStyle(color: muted),
                   ),
@@ -283,12 +293,12 @@ class _LoginViewState extends State<LoginView> {
               if (error != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(error!, style: const TextStyle(color: red)),
+                  child: Text(error!, style: TextStyle(color: red)),
                 ),
               const SizedBox(height: 24),
               FilledButton(
                 onPressed: busy ? null : submit,
-                child: Text(
+                child: AppText(
                   busy
                       ? 'Connecting…'
                       : widget.initialized
@@ -297,7 +307,7 @@ class _LoginViewState extends State<LoginView> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
+              AppText(
                 'Secure access • Your network, under your control',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: muted),
@@ -345,12 +355,16 @@ class Operations extends StatefulWidget {
   State<Operations> createState() => _OperationsState();
 }
 
-class _OperationsState extends State<Operations> {
+class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
   bool ispDashboard = true;
   bool ispOnline = false;
   bool nocExpanded = false;
+  int? nocOnlineUsers;
+  bool fetchingNocUsers = false;
+  String? nocUsersMessage;
+  void Function()? stopFullscreen;
   bool mapExpanded = false;
   bool loading = true;
   bool refreshing = false;
@@ -371,17 +385,62 @@ class _OperationsState extends State<Operations> {
   @override
   void initState() {
     super.initState();
-    reload();
-    timer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => reload(quiet: true),
+    stopFullscreen = fullscreen.watchFullscreen(
+      changed: (active) {
+        if (!active && mounted && nocExpanded) {
+          setState(() => nocExpanded = false);
+        }
+      },
+      nocActive: () => mounted && pages[page] == 'NOC Screen',
+      toggle: toggleNoc,
     );
+    reload();
+    timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      reload(quiet: true);
+      if (pages[page] == 'NOC Screen') unawaited(reloadNocUsers());
+    });
   }
 
   @override
   void dispose() {
     timer?.cancel();
+    stopFullscreen?.call();
+    if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     super.dispose();
+  }
+
+  void toggleNoc() {
+    setState(() => nocExpanded = !nocExpanded);
+    if (nocExpanded) {
+      unawaited(fullscreen.enterFullscreen());
+    } else {
+      unawaited(fullscreen.leaveFullscreen());
+    }
+  }
+
+  Future<void> reloadNocUsers() async {
+    if (fetchingNocUsers || !writer) return;
+    fetchingNocUsers = true;
+    int? count;
+    String? message;
+    try {
+      final data = await api.request('/integrations/sas4/dashboard');
+      final value = data['online_users'];
+      if (value is int && value >= 0) count = value;
+      if (count == null) message = 'Unavailable';
+    } on ApiException catch (e) {
+      message = e.status == 409 ? 'Connect SAS4 in My account' : 'Unavailable';
+    } catch (_) {
+      message = 'Unavailable';
+    } finally {
+      fetchingNocUsers = false;
+    }
+    if (mounted && (nocOnlineUsers != count || nocUsersMessage != message)) {
+      setState(() {
+        nocOnlineUsers = count;
+        nocUsersMessage = message;
+      });
+    }
   }
 
   void toast(String text) {
@@ -493,6 +552,7 @@ class _OperationsState extends State<Operations> {
   }
 
   void navigate(int index) {
+    if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     setState(() {
       page = index;
       mapExpanded = pages[index] == 'Network Map';
@@ -500,9 +560,11 @@ class _OperationsState extends State<Operations> {
       search = '';
       towerFilter = null;
     });
+    if (pages[index] == 'NOC Screen') unawaited(reloadNocUsers());
   }
 
   void openTowerDevices(String id) {
+    if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     setState(() {
       towerOrigin = page;
       page = pages.indexOf('Towers');
@@ -515,17 +577,17 @@ class _OperationsState extends State<Operations> {
   Widget navigation() => SizedBox(
     width: 244,
     child: Material(
-      color: const Color(0xff091a30),
+      color: themeColor(0xff091a30, 0xffe8eef8),
       child: SafeArea(
         child: Column(
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(24, 24, 24, 20),
               child: Column(
                 children: [
                   AirLinkLogo(),
                   SizedBox(height: 12),
-                  Text(
+                  AppText(
                     'ISP OPERATING SYSTEM',
                     style: TextStyle(
                       fontSize: 9,
@@ -555,7 +617,7 @@ class _OperationsState extends State<Operations> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         leading: Icon(icons[i], size: 22),
-                        title: Text(pages[i]),
+                        title: AppText(pages[i]),
                         onTap: () {
                           navigate(i);
                           if (Scaffold.of(context).isDrawerOpen) {
@@ -563,6 +625,21 @@ class _OperationsState extends State<Operations> {
                           }
                         },
                       ),
+                      if (pages[i] == 'Settings')
+                        ListTile(
+                          dense: true,
+                          leading: const Icon(
+                            Icons.account_circle_outlined,
+                            size: 22,
+                          ),
+                          title: const AppText('My account'),
+                          onTap: () {
+                            if (Scaffold.of(context).isDrawerOpen) {
+                              Navigator.pop(context);
+                            }
+                            openAccount();
+                          },
+                        ),
                       if (pages[i] == 'ISP Card' && page == i)
                         for (final dashboard in [true, false])
                           Padding(
@@ -581,7 +658,7 @@ class _OperationsState extends State<Operations> {
                                     : Icons.people_outline,
                                 size: 18,
                               ),
-                              title: Text(dashboard ? 'Dashboard' : 'Users'),
+                              title: AppText(dashboard ? 'Dashboard' : 'Users'),
                               onTap: () {
                                 setState(() => ispDashboard = dashboard);
                                 if (Scaffold.of(context).isDrawerOpen) {
@@ -609,7 +686,7 @@ class _OperationsState extends State<Operations> {
                                 online ? Icons.wifi : Icons.list_alt,
                                 size: 16,
                               ),
-                              title: Text(
+                              title: AppText(
                                 online ? 'Online users' : 'Users list',
                                 style: const TextStyle(fontSize: 13),
                               ),
@@ -626,11 +703,11 @@ class _OperationsState extends State<Operations> {
                 ),
               ),
             ),
-            const Divider(color: Color(0xff20334e)),
+            Divider(color: themeColor(0xff20334e, 0xffd6dfeb)),
             ListTile(
               leading: const CircleAvatar(child: Icon(Icons.person_outline)),
               title: Text(api.user!['username']),
-              subtitle: Text(role, style: const TextStyle(color: muted)),
+              subtitle: Text(role, style: TextStyle(color: muted)),
               trailing: IconButton(
                 tooltip: 'Sign out',
                 icon: const Icon(Icons.logout, size: 20),
@@ -649,82 +726,71 @@ class _OperationsState extends State<Operations> {
       final wide = constraints.maxWidth >= 1050;
       final mapFull = pages[page] == 'Network Map' && mapExpanded;
       return Scaffold(
-        drawer: wide && !mapFull ? null : Drawer(child: navigation()),
+        drawer: nocExpanded || (wide && !mapFull)
+            ? null
+            : Drawer(child: navigation()),
         body: Row(
           children: [
             if (wide && !nocExpanded && !mapFull) navigation(),
             Expanded(
               child: Column(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 18,
-                    ),
-                    decoration: const BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(color: Color(0xff20334e)),
+                  if (!nocExpanded)
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: wide ? 24 : 12,
+                        vertical: 18,
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        if (!wide || mapFull)
-                          Builder(
-                            builder: (context) => IconButton(
-                              icon: const Icon(Icons.menu),
-                              onPressed: () =>
-                                  Scaffold.of(context).openDrawer(),
-                            ),
-                          ),
-                        if (!wide || nocExpanded || mapFull) ...[
-                          const AirLinkLogo(width: 40, stacked: true),
-                          const SizedBox(width: 12),
-                        ],
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                pages[page],
-                                style: const TextStyle(
-                                  fontSize: 25,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              Text(
-                                observed == null
-                                    ? 'Connecting to your network'
-                                    : 'Updated ${TimeOfDay.fromDateTime(observed!).format(context)} • refreshes every 30 seconds',
-                                style: const TextStyle(
-                                  color: muted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: themeColor(0xff20334e, 0xffd6dfeb),
                           ),
                         ),
-                        if (wide)
-                          TextButton.icon(
-                            onPressed: openAccount,
-                            icon: const Icon(Icons.account_circle_outlined),
-                            label: SizedBox(
-                              width: 130,
-                              child: Text(
-                                '${api.user!['username']}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                      ),
+                      child: Row(
+                        textDirection: TextDirection.ltr,
+                        children: [
+                          if (!wide || mapFull)
+                            Builder(
+                              builder: (context) => IconButton(
+                                icon: const Icon(Icons.menu),
+                                onPressed: () =>
+                                    Scaffold.of(context).openDrawer(),
                               ),
                             ),
-                          )
-                        else
-                          IconButton(
-                            tooltip: 'My account',
-                            onPressed: openAccount,
-                            icon: const Icon(Icons.account_circle_outlined),
+                          if (constraints.maxWidth >= 600 &&
+                              (!wide || nocExpanded || mapFull)) ...[
+                            const AirLinkLogo(width: 40, stacked: true),
+                            const SizedBox(width: 12),
+                          ],
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AppText(
+                                  pages[page],
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 25,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  observed == null
+                                      ? 'Connecting to your network'
+                                      : '${tr('Updated')} ${TimeOfDay.fromDateTime(observed!).format(context)} • ${tr('Refreshes every 30 seconds')}',
+                                  style: TextStyle(color: muted, fontSize: 12),
+                                ),
+                              ],
+                            ),
                           ),
-                      ],
+                          const ThemeToggle(),
+                          const LanguageSelector(),
+                        ],
+                      ),
                     ),
-                  ),
                   if (error != null)
                     Container(
                       width: double.infinity,
@@ -732,7 +798,7 @@ class _OperationsState extends State<Operations> {
                       padding: const EdgeInsets.all(12),
                       child: Text(
                         'Refresh failed — previous data may be stale. $error',
-                        style: const TextStyle(color: red),
+                        style: TextStyle(color: red),
                       ),
                     ),
                   if (loading) const LinearProgressIndicator(minHeight: 2),
@@ -759,12 +825,16 @@ class _OperationsState extends State<Operations> {
       case 'NOC Screen':
         return NocScreen(
           summary: summary,
+          onlineUsers: nocOnlineUsers,
+          onlineUsersMessage: writer
+              ? nocUsersMessage
+              : 'SAS4 manager access required',
           towers: list('towers'),
           devices: list('devices'),
           alerts: list('alerts'),
           hasData: observed != null,
           expanded: nocExpanded,
-          toggleExpanded: () => setState(() => nocExpanded = !nocExpanded),
+          toggleExpanded: toggleNoc,
           openAlerts: () => navigate(pages.indexOf('Alerts')),
           openMonitoring: () => navigate(pages.indexOf('Monitoring')),
           openTowerDevices: openTowerDevices,
@@ -808,12 +878,12 @@ class _OperationsState extends State<Operations> {
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        AppText(
           title,
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
-        Text(detail, style: const TextStyle(color: muted, height: 1.6)),
+        AppText(detail, style: TextStyle(color: muted, height: 1.6)),
       ],
     ),
   );
@@ -824,7 +894,7 @@ class _OperationsState extends State<Operations> {
         Row(
           children: [
             Expanded(
-              child: Text(
+              child: AppText(
                 title,
                 style: const TextStyle(
                   fontSize: 18,
@@ -881,12 +951,12 @@ class _OperationsState extends State<Operations> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        const AppText(
           'Network overview',
           style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
-        const Text(
+        AppText(
           'Measured network health, inventory and recent events.',
           style: TextStyle(color: muted),
         ),
@@ -912,9 +982,9 @@ class _OperationsState extends State<Operations> {
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
+                                  child: AppText(
                                     item[0] as String,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: muted,
                                       fontSize: 12,
                                     ),
@@ -947,10 +1017,7 @@ class _OperationsState extends State<Operations> {
                                   : item[1] == 'availability_24h'
                                   ? '${summary['sample_count'] ?? 0} observed samples'
                                   : 'From authorized inventory',
-                              style: const TextStyle(
-                                color: muted,
-                                fontSize: 11,
-                              ),
+                              style: TextStyle(color: muted, fontSize: 11),
                             ),
                           ],
                         ),
@@ -1027,7 +1094,7 @@ class _OperationsState extends State<Operations> {
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
-        const Text(
+        AppText(
           'Click a tower to view all its devices.',
           style: TextStyle(color: muted),
         ),
@@ -1038,7 +1105,7 @@ class _OperationsState extends State<Operations> {
               search.isEmpty
                   ? 'No towers to display yet.'
                   : 'No towers match your search.',
-              style: const TextStyle(color: muted),
+              style: TextStyle(color: muted),
             ),
           )
         else
@@ -1084,7 +1151,7 @@ class _OperationsState extends State<Operations> {
                                   if (writer)
                                     PopupMenuButton<String>(
                                       tooltip: 'Tower actions',
-                                      icon: const Icon(
+                                      icon: Icon(
                                         Icons.more_vert,
                                         size: 20,
                                         color: muted,
@@ -1108,16 +1175,16 @@ class _OperationsState extends State<Operations> {
                                       itemBuilder: (_) => [
                                         const PopupMenuItem(
                                           value: 'discover',
-                                          child: Text('Discover devices'),
+                                          child: AppText('Discover devices'),
                                         ),
                                         const PopupMenuItem(
                                           value: 'edit',
-                                          child: Text('Edit tower'),
+                                          child: AppText('Edit tower'),
                                         ),
                                         if (owner)
                                           const PopupMenuItem(
                                             value: 'delete',
-                                            child: Text('Delete tower'),
+                                            child: AppText('Delete tower'),
                                           ),
                                       ],
                                     ),
@@ -1144,7 +1211,7 @@ class _OperationsState extends State<Operations> {
                                     : 'No location set',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: muted),
+                                style: TextStyle(color: muted),
                               ),
                               const SizedBox(height: 4),
                               Text(
@@ -1152,18 +1219,21 @@ class _OperationsState extends State<Operations> {
                                     'No management IP',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: muted,
-                                  fontSize: 12,
-                                ),
+                                style: TextStyle(color: muted, fontSize: 12),
                               ),
                               const Spacer(),
-                              const Divider(color: Color(0xff20334e)),
+                              Divider(
+                                color: themeColor(0xff20334e, 0xffd6dfeb),
+                              ),
                               const SizedBox(height: 8),
                               Row(
                                 children: [
                                   for (final stat in [
-                                    (count, 'Devices', Colors.white),
+                                    (
+                                      count,
+                                      'Devices',
+                                      themeColor(0xffffffff, 0xff172b4d),
+                                    ),
                                     (online, 'Online', green),
                                     (offline, 'Offline', red),
                                   ])
@@ -1182,7 +1252,7 @@ class _OperationsState extends State<Operations> {
                                           ),
                                           Text(
                                             stat.$2,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: muted,
                                               fontSize: 12,
                                             ),
@@ -1217,9 +1287,9 @@ class _OperationsState extends State<Operations> {
           width: 300,
           child: TextField(
             key: ValueKey('$resource:$towerFilter'),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               prefixIcon: Icon(Icons.search),
-              hintText: 'Search inventory',
+              hintText: tr('Search inventory'),
             ),
             onChanged: (v) => setState(() => search = v),
           ),
@@ -1288,7 +1358,7 @@ class _OperationsState extends State<Operations> {
                               ? 'No devices are assigned to this tower yet.'
                               : 'No devices match this search in this tower.')
                         : 'No matching records. Add your inventory to begin monitoring.',
-                    style: const TextStyle(color: muted),
+                    style: TextStyle(color: muted),
                   ),
                 )
               : SingleChildScrollView(
@@ -1296,7 +1366,7 @@ class _OperationsState extends State<Operations> {
                   child: DataTable(
                     columns: [
                       ...columns.map((x) => DataColumn(label: Text(x))),
-                      const DataColumn(label: Text('Actions')),
+                      const DataColumn(label: AppText('Actions')),
                     ],
                     rows: data.map((row) {
                       List<dynamic> values = switch (resource) {
@@ -1346,7 +1416,7 @@ class _OperationsState extends State<Operations> {
                                     tooltip: 'View tower devices',
                                     onPressed: () =>
                                         openTowerDevices(row['id']),
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.router_outlined,
                                       size: 19,
                                       color: blue,
@@ -1390,7 +1460,7 @@ class _OperationsState extends State<Operations> {
                                   IconButton(
                                     tooltip: 'Delete account',
                                     onPressed: () => deleteAccount(row),
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.delete_outline,
                                       size: 19,
                                       color: red,
@@ -1421,7 +1491,7 @@ class _OperationsState extends State<Operations> {
                                   IconButton(
                                     tooltip: 'Delete',
                                     onPressed: () => remove(resource, row),
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.delete_outline,
                                       size: 19,
                                       color: red,
@@ -1496,17 +1566,17 @@ class _OperationsState extends State<Operations> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Delete account ${row['username']}?'),
-        content: const Text(
+        content: const AppText(
           'This permanently deletes the account and ends its sessions. Assigned towers become unassigned; towers and devices are kept.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const AppText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete account'),
+            child: const AppText('Delete account'),
           ),
         ],
       ),
@@ -1528,17 +1598,17 @@ class _OperationsState extends State<Operations> {
         title: Text(
           resource == 'users' ? 'Disable account?' : 'Delete ${row['name']}?',
         ),
-        content: const Text(
+        content: const AppText(
           'This changes the saved inventory. Resources with dependents must be emptied first.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const AppText('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm'),
+            child: const AppText('Confirm'),
           ),
         ],
       ),
@@ -1560,7 +1630,7 @@ class _OperationsState extends State<Operations> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Assign a device'),
+        title: const AppText('Assign a device'),
         content: DropdownButtonFormField<String>(
           items: list('devices')
               .map(
@@ -1575,7 +1645,7 @@ class _OperationsState extends State<Operations> {
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Assign'),
+            child: const AppText('Assign'),
           ),
         ],
       ),
@@ -1832,8 +1902,8 @@ class _OperationsState extends State<Operations> {
                   ? deviceId
                   : null,
               isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Select monitored device',
+              decoration: InputDecoration(
+                labelText: tr('Select monitored device'),
               ),
               items: list('devices')
                   .map(
@@ -1850,10 +1920,10 @@ class _OperationsState extends State<Operations> {
           ),
           const SizedBox(height: 24),
           if (samples.isEmpty)
-            const SizedBox(
+            SizedBox(
               height: 160,
               child: Center(
-                child: Text(
+                child: AppText(
                   'Select a device with collected samples to view real telemetry.',
                   style: TextStyle(color: muted),
                 ),
@@ -1866,7 +1936,7 @@ class _OperationsState extends State<Operations> {
               child: CustomPaint(painter: HistoryChart(points)),
             ),
             const SizedBox(height: 12),
-            const Text(
+            AppText(
               'RX Mbit/s · sum of device interfaces · missing samples shown as gaps',
               style: TextStyle(color: muted, fontSize: 12),
             ),
@@ -1887,7 +1957,7 @@ class _OperationsState extends State<Operations> {
                     children: [
                       Text(
                         field.replaceAll('_', ' '),
-                        style: const TextStyle(color: muted, fontSize: 12),
+                        style: TextStyle(color: muted, fontSize: 12),
                       ),
                       Text(
                         value(samples.last['values'][field]),
@@ -1915,7 +1985,7 @@ class _OperationsState extends State<Operations> {
     return section(
       recent ? 'Recent alerts' : 'Alerts',
       data.isEmpty
-          ? const Text('No alerts recorded.', style: TextStyle(color: muted))
+          ? AppText('No alerts recorded.', style: TextStyle(color: muted))
           : Column(
               children: data
                   .map(
@@ -1938,7 +2008,7 @@ class _OperationsState extends State<Operations> {
                             : a['acknowledged_by'] != null
                             ? 'Acknowledged'
                             : 'Open'}',
-                        style: const TextStyle(color: muted, fontSize: 12),
+                        style: TextStyle(color: muted, fontSize: 12),
                       ),
                       trailing: role != 'viewer' && a['acknowledged_by'] == null
                           ? TextButton(
@@ -1953,7 +2023,7 @@ class _OperationsState extends State<Operations> {
                                   toast(e.toString());
                                 }
                               },
-                              child: const Text('Acknowledge'),
+                              child: const AppText('Acknowledge'),
                             )
                           : null,
                     ),
@@ -1986,7 +2056,7 @@ class _OperationsState extends State<Operations> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              AppText(
                 'Only towers with saved coordinates are shown. Links require owner-entered verification evidence.',
                 style: TextStyle(color: muted),
               ),
@@ -1995,7 +2065,7 @@ class _OperationsState extends State<Operations> {
                 const SizedBox(
                   height: 320,
                   child: Center(
-                    child: Text(
+                    child: AppText(
                       'Add GPS coordinates to a tower to place it on the map.',
                     ),
                   ),
@@ -2116,7 +2186,7 @@ class _OperationsState extends State<Operations> {
                                           TextButton(
                                             onPressed: () =>
                                                 Navigator.pop(context),
-                                            child: const Text('Close'),
+                                            child: const AppText('Close'),
                                           ),
                                         ],
                                       ),
@@ -2138,7 +2208,7 @@ class _OperationsState extends State<Operations> {
                   ),
                 ),
               const SizedBox(height: 12),
-              const Text(
+              AppText(
                 'Map tiles require internet access. Inventory and monitoring remain local.',
                 style: TextStyle(color: muted, fontSize: 12),
               ),
@@ -2179,7 +2249,7 @@ class _OperationsState extends State<Operations> {
                     ),
                   ),
                   icon: const Icon(Icons.add_link),
-                  label: const Text('Add verified link'),
+                  label: const AppText('Add verified link'),
                 ),
             ],
           ),
@@ -2193,7 +2263,7 @@ class _OperationsState extends State<Operations> {
     Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        AppText(
           'The report uses observed ICMP samples from the last 24 hours. Unsampled time is not counted as uptime.',
           style: TextStyle(color: muted),
         ),
@@ -2206,7 +2276,7 @@ class _OperationsState extends State<Operations> {
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('Availability CSV'),
+                  title: const AppText('Availability CSV'),
                   content: SizedBox(
                     width: 700,
                     child: SingleChildScrollView(child: SelectableText(csv)),
@@ -2214,7 +2284,7 @@ class _OperationsState extends State<Operations> {
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.pop(context),
-                      child: const Text('Close'),
+                      child: const AppText('Close'),
                     ),
                   ],
                 ),
@@ -2224,7 +2294,7 @@ class _OperationsState extends State<Operations> {
             }
           },
           icon: const Icon(Icons.table_view_outlined),
-          label: const Text('Generate report'),
+          label: const AppText('Generate report'),
         ),
       ],
     ),
@@ -2240,12 +2310,14 @@ class _OperationsState extends State<Operations> {
       ),
       if (owner) ...[
         const SizedBox(height: 24),
+        card(PaymentSettings(api: api, initiallyExpanded: true)),
+        const SizedBox(height: 24),
         section(
           'SNMPv3 credential profiles',
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              AppText(
                 'SHA-256 authentication • AES-128 privacy. Secrets are encrypted on the server and cannot be read back.',
                 style: TextStyle(color: muted),
               ),
@@ -2259,7 +2331,7 @@ class _OperationsState extends State<Operations> {
               FilledButton.icon(
                 onPressed: () => edit('snmp-profiles'),
                 icon: const Icon(Icons.add),
-                label: const Text('Add SNMPv3 profile'),
+                label: const AppText('Add SNMPv3 profile'),
               ),
             ],
           ),
@@ -2277,7 +2349,7 @@ class _OperationsState extends State<Operations> {
                 showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
-                    title: const Text('Recent administrative events'),
+                    title: const AppText('Recent administrative events'),
                     content: SizedBox(
                       width: 600,
                       height: 400,
@@ -2297,7 +2369,7 @@ class _OperationsState extends State<Operations> {
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Close'),
+                        child: const AppText('Close'),
                       ),
                     ],
                   ),
@@ -2306,7 +2378,7 @@ class _OperationsState extends State<Operations> {
                 toast(e.toString());
               }
             },
-            child: const Text('View audit log'),
+            child: const AppText('View audit log'),
           ),
         ),
       ],
@@ -2350,7 +2422,7 @@ class ResourceDialog extends StatefulWidget {
   State<ResourceDialog> createState() => _ResourceDialogState();
 }
 
-class _ResourceDialogState extends State<ResourceDialog> {
+class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
   final form = GlobalKey<FormState>();
   final controls = <String, TextEditingController>{};
   final values = <String, dynamic>{};
@@ -2421,7 +2493,7 @@ class _ResourceDialogState extends State<ResourceDialog> {
                   padding: const EdgeInsets.only(bottom: 16),
                   child: f.kind == 'bool'
                       ? SwitchListTile(
-                          title: Text(f.label),
+                          title: AppText(f.label),
                           value: values[f.key] == true,
                           onChanged: (v) => setState(() => values[f.key] = v),
                         )
@@ -2432,7 +2504,7 @@ class _ResourceDialogState extends State<ResourceDialog> {
                               ? values[f.key]
                               : null,
                           isExpanded: true,
-                          decoration: InputDecoration(labelText: f.label),
+                          decoration: InputDecoration(labelText: tr(f.label)),
                           items: f.options!
                               .map(
                                 (o) => DropdownMenuItem(
@@ -2450,7 +2522,7 @@ class _ResourceDialogState extends State<ResourceDialog> {
                       : TextFormField(
                           controller: controls[f.key],
                           obscureText: f.kind == 'password',
-                          decoration: InputDecoration(labelText: f.label),
+                          decoration: InputDecoration(labelText: tr(f.label)),
                           validator: (v) {
                             if (f.required && (v == null || v.isEmpty)) {
                               return 'Required';
@@ -2471,8 +2543,7 @@ class _ResourceDialogState extends State<ResourceDialog> {
                           },
                         ),
                 ),
-              if (error != null)
-                Text(error!, style: const TextStyle(color: red)),
+              if (error != null) Text(error!, style: TextStyle(color: red)),
             ],
           ),
         ),
@@ -2481,11 +2552,11 @@ class _ResourceDialogState extends State<ResourceDialog> {
     actions: [
       TextButton(
         onPressed: busy ? null : () => Navigator.pop(context),
-        child: const Text('Cancel'),
+        child: const AppText('Cancel'),
       ),
       FilledButton(
         onPressed: busy ? null : submit,
-        child: Text(busy ? 'Saving…' : 'Save'),
+        child: AppText(busy ? 'Saving…' : 'Save'),
       ),
     ],
   );
@@ -2498,7 +2569,8 @@ class NetworkSettings extends StatefulWidget {
   State<NetworkSettings> createState() => _NetworkSettingsState();
 }
 
-class _NetworkSettingsState extends State<NetworkSettings> {
+class _NetworkSettingsState extends State<NetworkSettings>
+    with LanguageRebuild {
   final fields = {
     for (final x in [
       'interface',
@@ -2600,9 +2672,9 @@ class _NetworkSettingsState extends State<NetworkSettings> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Network settings', style: TextStyle(fontSize: 20)),
+          const AppText('Network settings', style: TextStyle(fontSize: 20)),
           const SizedBox(height: 12),
-          const Text(
+          AppText(
             'Applying settings starts a 120-second rollback timer. Reconnect at the new address and confirm to keep them.',
             style: TextStyle(color: muted),
           ),
@@ -2610,14 +2682,14 @@ class _NetworkSettingsState extends State<NetworkSettings> {
           DropdownButtonFormField<String>(
             initialValue: method,
             items: const [
-              DropdownMenuItem(value: 'dhcp', child: Text('Automatic DHCP')),
+              DropdownMenuItem(value: 'dhcp', child: AppText('Automatic DHCP')),
               DropdownMenuItem(
                 value: 'static',
-                child: Text('Manual static IPv4'),
+                child: AppText('Manual static IPv4'),
               ),
             ],
             onChanged: (v) => setState(() => method = v!),
-            decoration: const InputDecoration(labelText: 'Address method'),
+            decoration: InputDecoration(labelText: tr('Address method')),
           ),
           const SizedBox(height: 16),
           Wrap(
@@ -2639,7 +2711,7 @@ class _NetworkSettingsState extends State<NetworkSettings> {
                   width: 250,
                   child: TextField(
                     controller: fields[key],
-                    decoration: InputDecoration(labelText: key),
+                    decoration: InputDecoration(labelText: tr(key)),
                   ),
                 ),
             ],
@@ -2669,7 +2741,7 @@ class _NetworkSettingsState extends State<NetworkSettings> {
             ],
           ),
           const SizedBox(height: 16),
-          SelectableText(result, style: const TextStyle(color: muted)),
+          SelectableText(result, style: TextStyle(color: muted)),
         ],
       ),
     ),
@@ -2716,7 +2788,8 @@ class HealthBar extends StatelessWidget {
 
 class HistoryChart extends CustomPainter {
   final List<double?> points;
-  HistoryChart(this.points);
+  HistoryChart(this.points) : mode = appThemeMode.value;
+  final ThemeMode mode;
   @override
   void paint(Canvas canvas, Size size) {
     final grid = Paint()
@@ -2729,7 +2802,7 @@ class HistoryChart extends CustomPainter {
     final values = points.whereType<double>().toList();
     if (values.isEmpty) {
       final text = TextPainter(
-        text: const TextSpan(
+        text: TextSpan(
           text: 'Bandwidth counters unavailable',
           style: TextStyle(color: muted, fontSize: 14),
         ),
@@ -2770,7 +2843,7 @@ class HistoryChart extends CustomPainter {
     final label = TextPainter(
       text: TextSpan(
         text: '${max.toStringAsFixed(2)} Mbit/s',
-        style: const TextStyle(color: muted, fontSize: 11),
+        style: TextStyle(color: muted, fontSize: 11),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -2779,5 +2852,5 @@ class HistoryChart extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant HistoryChart oldDelegate) =>
-      oldDelegate.points != points;
+      oldDelegate.points != points || oldDelegate.mode != mode;
 }

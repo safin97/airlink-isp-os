@@ -1,3 +1,4 @@
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_recharge.dart';
@@ -10,7 +11,8 @@ class Sas4UserDetails extends StatefulWidget {
   State<Sas4UserDetails> createState() => _Sas4UserDetailsState();
 }
 
-class _Sas4UserDetailsState extends State<Sas4UserDetails> {
+class _Sas4UserDetailsState extends State<Sas4UserDetails>
+    with LanguageRebuild {
   final form = GlobalKey<FormState>();
   final controllers = <String, TextEditingController>{};
   final values = <String, dynamic>{};
@@ -129,7 +131,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
         saved = true;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User information saved to SAS4.')),
+        const SnackBar(content: AppText('User information saved to SAS4.')),
       );
       return true;
     } catch (e) {
@@ -156,7 +158,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
     if (recharged == true) {
       saved = true;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Card recharged successfully.')),
+        const SnackBar(content: AppText('Card recharged successfully.')),
       );
       await load(preserveEdits: true);
     }
@@ -195,13 +197,13 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
                 const SizedBox(height: 8),
                 const FittedBox(
                   fit: BoxFit.scaleDown,
-                  child: Text(
+                  child: AppText(
                     'Recharge card',
                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                AppText(
                   !allowed
                       ? 'SAS4 permission required'
                       : changed
@@ -231,16 +233,16 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
         ? 'YYYY-MM-DD HH:MM:SS • SAS4 server time'
         : field['help'] as String?;
     final decoration = InputDecoration(
-      labelText: label,
-      helperText: help,
+      labelText: tr(label),
+      helperText: help == null ? null : tr(help),
       helperMaxLines: 3,
       border: const OutlineInputBorder(),
     );
     if (kind == 'switch') {
       return SwitchListTile(
         contentPadding: EdgeInsets.zero,
-        title: Text(label),
-        subtitle: help == null ? null : Text(help),
+        title: AppText(label),
+        subtitle: help == null ? null : AppText(help),
         value: values[key] == 1 || values[key] == true,
         onChanged: editable && editing && !saving
             ? (value) => setState(() {
@@ -327,8 +329,8 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
         ),
         title: Text(
           details == null
-              ? 'User information'
-              : '${details!['username']} • User information',
+              ? tr('User information')
+              : "${details!['username']} • ${tr('User information')}",
         ),
         actions: [
           Padding(
@@ -347,7 +349,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
                   ? save
                   : () => setState(() => editing = true),
               icon: Icon(editing ? Icons.save_outlined : Icons.edit_outlined),
-              label: Text(
+              label: AppText(
                 saving
                     ? 'Saving…'
                     : editing
@@ -378,7 +380,7 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails> {
                   if (details != null) ...[
                     rechargeSquare(),
                     const SizedBox(height: 20),
-                    Text(
+                    AppText(
                       editing
                           ? 'Changes are saved to SAS4 when you select Save changes.'
                           : 'Select Edit to change user information.',

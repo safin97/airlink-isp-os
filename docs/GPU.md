@@ -1,6 +1,8 @@
 # Automatic GPU detection
 
-The GPU-capable installer includes NVIDIA's Debian 13 open kernel driver from the 610 branch, its user-space graphics libraries and `nvidia-smi`. Drivers are built for the ISO kernel before packaging, so a supported RTX card can bind through normal Linux PCI/udev detection without an Internet download at boot. Mesa remains installed for other graphics hardware. AirLink does not force an Xorg primary GPU or change laptop GPU routing.
+Release 0.1.6-dev is an application-only update: it includes detection/status reporting but does not ship a new ISO or install drivers. The GPU-capable ISO recipe below is separate.
+
+The GPU-capable ISO build recipe includes NVIDIA's Debian 13 open kernel driver from the 610 branch, its user-space graphics libraries and `nvidia-smi`. Drivers are built for the ISO kernel before packaging, so a supported RTX card can bind through normal Linux PCI/udev detection without an Internet download at boot. Mesa remains installed for other graphics hardware. AirLink does not force an Xorg primary GPU or change laptop GPU routing.
 
 PC settings → Overview shows every detected PCI display/3D controller. For an active NVIDIA driver, it also shows the model, driver version, VRAM use, utilization and temperature reported by `nvidia-smi`. Missing drivers and unavailable metrics are shown honestly; zero utilization is a valid idle reading. Detection is read-only and never downloads drivers, reboots, changes power limits or overclocks hardware.
 

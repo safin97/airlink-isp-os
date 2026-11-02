@@ -1,3 +1,5 @@
+import 'app_theme.dart';
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
@@ -8,7 +10,7 @@ class Sas4Connection extends StatefulWidget {
   State<Sas4Connection> createState() => _Sas4ConnectionState();
 }
 
-class _Sas4ConnectionState extends State<Sas4Connection> {
+class _Sas4ConnectionState extends State<Sas4Connection> with LanguageRebuild {
   final username = TextEditingController();
   final password = TextEditingController();
   final form = GlobalKey<FormState>();
@@ -94,20 +96,20 @@ class _Sas4ConnectionState extends State<Sas4Connection> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
+        const AppText(
           'SAS4 connection',
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
-        const Text(
+        AppText(
           'airlinkcom.online • Private to your AirLink account.',
-          style: TextStyle(color: Color(0xff99acc6)),
+          style: TextStyle(color: themeColor(0xff99acc6, 0xff52627a)),
         ),
         const SizedBox(height: 16),
         TextFormField(
           controller: username,
           enabled: !busy,
-          decoration: const InputDecoration(labelText: 'SAS4 manager username'),
+          decoration: InputDecoration(labelText: tr('SAS4 manager username')),
           validator: (value) =>
               value == null || value.trim().isEmpty ? 'Required' : null,
         ),
@@ -117,7 +119,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> {
           enabled: !busy,
           obscureText: true,
           decoration: InputDecoration(
-            labelText: 'SAS4 manager password',
+            labelText: tr('SAS4 manager password'),
             helperText: configured
                 ? 'Leave blank to keep the saved password for this username.'
                 : 'Stored encrypted on the AirLink server.',
@@ -130,7 +132,7 @@ class _Sas4ConnectionState extends State<Sas4Connection> {
         FilledButton.icon(
           onPressed: busy ? null : save,
           icon: const Icon(Icons.link),
-          label: const Text('Save SAS4 connection'),
+          label: const AppText('Save SAS4 connection'),
         ),
         if (busy)
           const Padding(

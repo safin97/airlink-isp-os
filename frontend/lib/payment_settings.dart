@@ -1,14 +1,21 @@
+import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
 class PaymentSettings extends StatefulWidget {
   final Api api;
-  const PaymentSettings({super.key, required this.api});
+  final bool initiallyExpanded;
+  const PaymentSettings({
+    super.key,
+    required this.api,
+    this.initiallyExpanded = false,
+  });
   @override
   State<PaymentSettings> createState() => _PaymentSettingsState();
 }
 
-class _PaymentSettingsState extends State<PaymentSettings> {
+class _PaymentSettingsState extends State<PaymentSettings>
+    with LanguageRebuild {
   final merchants = {
     for (final p in ['fib', 'fastpay']) p: TextEditingController(),
   };
@@ -20,6 +27,12 @@ class _PaymentSettingsState extends State<PaymentSettings> {
   bool loaded = false;
   bool busy = false;
   String? message;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initiallyExpanded) load();
+  }
+
   @override
   void dispose() {
     for (final c in [...merchants.values, ...secrets.values]) {
@@ -83,14 +96,15 @@ class _PaymentSettingsState extends State<PaymentSettings> {
 
   @override
   Widget build(BuildContext context) => ExpansionTile(
+    initiallyExpanded: widget.initiallyExpanded,
     tilePadding: EdgeInsets.zero,
-    title: const Text('Payment setup'),
-    subtitle: const Text('FIB Bank and FastPay merchant API accounts'),
+    title: const AppText('Payment setup'),
+    subtitle: const AppText('FIB Bank and FastPay merchant API accounts'),
     onExpansionChanged: (open) {
       if (open) load();
     },
     children: [
-      const Text(
+      const AppText(
         'Use merchant API credentials, not your personal banking login. Secrets are stored encrypted and never shown again.',
       ),
       if (busy) const LinearProgressIndicator(),
@@ -100,7 +114,10 @@ class _PaymentSettingsState extends State<PaymentSettings> {
           child: Text(message!),
         ),
       if (!loaded && !busy)
-        TextButton(onPressed: load, child: const Text('Load payment settings')),
+        TextButton(
+          onPressed: load,
+          child: const AppText('Load payment settings'),
+        ),
       if (loaded)
         for (final provider in ['fib', 'fastpay'])
           Padding(
@@ -115,18 +132,23 @@ class _PaymentSettingsState extends State<PaymentSettings> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                AppText(
+                  configured[provider] == true
+                      ? 'Configured'
+                      : 'Not configured',
+                ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   initialValue: environments[provider],
-                  decoration: const InputDecoration(labelText: 'Environment'),
+                  decoration: InputDecoration(labelText: tr('Environment')),
                   items: const [
                     DropdownMenuItem(
                       value: 'sandbox',
-                      child: Text('Sandbox — test payments'),
+                      child: AppText('Sandbox — test payments'),
                     ),
                     DropdownMenuItem(
                       value: 'production',
-                      child: Text('Production — real payments'),
+                      child: AppText('Production — real payments'),
                     ),
                   ],
                   onChanged: busy
@@ -139,9 +161,9 @@ class _PaymentSettingsState extends State<PaymentSettings> {
                   controller: merchants[provider],
                   enabled: !busy,
                   decoration: InputDecoration(
-                    labelText: provider == 'fib'
-                        ? 'FIB client ID'
-                        : 'FastPay store ID',
+                    labelText: tr(
+                      provider == 'fib' ? 'FIB client ID' : 'FastPay store ID',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -152,23 +174,25 @@ class _PaymentSettingsState extends State<PaymentSettings> {
                   autocorrect: false,
                   enableSuggestions: false,
                   decoration: InputDecoration(
-                    labelText: provider == 'fib'
-                        ? 'FIB client secret'
-                        : 'FastPay store password',
+                    labelText: tr(
+                      provider == 'fib'
+                          ? 'FIB client secret'
+                          : 'FastPay store password',
+                    ),
                     helperText: configured[provider] == true
                         ? 'Leave blank to keep the saved secret'
                         : 'Provided by your merchant payment provider',
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                const AppText(
                   'Sandbox payments never recharge a real SAS4 account. Production payments recharge only after server verification.',
                   style: TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: busy ? null : () => save(provider),
-                  child: const Text('Save merchant settings'),
+                  child: const AppText('Save merchant settings'),
                 ),
               ],
             ),

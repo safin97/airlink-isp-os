@@ -11,6 +11,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(home:LoginView(api:api,initialized:true,done:(){})));
     await tester.enterText(find.byType(TextField).at(0),'owner');
     await tester.enterText(find.byType(TextField).at(1),'bad-password');
+    await tester.ensureVisible(find.widgetWithText(FilledButton,'Sign in'));
     await tester.tap(find.widgetWithText(FilledButton,'Sign in'));
     await tester.pumpAndSettle();
     expect(find.text('Invalid username or password'),findsOneWidget);

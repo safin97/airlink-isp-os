@@ -81,7 +81,9 @@ void main() {
         client: MockClient(
           (request) async => http.Response(
             jsonEncode(
-              request.url.path.endsWith('/dashboard')
+              request.url.path == '/api/integrations/sas4/dashboard'
+                  ? {'online_users': 125}
+                  : request.url.path.endsWith('/dashboard')
                   ? {
                       'online': 0,
                       'offline': 0,
@@ -97,7 +99,7 @@ void main() {
             headers: {'content-type': 'application/json'},
           ),
         ),
-      )..user = {'username': 'viewer', 'role': 'viewer'};
+      )..user = {'username': 'manager', 'role': 'manager'};
       await tester.pumpWidget(
         MaterialApp(
           home: Operations(api: api, logout: () async {}),
@@ -107,10 +109,14 @@ void main() {
       await tester.tap(find.widgetWithText(ListTile, 'NOC Screen'));
       await tester.pumpAndSettle();
       expect(find.text('Network operations center'), findsOneWidget);
+      expect(find.text('Online users'), findsOneWidget);
+      expect(find.text('125'), findsOneWidget);
       await tester.tap(find.text('Expand NOC'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(ListTile, 'Dashboard'), findsNothing);
-      await tester.tap(find.text('Show sidebar'));
+      expect(find.byKey(const ValueKey('language-selector')), findsNothing);
+      expect(find.byKey(const ValueKey('theme-toggle')), findsNothing);
+      await tester.tap(find.text('Exit fullscreen'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('View alerts'));
       await tester.pumpAndSettle();

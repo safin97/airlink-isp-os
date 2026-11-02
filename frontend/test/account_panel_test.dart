@@ -8,7 +8,7 @@ import 'package:airlink_isp_os/main.dart';
 
 void main() {
   testWidgets(
-    'top-right account opens profile, password change and SAS4 settings',
+    'sidebar account opens profile, password change and SAS4 settings',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 1400);
       tester.view.devicePixelRatio = 1;
@@ -39,9 +39,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'my-manager'));
+      await tester.ensureVisible(find.widgetWithText(ListTile, 'My account'));
+      await tester.tap(find.widgetWithText(ListTile, 'My account'));
       await tester.pumpAndSettle();
-      expect(find.text('My account'), findsOneWidget);
+      expect(find.text('My account'), findsNWidgets(2));
       expect(find.text('Role: manager'), findsOneWidget);
       expect(find.text('SAS4 connection'), findsOneWidget);
       await tester.enterText(
@@ -56,8 +57,10 @@ void main() {
         find.byType(TextFormField).at(2),
         'New-Password-For-Account-492!',
       );
-      await tester.ensureVisible(find.widgetWithText(FilledButton, 'Change password'));
-    await tester.tap(find.widgetWithText(FilledButton, 'Change password'));
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Change password'),
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Change password'));
       await tester.pumpAndSettle();
       expect(writes.single.url.path, '/api/auth/password');
       expect(jsonDecode(writes.single.body), {
@@ -80,7 +83,7 @@ void main() {
       );
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
-      expect(find.text('My account'), findsNothing);
+      expect(find.text('My account'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
