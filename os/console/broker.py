@@ -12,6 +12,7 @@ import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from network.configure import action as network_action
 from updates.update import action as update_action, restart_system
+from console.gpu import detect as detect_gpus
 
 SOCKET = Path("/run/airlink/control.sock")
 
@@ -22,7 +23,8 @@ def status():
         services[name] = subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True).stdout.strip()
     return {"hostname": socket.gethostname(), "cpu_percent": psutil.cpu_percent(interval=0.2),
             "memory_percent": psutil.virtual_memory().percent, "storage_percent": psutil.disk_usage("/").percent,
-            "addresses": json.loads(subprocess.check_output(["ip", "-j", "address"], text=True)), "services": services}
+            "addresses": json.loads(subprocess.check_output(["ip", "-j", "address"], text=True)),
+            "services": services, "gpus": detect_gpus()}
 
 
 class Handler(socketserver.StreamRequestHandler):

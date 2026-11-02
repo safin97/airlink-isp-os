@@ -13,7 +13,10 @@ RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin
 RUN useradd --system --home-dir /var/lib/airlink --create-home --shell /usr/sbin/nologin airlink && \
     mkdir -p /etc/airlink /var/lib/airlink /var/backups/airlink /opt/airlink && \
     passwd -l root && printf 'en_US.UTF-8 UTF-8\n' > /etc/locale.gen && locale-gen
-FROM foundation AS runtime
+FROM foundation AS graphics
+COPY os/build/install-gpu-drivers.sh /tmp/install-gpu-drivers.sh
+RUN bash /tmp/install-gpu-drivers.sh && rm /tmp/install-gpu-drivers.sh
+FROM graphics AS runtime
 COPY backend/requirements.lock /tmp/requirements.lock
 RUN python3 -m venv /opt/airlink/venv && /opt/airlink/venv/bin/pip install --no-cache-dir -r /tmp/requirements.lock
 COPY backend /opt/airlink/backend

@@ -254,6 +254,24 @@ class Panel(QMainWindow):
                 if address.get('scope') == 'global':
                     ip = address['local']
                     lines.append(f"  {interface['ifname']} — https://{'[' + ip + ']' if ':' in ip else ip}")
+        lines += ['', 'Graphics processors:']
+        if not data.get('gpus'):
+            lines.append('No PCI graphics processor detected.')
+        for gpu in data.get('gpus', []):
+            state = {'ready': 'NVIDIA driver ready', 'loaded': 'Driver loaded',
+                     'not_loaded': 'Driver not loaded'}.get(gpu['status'], gpu['status'])
+            lines.append(f"{gpu['name']} — {state} ({gpu.get('driver') or 'none'})")
+            if gpu.get('driver_version'):
+                lines.append('  Driver version: ' + gpu['driver_version'])
+            readings = []
+            for key, label, unit in [('utilization_percent', 'GPU', '%'),
+                                     ('memory_used_mib', 'VRAM used', ' MiB'),
+                                     ('memory_total_mib', 'VRAM total', ' MiB'),
+                                     ('temperature_c', 'Temperature', ' °C')]:
+                if gpu.get(key) is not None:
+                    readings.append(f"{label}: {gpu[key]:g}{unit}")
+            if readings:
+                lines.append('  ' + ' | '.join(readings))
         lines += ['', 'Services:'] + [name + ': ' + value for name, value in data['services'].items()]
         self.overview.setPlainText('\n'.join(lines))
 
