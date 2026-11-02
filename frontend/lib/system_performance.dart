@@ -20,11 +20,26 @@ class SystemPerformance extends StatelessWidget {
       ? '${(value / 1048576).toStringAsFixed(2)} MiB/s'
       : 'Unavailable';
 
+  String latencyReading(Map data) {
+    if (data['status'] == 'ready' && data['rtt_ms'] is num) {
+      return '${data['less_than'] == true ? '<' : ''}${number(data['rtt_ms'], suffix: ' ms')}';
+    }
+    return switch (data['status']) {
+      'no_reply' => 'No reply',
+      'stale' => 'Stale',
+      'unavailable' => 'Unavailable',
+      _ => 'Measuring…',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final memory = data['memory'] as Map? ?? {};
     final storage = data['storage'] as Map? ?? {};
+    final latency = data['latency'] as Map? ?? {};
+    final google = latency['google_dns'] as Map? ?? {};
+    final gaming = latency['gaming'] as Map? ?? {};
     final cards = <Widget>[];
     Widget tile(
       String title,
@@ -105,6 +120,18 @@ class SystemPerformance extends StatelessWidget {
         ['Read speed', 'Write: ${throughput(data['disk_write_bytes_sec'])}'],
       ),
     );
+    cards.add(
+      tile('Google DNS', Icons.dns_outlined, latencyReading(google), [
+        '8.8.8.8 · ICMP round-trip',
+        'Measured from this PC',
+      ]),
+    );
+    cards.add(
+      tile('Gaming ms', Icons.sports_esports_outlined, latencyReading(gaming), [
+        '1.1.1.1 · Internet connection test',
+        'Not actual PUBG / Call of Duty ping',
+      ]),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -117,7 +144,7 @@ class SystemPerformance extends StatelessWidget {
           data['status'] == 'stale'
               ? 'Performance readings are out of date.'
               : '${data['hostname'] ?? 'This PC'} · ${data['platform'] ?? 'System'}'
-                    ' · Updates every 30 seconds',
+                    ' · Live readings',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),

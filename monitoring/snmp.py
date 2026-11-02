@@ -1,4 +1,5 @@
 """Read-only SNMP v1/v2c/v3 with bounded standard and verified vendor MIB walks."""
+from airlink.vendor_identity import identify_vendor
 from pysnmp.proto.rfc1905 import NoSuchObject, NoSuchInstance, EndOfMibView
 from pysnmp.hlapi.v3arch.asyncio import (SnmpEngine, CommunityData, UsmUserData, UdpTransportTarget, ContextData,
     ObjectType, ObjectIdentity, get_cmd, walk_cmd, USM_AUTH_HMAC192_SHA256, USM_PRIV_CFB128_AES)
@@ -102,12 +103,12 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
         values = {"uptime_seconds": uptime, "snmp_up": True}
         if vendor == "auto":
             error, status, _, identity = await get_cmd(engine, auth, target, ContextData(),
-                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.2.0")), lookupMib=False)
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.2.0")),
+                ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")), lookupMib=False)
             oid = str(identity[0][1]) if not error and not status and identity else ""
-            vendor = ("mikrotik" if oid == "1.3.6.1.4.1.14988" or oid.startswith("1.3.6.1.4.1.14988.")
-                      else "ubiquiti" if oid == "1.3.6.1.4.1.41112" or oid.startswith(("1.3.6.1.4.1.41112.", "1.3.6.1.4.1.10002."))
-                      else "generic")
-            values["detected_vendor"] = vendor
+            description = str(identity[1][1]) if not error and not status and len(identity or []) > 1 else ""
+            vendor = identify_vendor(oid, description)
+            values.update(detected_vendor=vendor, vendor_detection_source='SNMP')
         tables = {}
         for name, oid in TABLES.items():
             if link_only and name not in ("if_name", "if_type", "if_status", "if_speed_mbps"):

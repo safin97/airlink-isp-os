@@ -94,3 +94,11 @@ NVIDIA metrics use the existing PCI/nvidia-smi detector and require a working dr
 ## Places and towers
 
 In **Towers**, the owner can select **Add place** and enter a name. Opening a place shows its tower cards; **Add tower** preselects that place. The main Towers page shows only places. Tower cards and **Add tower** appear after opening a named place. Existing towers without a place remain accessible through the **Unassigned towers** group, where the owner can assign a place in **Edit tower**. Each tower belongs to at most one place. Opening a tower still shows its devices, and returning preserves the selected place. Places can be renamed; move or remove their towers before deleting a place. Managers and technicians see only places containing towers they can already access, with counts scoped to that access. Grouping does not change inventory permissions or monitoring settings.
+
+## Automatic device vendor detection
+
+New devices default to Auto detect (SNMP / API); existing Generic devices also use this mode. SNMP sysObjectID/sysDescr and authenticated RouterOS/airOS responses identify supported vendors. Ubiquiti M5/AC is shown only when the identity contains a matching model; otherwise it remains Ubiquiti. Unknown identities remain generic. Configured SNMP profiles or tower API credentials are required; ping alone does not identify a vendor. Manual vendor selections remain available. Detection is displayed after polling and retained through temporary probe failures, but cleared when the device address/configuration changes.
+
+## PC connection measurements
+
+PC Performance includes ICMP round-trip latency to Google DNS (8.8.8.8) and an explicitly labeled gaming connection reference (1.1.1.1). The latter is not a PUBG Mobile or Call of Duty server measurement. Two shared, bounded probes run in parallel every five seconds; requests read their cache. Failed or blocked ICMP displays No reply, never a fabricated zero. System TX/RX and individual Ethernet cards are hidden from the dashboard. Network counters remain available to the monitoring service.

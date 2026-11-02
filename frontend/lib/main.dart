@@ -8,6 +8,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'api.dart';
 import 'branding.dart';
+import 'dashboard_clock.dart';
 import 'update_center.dart';
 import 'noc_screen.dart';
 import 'tower_discovery.dart';
@@ -384,7 +385,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Map<String, List<dynamic>> rows = {};
   List<dynamic> samples = [];
   String? deviceId;
-  Timer? timer;
+  Timer? nocTimer;
+  StreamSubscription<Map<String, dynamic>>? liveSubscription;
+  bool liveConnected = false;
   Api get api => widget.api;
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
@@ -433,19 +436,76 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       nocActive: () => mounted && pages[page] == 'NOC Screen',
       toggle: toggleNoc,
     );
-    reload();
-    timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      reload(quiet: true);
+    liveSubscription = api.liveEvents.listen(applyLive);
+    unawaited(
+      reload().then((_) {
+        if (mounted) api.startLive();
+      }),
+    );
+    nocTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (pages[page] == 'NOC Screen') unawaited(reloadNocUsers());
     });
   }
 
   @override
   void dispose() {
-    timer?.cancel();
+    nocTimer?.cancel();
+    liveSubscription?.cancel();
+    api.stopLive();
     stopFullscreen?.call();
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     super.dispose();
+  }
+
+  void applyLive(Map<String, dynamic> event) {
+    if (!mounted) return;
+    if (event['type'] == 'session_expired') {
+      unawaited(widget.logout());
+      return;
+    }
+    if (event['type'] == 'connection') {
+      if (liveConnected) setState(() => liveConnected = false);
+      return;
+    }
+    if (event['type'] == 'heartbeat') {
+      if (!liveConnected) setState(() => liveConnected = true);
+      return;
+    }
+    final identity = event['user'];
+    final updates = event['rows'] as Map? ?? {};
+    setState(() {
+      liveConnected = true;
+      if (identity is Map) {
+        api.user = Map<String, dynamic>.from(identity);
+        selectAllowedPage();
+      }
+      if (event.containsKey('summary')) {
+        summary = Map<String, dynamic>.from(event['summary']);
+      }
+      if (event['type'] == 'snapshot') rows = {};
+      for (final key in updates.keys) {
+        rows[key as String] = List<dynamic>.from(updates[key]);
+      }
+      if (placeFilter != null &&
+          placeFilter != '' &&
+          !list('places').any((p) => p['id'] == placeFilter)) {
+        placeFilter = null;
+      }
+      if (towerFilter != null &&
+          !list('towers').any((t) => t['id'] == towerFilter)) {
+        towerFilter = null;
+      }
+      if (deviceId != null &&
+          !list('devices').any((d) => d['id'] == deviceId)) {
+        deviceId = null;
+        samples = [];
+      }
+      observed = DateTime.now();
+      error = null;
+    });
+    if (deviceId != null && updates.containsKey('devices')) {
+      unawaited(loadMetrics(deviceId!, quiet: true));
+    }
   }
 
   void toggleNoc() {
@@ -857,12 +917,18 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                 Text(
                                   observed == null
                                       ? 'Connecting to your network'
-                                      : '${tr('Updated')} ${TimeOfDay.fromDateTime(observed!).format(context)} • ${tr('Refreshes every 30 seconds')}',
+                                      : '${tr('Updated')} ${TimeOfDay.fromDateTime(observed!).format(context)} • ${tr(liveConnected ? 'Live' : 'Reconnecting…')}',
                                   style: TextStyle(color: muted, fontSize: 12),
                                 ),
+                                if (constraints.maxWidth < 750)
+                                  const DashboardClock(compact: true),
                               ],
                             ),
                           ),
+                          if (constraints.maxWidth >= 750) ...[
+                            const DashboardClock(),
+                            const SizedBox(width: 16),
+                          ],
                           const ThemeToggle(),
                           const LanguageSelector(),
                         ],
@@ -1713,7 +1779,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                         _ => [
                           row['name'],
                           row['ip_address'],
-                          row['vendor'],
+                          row['vendor_label'] ?? row['vendor'],
                           nameOf('towers', row['tower_id']),
                           badge(row['status']),
                           snmpStatus(row),
@@ -2277,7 +2343,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'Vendor',
             initial: 'generic',
             options: const [
-              Option('generic', 'Generic SNMP'),
+              Option('generic', 'Auto detect (SNMP / API)'),
               Option('mikrotik', 'MikroTik'),
               Option('ubiquiti', 'Ubiquiti (other airMAX)'),
               Option('ubiquiti_m5', 'Ubiquiti airMAX M5'),

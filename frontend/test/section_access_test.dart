@@ -1,3 +1,4 @@
+import 'live_socket_fixture.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,17 +23,24 @@ void main() {
       'sections': ['towers'],
     };
     final requests = <String>[];
-    final api = Api(
-      client: MockClient((request) async {
-        requests.add(request.url.path);
-        final Object body = request.url.path == '/api/auth/me' ? account : [];
-        return http.Response(
-          jsonEncode(body),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      }),
-    )..user = Map<String, dynamic>.from(account);
+    final socket = FakeSocket();
+    final api =
+        Api(
+            liveConnector: (uri, token) => socket,
+            client: MockClient((request) async {
+              requests.add(request.url.path);
+              final Object body = request.url.path == '/api/auth/me'
+                  ? account
+                  : [];
+              return http.Response(
+                jsonEncode(body),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }),
+          )
+          ..token = 'live-test-token'
+          ..user = Map<String, dynamic>.from(account);
     await tester.pumpWidget(
       MaterialApp(
         home: Operations(api: api, logout: () async {}),
@@ -55,14 +63,34 @@ void main() {
     expect(requests, isNot(contains('/api/alerts')));
     requests.clear();
     account['sections'] = ['reports'];
-    await tester.pump(const Duration(seconds: 30));
+    socket.controller.add({
+      'type': 'patch',
+      'user': Map<String, dynamic>.from(account),
+      'rows': <String, dynamic>{
+        'towers': [],
+        'places': [],
+        'devices': [],
+        'sectors': [],
+      },
+      'summary': <String, dynamic>{},
+    });
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile, 'Towers'), findsNothing);
     expect(find.widgetWithText(ListTile, 'Reports'), findsOneWidget);
     expect(find.text('Generate report'), findsOneWidget);
-    expect(requests, ['/api/auth/me']);
+    expect(requests, isEmpty);
     account['sections'] = <String>[];
-    await tester.pump(const Duration(seconds: 30));
+    socket.controller.add({
+      'type': 'patch',
+      'user': Map<String, dynamic>.from(account),
+      'rows': <String, dynamic>{
+        'towers': [],
+        'places': [],
+        'devices': [],
+        'sectors': [],
+      },
+      'summary': <String, dynamic>{},
+    });
     await tester.pumpAndSettle();
     expect(find.text('No sections assigned'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'My account'), findsOneWidget);
@@ -83,30 +111,35 @@ void main() {
       'sections': ['settings'],
     };
     final requests = <String>[];
-    final api = Api(
-      client: MockClient((request) async {
-        requests.add(request.url.path);
-        final Object body = switch (request.url.path) {
-          '/api/auth/me' => account,
-          '/api/network' => {'interfaces': <dynamic>[]},
-          '/api/updates' => {
-            'current_version': 'test',
-            'state': {
-              'configured': true,
-              'state': {'status': 'idle'},
-            },
-            'history': <dynamic>[],
-          },
-          '/api/updates/check' => <String, dynamic>{},
-          _ => <dynamic>[],
-        };
-        return http.Response(
-          jsonEncode(body),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      }),
-    )..user = Map<String, dynamic>.from(account);
+    final socket = FakeSocket();
+    final api =
+        Api(
+            liveConnector: (uri, token) => socket,
+            client: MockClient((request) async {
+              requests.add(request.url.path);
+              final Object body = switch (request.url.path) {
+                '/api/auth/me' => account,
+                '/api/network' => {'interfaces': <dynamic>[]},
+                '/api/updates' => {
+                  'current_version': 'test',
+                  'state': {
+                    'configured': true,
+                    'state': {'status': 'idle'},
+                  },
+                  'history': <dynamic>[],
+                },
+                '/api/updates/check' => <String, dynamic>{},
+                _ => <dynamic>[],
+              };
+              return http.Response(
+                jsonEncode(body),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }),
+          )
+          ..token = 'live-test-token'
+          ..user = Map<String, dynamic>.from(account);
     await tester.pumpWidget(
       MaterialApp(
         home: Operations(api: api, logout: () async {}),
@@ -119,7 +152,17 @@ void main() {
     expect(find.widgetWithText(ListTile, 'Managers'), findsNothing);
     expect(find.widgetWithText(ListTile, 'Software Updates'), findsNothing);
     account['sections'] = ['software_updates'];
-    await tester.pump(const Duration(seconds: 30));
+    socket.controller.add({
+      'type': 'patch',
+      'user': Map<String, dynamic>.from(account),
+      'rows': <String, dynamic>{
+        'towers': [],
+        'places': [],
+        'devices': [],
+        'sectors': [],
+      },
+      'summary': <String, dynamic>{},
+    });
     await tester.pumpAndSettle();
     expect(find.text('Software Update Center'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'Settings'), findsNothing);

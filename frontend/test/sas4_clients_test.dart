@@ -132,7 +132,7 @@ void main() {
       final beforeDashboardRefresh = requests
           .where((r) => r.url.path.endsWith('/dashboard'))
           .length;
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(
         requests.where((r) => r.url.path.endsWith('/dashboard')).length,
@@ -165,7 +165,7 @@ void main() {
       final beforeRefresh = requests
           .where((r) => r.url.path.endsWith('/clients'))
           .length;
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(
         requests.where((r) => r.url.path.endsWith('/clients')).length,
@@ -201,7 +201,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(requests.last.url.path, endsWith('/online'));
       expect(requests.last.url.queryParameters['search'], 'Ali');
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(requests.last.url.path, endsWith('/online'));
       expect(requests.last.url.queryParameters['search'], 'Ali');
@@ -264,7 +264,7 @@ void main() {
           matching: find.byType(EditableText),
         ),
       );
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect(tester.widget<TextField>(find.byType(TextField)).enabled, isTrue);
       expect(editable.widget.focusNode.hasFocus, isTrue);
@@ -279,12 +279,12 @@ void main() {
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         'draft',
       );
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       pending.removeAt(0).complete(users('changed', '2026-11-02T10:01:30Z'));
       await tester.pumpAndSettle();
       expect(find.text('changed'), findsOneWidget);
       expect(editable.widget.focusNode.hasFocus, isTrue);
-      await tester.pump(const Duration(seconds: 30));
+      await tester.pump(const Duration(seconds: 5));
       await tester.enterText(find.byType(TextField), 'Ali');
       await tester.tap(find.text('Search'));
       await tester.pumpAndSettle();

@@ -11,6 +11,7 @@ from airlink.models import Device, SNMPProfile, Metric, Interface, Alert, now
 from airlink.security import aware, cipher
 from .snmp import collect, interface_rate
 from airlink.device_api import collect_api
+from airlink.vendor_identity import merge_vendor
 from airlink.tower_api import configuration as tower_configuration
 
 log = logging.getLogger("airlink.monitor")
@@ -54,6 +55,9 @@ async def poll(device_id, semaphore):
                     try:
                         api_values = await asyncio.wait_for(collect_api(device.ip_address, api_config,
                             vendor=values.get('detected_vendor', device.vendor), inventory=True), timeout=30)
+                        detected = merge_vendor(values.get('detected_vendor'), api_values.get('detected_vendor'))
+                        if detected != 'generic':
+                            api_values['detected_vendor'] = detected
                         # Empty API fields must not replace useful SNMP readings.
                         values.update({key: value for key, value in api_values.items()
                                        if value is not None and value != [] and
@@ -74,6 +78,11 @@ async def poll(device_id, semaphore):
                     return
                 device = current
                 previous = db.scalar(select(Metric).where(Metric.device_id == device_id).order_by(Metric.collected_at.desc()).limit(1))
+                if (device.vendor == 'generic' and previous and device.last_poll
+                        and not values.get('snmp_up') and not values.get('api_up')):
+                    for key in ('detected_vendor', 'vendor_detection_source'):
+                        if key in previous.values:
+                            values[key] = previous.values[key]
                 if previous and "interfaces" in values:
                     elapsed = (timestamp - aware(previous.collected_at)).total_seconds()
                     rebooted = values.get("uptime_seconds", 0) < previous.values.get("uptime_seconds", 0)

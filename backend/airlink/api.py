@@ -11,13 +11,14 @@ from datetime import timedelta
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, Query
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import select, func, text, delete, update, or_
+from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles
 from .customer_probes import service as customer_probe_service
 from .system_stats import service as system_stats_service
+from .vendor_identity import VENDOR_LABELS
 from .config import settings
 from .db import get_db, SessionLocal
 from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device,
@@ -603,7 +604,13 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
             telemetry['ethernet_links'] = [{'name': port.get('name', index), 'speed_mbps': port['speed_mbps']}
                 for index, port in values.get('interfaces', {}).items()
                 if port.get('type') == 6 and port.get('status') == 1 and port.get('speed_mbps', 0) > 0]
-        result.append({**public(device), 'status': effective_status(device), 'snmp_status': snmp_status(device, metric),
+        detected = metric.values.get('detected_vendor') if metric and device.last_poll else None
+        detected = detected if detected in VENDOR_LABELS and detected != 'generic' else None
+        effective_vendor = device.vendor if device.vendor != 'generic' else detected or 'generic'
+        result.append({**public(device), 'detected_vendor': detected,
+                       'vendor_label': VENDOR_LABELS.get(effective_vendor, effective_vendor),
+                       'vendor_auto': device.vendor == 'generic',
+                       'status': effective_status(device), 'snmp_status': snmp_status(device, metric),
                        'api_status': status, 'telemetry': telemetry,
                        'telemetry_at': metric.collected_at if fresh else None})
     return result
@@ -713,14 +720,17 @@ def summary(db, user):
     ids = [d.id for d in inventory]
     online = sum(effective_status(d) == "online" for d in inventory)
     offline = sum(effective_status(d) == "offline" for d in inventory)
-    samples = db.scalars(select(Metric).where(Metric.device_id.in_(ids), Metric.collected_at >= now() - timedelta(hours=24))).all()
-    availability = [m.values["icmp_up"] for m in samples if "icmp_up" in m.values]
+    # Aggregate in SQL: live clients must not load a day of metrics into memory.
+    icmp = Metric.values['icmp_up'].as_boolean()
+    sample_count, observations, successes = db.execute(select(func.count(Metric.id), func.count(icmp),
+        func.sum(case((icmp.is_(True), 1), else_=0))).where(Metric.device_id.in_(ids),
+        Metric.collected_at >= now() - timedelta(hours=24))).one()
     return {"towers": db.scalar(select(func.count()).select_from(Tower).where(Tower.id.in_(tower_ids(db, user)))),
             "sectors": len(sectors(user, db)), "devices": len(ids), "online": online, "offline": offline,
             "unknown": len(ids) - online - offline, "connected_clients": None,
             "active_alerts": db.scalar(select(func.count()).select_from(Alert).where(Alert.device_id.in_(ids), Alert.resolved_at.is_(None))),
-            "availability_24h": round(100 * sum(availability) / len(availability), 2) if availability else None,
-            "sample_count": len(availability), "observed_at": now(), "system": system_stats_service.read()}
+            "availability_24h": round(100 * (successes or 0) / observations, 2) if observations else None,
+            "sample_count": observations, "observed_at": now(), "system": system_stats_service.read()}
 
 
 @app.get("/api/dashboard")
@@ -842,6 +852,26 @@ async def live(websocket: WebSocket):
             await websocket.send_json(result)
             await asyncio.sleep(10)
     except (HTTPException, asyncio.TimeoutError, ValueError):
+        await websocket.close(code=4401)
+    except WebSocketDisconnect:
+        pass
+
+
+@app.websocket('/api/live')
+async def live_changes(websocket: WebSocket):
+    from . import live_updates
+    await websocket.accept()
+    try:
+        message = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+        token = message.get('token', '')
+        previous = None
+        while True:
+            # Reauthenticate and rescope every frame, including after grants change.
+            current = await asyncio.to_thread(live_updates.snapshot, token)
+            await websocket.send_json(live_updates.changes(previous, current))
+            previous = current
+            await asyncio.sleep(live_updates.INTERVAL)
+    except (HTTPException, asyncio.TimeoutError, ValueError, TypeError, AttributeError):
         await websocket.close(code=4401)
     except WebSocketDisconnect:
         pass

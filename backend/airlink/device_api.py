@@ -3,6 +3,7 @@ import json
 import math
 import re
 import httpx
+from .vendor_identity import identify_vendor
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -113,7 +114,8 @@ async def routeros(client, base, credentials, inventory=False):
             break
         if isinstance(data, list):
             wireless_values.setdefault('wireless_clients', 0)
-    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API'}
+    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API',
+              'detected_vendor': 'mikrotik', 'vendor_detection_source': 'API'}
     if inventory:
         result.update(wireless_values)
         resource = await read('system/resource')
@@ -144,7 +146,11 @@ def airos_values(data, inventory=False):
     wireless = data['wireless']
     # airOS station mode only; AP status must not become a subscriber signal.
     strength = signal(wireless.get('signal')) if wireless.get('mode') in ('sta', 'station', 'Station', 'sta-wds', 'sta-ptmp', 'sta-ptp') else None
-    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'airOS API'}
+    host = data.get('host') if isinstance(data.get('host'), dict) else {}
+    identity = ' '.join(str(host.get(key, '')) for key in ('devmodel', 'model', 'fwversion'))
+    result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'airOS API',
+              'detected_vendor': identify_vendor(description=identity, family='ubiquiti'),
+              'vendor_detection_source': 'API'}
     if inventory:
         host = data.get('host') if isinstance(data.get('host'), dict) else {}
         for key, raw in (('cpu_percent', numeric(host.get('cpuload'), 0, 100)),
@@ -189,7 +195,7 @@ async def collect_api(address, credentials, vendor='generic', transport=None, in
                 status, root = await request(client, 'GET', base + '/')
                 page = root.decode('utf-8', errors='ignore').lower()
                 kind = 'ubiquiti' if vendor in ('ubiquiti_m5', 'ubiquiti_ac') else vendor
-                if kind == 'generic':
+                if kind in ('generic', 'auto'):
                     if 'mikrotik' in page or 'routeros' in page:
                         kind = 'mikrotik'
                     elif 'airos' in page or 'ubiquiti' in page or 'ubnt' in page:

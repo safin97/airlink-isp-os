@@ -4,7 +4,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'section_access.dart';
 import 'sas4_user_details.dart';
+import 'sas4_recharge.dart';
 
 class Sas4Clients extends StatefulWidget {
   final Api api;
@@ -35,7 +37,8 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   bool onlineOnly = false;
   String currentSearch = '';
   bool get canConnect =>
-      ['owner', 'manager'].contains(widget.api.user?['role']);
+      widget.api.user?['role'] == 'owner' ||
+      usesSectionPermissions(widget.api.user ?? {});
 
   @override
   void initState() {
@@ -44,7 +47,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     onlineOnly = widget.showOnline;
     if (canConnect) {
       loadConnection();
-      refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         if (configured && !busy && !backgroundFetching && !viewingUser) {
           fetch(
             page: viewingDashboard ? 1 : result?['page'] as int? ?? 1,
@@ -147,6 +150,32 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     viewingUser = false;
     if (mounted && saved == true) {
       fetch(page: result?['page'] as int? ?? 1, quiet: true);
+    }
+  }
+
+  Future<void> openRecharge(dynamic row) async {
+    final id = int.tryParse('${row['id']}');
+    if (id == null ||
+        id < 1 ||
+        viewingUser ||
+        !canEditSection(widget.api.user ?? {}, 'isp_card')) {
+      return;
+    }
+    viewingUser = true;
+    try {
+      final recharged = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => Sas4Recharge(api: widget.api, userId: id),
+      );
+      if (mounted && recharged == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: AppText('Card recharged successfully.')),
+        );
+        await fetch(page: result?['page'] as int? ?? 1, quiet: true);
+      }
+    } finally {
+      viewingUser = false;
     }
   }
 
@@ -376,7 +405,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
         ),
         const SizedBox(height: 8),
         AppText(
-          'Your SAS4 account • Refreshes every 30 seconds',
+          'Your SAS4 account • Automatic background updates',
           style: TextStyle(fontSize: viewingDashboard ? null : 13),
         ),
         SizedBox(height: viewingDashboard ? 16 : 8),
@@ -510,7 +539,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                   for (final label in [
                     'Status',
                     'Username',
-                    if (!onlineOnly) ...['Name', 'Profile'],
+                    if (!onlineOnly) ...['Name', 'Recharge card', 'Profile'],
                     if (onlineOnly) ...[
                       'IP address',
                       'Ethernet speed',
@@ -560,6 +589,27 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                           ),
                           if (!onlineOnly) ...[
                             DataCell(Text(text(row['name']))),
+                            DataCell(
+                              TextButton.icon(
+                                onPressed:
+                                    (int.tryParse('${row['id']}') ?? 0) > 0 &&
+                                        canEditSection(
+                                          widget.api.user ?? {},
+                                          'isp_card',
+                                        )
+                                    ? () => openRecharge(row)
+                                    : null,
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(0, 28),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: const Icon(Icons.credit_card, size: 16),
+                                label: const AppText('Recharge'),
+                              ),
+                            ),
                             DataCell(Text(text(row['profile']))),
                           ],
                           if (onlineOnly)

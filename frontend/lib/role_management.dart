@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'section_access.dart';
@@ -18,6 +19,7 @@ class RoleManagement extends StatefulWidget {
 
 class _RoleManagementState extends State<RoleManagement> {
   List<Map<String, dynamic>> rows = [], groups = [];
+  StreamSubscription<Map<String, dynamic>>? liveSubscription;
   bool loading = true;
   String? error;
   String get endpoint => widget.accessGroups ? '/access-roles' : '/roles';
@@ -30,6 +32,25 @@ class _RoleManagementState extends State<RoleManagement> {
   void initState() {
     super.initState();
     load();
+    liveSubscription = widget.api.liveEvents.listen((event) {
+      if (!mounted) return;
+      final updated =
+          event['rows']?[widget.accessGroups ? 'access-roles' : 'roles'];
+      if (updated is List) {
+        setState(() {
+          rows = updated.map((r) => Map<String, dynamic>.from(r)).toList();
+          if (widget.accessGroups) groups = rows;
+        });
+      } else if (event['user'] != null) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    liveSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> load() async {

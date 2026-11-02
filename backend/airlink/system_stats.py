@@ -4,12 +4,15 @@ import importlib.util
 import logging
 import platform
 import socket
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import psutil
+from .connection_latency import service as latency_service
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +39,34 @@ def gpu_readings():
     return module.detect()
 
 
+def ethernet_ports(names):
+    if sys.platform == 'darwin':
+        try:
+            output = subprocess.run(['/usr/sbin/networksetup', '-listallhardwareports'],
+                capture_output=True, text=True, timeout=2, check=True).stdout
+            ports = set()
+            hardware = ''
+            for line in output.splitlines():
+                if line.startswith('Hardware Port:'):
+                    hardware = line.split(':', 1)[1].strip().lower()
+                elif line.startswith('Device:') and 'ethernet' in hardware:
+                    ports.add(line.split(':', 1)[1].strip())
+            return ports
+        except (OSError, subprocess.SubprocessError):
+            return set()
+    ports = set()
+    for name in names:
+        path = Path('/sys/class/net') / name
+        try:
+            if (path.joinpath('type').read_text().strip() == '1' and
+                    not path.joinpath('wireless').exists() and
+                    path.joinpath('device').exists() and '/virtual/' not in str(path.resolve())):
+                ports.add(name)
+        except OSError:
+            continue
+    return ports
+
+
 class SystemStats:
     def __init__(self):
         self.lock = threading.Lock()
@@ -49,11 +80,13 @@ class SystemStats:
         if self.thread and self.thread.is_alive():
             return
         self.previous = None
+        latency_service.start()
         self.stop_event.clear()
         self.thread = threading.Thread(target=self.run, name='airlink-host-stats', daemon=True)
         self.thread.start()
 
     def stop(self):
+        latency_service.stop()
         self.stop_event.set()
         if self.thread:
             self.thread.join(timeout=8)
@@ -63,6 +96,7 @@ class SystemStats:
             result = copy.deepcopy(self.snapshot)
             if self.sampled_at is not None and time.monotonic() - self.sampled_at > 30:
                 return {'status': 'stale'}
+            result['latency'] = latency_service.read()
             return result
 
     def sample(self):
@@ -77,12 +111,14 @@ class SystemStats:
         previous = self.previous
         elapsed = stamp - previous['stamp'] if previous else 0
         interfaces = []
+        ethernet = ethernet_ports(network)
         for name, counters in network.items():
             state = stats.get(name)
-            if not state or not state.isup or name in ('lo', 'lo0') or 'loopback' in getattr(state, 'flags', ''):
+            if not state or name in ('lo', 'lo0') or 'loopback' in getattr(state, 'flags', ''):
                 continue
-            before = previous['network'].get(name) if previous else None
-            interfaces.append({'name': name, 'link_mbps': state.speed if state.speed > 0 else None,
+            before = previous['network'].get(name) if previous and state.isup else None
+            interfaces.append({'name': name, 'kind': 'ethernet' if name in ethernet else 'other',
+                'is_up': bool(state.isup), 'link_mbps': state.speed if state.speed > 0 else None,
                 'rx_bytes_sec': rate(counters.bytes_recv, before.bytes_recv if before else None, elapsed),
                 'tx_bytes_sec': rate(counters.bytes_sent, before.bytes_sent if before else None, elapsed)})
         old_disk = previous['disk'] if previous else None
