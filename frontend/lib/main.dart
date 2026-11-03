@@ -24,6 +24,8 @@ import 'system_performance.dart';
 import 'section_access.dart';
 import 'role_management.dart';
 import 'wireless_clients_dialog.dart';
+import 'device_management_dialog.dart';
+import 'device_api_access_panel.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -367,6 +369,7 @@ class Operations extends StatefulWidget {
 class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
+  String? settingsPage;
   bool ispDashboard = true;
   bool ispReports = false;
   bool ispOnline = false;
@@ -688,6 +691,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     setState(() {
       page = index;
+      settingsPage = null;
       mapExpanded = pages[index] == 'Network Map';
       nocExpanded = false;
       search = '';
@@ -764,6 +768,32 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   }
                                 },
                               ),
+                            if (pages[i] == 'Settings' &&
+                                page == i &&
+                                canPage(i))
+                              for (final entry in settingsPages.entries)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 24,
+                                    top: 3,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    selected: settingsPage == entry.key,
+                                    selectedColor: blue,
+                                    selectedTileColor: blue.withValues(
+                                      alpha: .15,
+                                    ),
+                                    leading: Icon(entry.value, size: 18),
+                                    title: AppText(entry.key),
+                                    onTap: () {
+                                      setState(() => settingsPage = entry.key);
+                                      if (Scaffold.of(context).isDrawerOpen) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                  ),
+                                ),
                             if (pages[i] == 'Settings')
                               ListTile(
                                 dense: true,
@@ -1878,6 +1908,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       color: blue,
                                     ),
                                   ),
+                                if (resource == 'devices')
+                                  IconButton(
+                                    tooltip: 'Manage device',
+                                    onPressed: () => manageDevice(
+                                      Map<String, dynamic>.from(row),
+                                    ),
+                                    icon: const Icon(
+                                      Icons.settings_input_antenna,
+                                      size: 19,
+                                    ),
+                                  ),
                                 if (resource == 'devices' &&
                                     hasSection(api.user!, 'monitoring'))
                                   IconButton(
@@ -2151,6 +2192,18 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
+  Future<void> manageDevice(Map<String, dynamic> device) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => DeviceManagementDialog(
+        api: api,
+        device: device,
+        canEdit: inventoryWriter,
+      ),
+    );
+  }
+
   Future<void> discoverTower(
     Map<String, dynamic> tower, {
     bool snmp = false,
@@ -2158,7 +2211,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => TowerDiscoveryDialog(api: api, tower: tower, snmp: snmp),
+      builder: (_) => TowerDiscoveryDialog(
+        api: api,
+        tower: tower,
+        snmp: snmp,
+        onManageDevice: manageDevice,
+      ),
     );
     if (mounted) await reload();
   }
@@ -2420,6 +2478,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               options: [
                 const Option('https', 'HTTPS'),
                 const Option('http', 'HTTP (unencrypted)'),
+                const Option('both', 'HTTPS + HTTP (auto)'),
               ],
             ),
             FieldSpec(
@@ -2975,18 +3034,83 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   );
   Widget updates() => section('Software Update Center', UpdateCenter(api: api));
 
-  Widget settings() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      notice(
-        'Session & permissions',
-        'Signed in as ${api.user!['username']} ($role). Access is enforced by the server on every request.',
-      ),
-      if (canManageSettings) ...[
-        const SizedBox(height: 24),
-        card(PaymentSettings(api: api, initiallyExpanded: true)),
-        const SizedBox(height: 24),
-        section(
+  Map<String, IconData> get settingsPages => {
+    if (canManageSettings) ...{
+      'Payment gateways': Icons.payments_outlined,
+      if (owner) 'Device API logins': Icons.router_outlined,
+      'SNMP profiles': Icons.key_outlined,
+      'Network': Icons.settings_ethernet,
+      'Audit log': Icons.history,
+    },
+    'Session & permissions': Icons.security_outlined,
+  };
+
+  Widget settings() {
+    final selected = settingsPages.containsKey(settingsPage)
+        ? settingsPage
+        : null;
+    if (selected == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const AppText('Choose a settings page'),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              for (final entry in settingsPages.entries)
+                SizedBox(
+                  width: 252,
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 16,
+                      ),
+                      leading: Icon(entry.value, color: blue),
+                      title: AppText(entry.key),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => setState(() => settingsPage = entry.key),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => settingsPage = null),
+          icon: const Icon(Icons.arrow_back),
+          label: const AppText('Back to Settings'),
+        ),
+        const SizedBox(height: 12),
+        AppText(
+          selected,
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 20),
+        KeyedSubtree(
+          key: ValueKey('settings-$selected'),
+          child: settingsContent(selected),
+        ),
+      ],
+    );
+  }
+
+  Widget settingsContent(String selected) {
+    switch (selected) {
+      case 'Payment gateways':
+        return card(PaymentSettings(api: api, initiallyExpanded: true));
+      case 'Device API logins':
+        return card(DeviceApiAccessPanel(api: api, initiallyExpanded: true));
+      case 'SNMP profiles':
+        return section(
           'SNMP credential profiles',
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3013,11 +3137,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 24),
-        NetworkSettings(api: api),
-        const SizedBox(height: 24),
-        section(
+        );
+      case 'Network':
+        return NetworkSettings(api: api);
+      case 'Audit log':
+        return section(
           'Audit trail',
           FilledButton(
             onPressed: () async {
@@ -3058,10 +3182,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             },
             child: const AppText('View audit log'),
           ),
-        ),
-      ],
-    ],
-  );
+        );
+      default:
+        return notice(
+          'Session & permissions',
+          'Signed in as ${api.user!['username']} ($role). Access is enforced by the server on every request.',
+        );
+    }
+  }
 }
 
 class Option {

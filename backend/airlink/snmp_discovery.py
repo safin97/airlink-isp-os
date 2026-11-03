@@ -24,6 +24,18 @@ def candidates(db, profile_id=None):
         result.append({'profile_id': profile.id, 'profile_name': profile.name,
                        'credentials': credentials})
     if not profile_id:
+        # Try both community protocols without disclosing or replacing saved secrets.
+        for profile in list(result):
+            credentials = profile['credentials']
+            if credentials.get('version') not in ('1', '2', '2c'):
+                continue
+            for version in ('1', '2c'):
+                if any(c['credentials'].get('version') == version and
+                       c['credentials'].get('community') == credentials.get('community') for c in result):
+                    continue
+                result.append({'profile_id': None, 'source_profile_id': profile['profile_id'],
+                               'profile_name': profile['profile_name'],
+                               'credentials': {'version': version, 'community': credentials['community']}})
         for version in ('2c', '1'):
             if not any(c['credentials'].get('version') == version and
                        c['credentials'].get('community') == 'public' for c in result):
@@ -61,7 +73,8 @@ async def identify(address, profiles):
                 return {'ip_address': address, 'name': name or f'{VENDOR_LABELS[vendor]} {address}',
                         'vendor': vendor, 'vendor_label': VENDOR_LABELS[vendor],
                         'snmp_version': credentials.get('version', '3'),
-                        'snmp_profile_id': profile['profile_id'], 'profile_name': profile['profile_name']}
+                        'snmp_profile_id': profile['profile_id'], 'profile_name': profile['profile_name'],
+                        'source_profile_id': profile.get('source_profile_id')}
             except Exception:
                 continue
         return None

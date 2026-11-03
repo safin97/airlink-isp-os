@@ -66,7 +66,7 @@ class TowerInput(Strict):
     api_enabled: Optional[bool] = None
     api_username: Optional[str] = Field(default=None, max_length=128)
     api_password: Optional[str] = Field(default=None, max_length=256)
-    api_protocol: Optional[Literal["https", "http"]] = None
+    api_protocol: Optional[Literal["https", "http", "both"]] = None
     api_port: Optional[int] = Field(default=None, ge=1, le=65535)
     api_verify_tls: Optional[bool] = None
     _ip = field_validator("management_ip")(ip)
@@ -156,6 +156,10 @@ class SNMPPublicProfileInput(Strict):
     version: Literal['1', '2c']
 
 
+class SNMPDiscoveryProfileInput(SNMPPublicProfileInput):
+    source_profile_id: str = Field(min_length=1, max_length=36)
+
+
 class SectionAccessInput(Strict):
     sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
     editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)
@@ -223,3 +227,16 @@ class ManagerRoleInput(Strict):
     name: str = Field(min_length=1, max_length=64)
     access_role_id: str = Field(min_length=1, max_length=36)
     _clean = field_validator('name')(AccessRoleInput.clean_name.__func__)
+
+
+class WirelessSSIDInput(Strict):
+    menu: Literal['wireless', 'wifi', 'wifiwave2']
+    radio_id: str = Field(pattern=r'^\*[0-9A-Fa-f]+$', max_length=32)
+    ssid: str = Field(min_length=1, max_length=32)
+    previous_ssid: str = Field(max_length=32)
+
+    @model_validator(mode='after')
+    def valid_ssid(self):
+        if len(self.ssid.encode('utf-8')) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in self.ssid):
+            raise ValueError('SSID must be 1–32 UTF-8 bytes without control characters')
+        return self

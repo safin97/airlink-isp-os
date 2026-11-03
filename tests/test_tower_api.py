@@ -164,3 +164,20 @@ def test_inflight_results_dropped_when_tower_credentials_change(client, owner, m
     with SessionLocal() as db:
         assert db.scalar(select(Metric).where(Metric.device_id == did)) is None
         assert db.get(Device, did).last_poll is None
+
+
+@pytest.mark.parametrize('port', [None, 8443])
+def test_monitoring_both_protocols_falls_back_to_http(port):
+    requests = []
+    def handle(request):
+        requests.append(request)
+        if request.url.scheme == 'https': raise httpx.ConnectError('HTTPS unavailable')
+        if request.url.path == '/': return httpx.Response(200, text='MikroTik RouterOS')
+        if request.url.path == '/rest/interface/ethernet': return httpx.Response(200, json=[])
+        return httpx.Response(404)
+    result = asyncio.run(device_api.collect_api('192.0.2.1', {
+        'api_username':'reader','api_password':'test','protocol':'both','port':port},
+        transport=httpx.MockTransport(handle)))
+    assert result['detected_vendor'] == 'mikrotik'
+    assert requests[0].url.scheme == 'https' and (requests[0].url.port or 443) == (port or 443)
+    assert all(r.url.scheme == 'http' and (r.url.port or 80) == (port or 80) for r in requests[1:])

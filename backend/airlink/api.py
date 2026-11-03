@@ -15,6 +15,7 @@ from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
+from . import device_management, device_access
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
@@ -29,7 +30,7 @@ from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tow
                      UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, UserAccessRole, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
                        current_user, owner, settings_access, updates_access, resolve_user, cipher, bearer)
-from .schemas import Login, Setup, UserInput, PlaceInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange, SectionAccessInput
+from .schemas import WirelessSSIDInput, SNMPDiscoveryProfileInput, Login, Setup, UserInput, PlaceInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange, SectionAccessInput
 
 cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
 
@@ -55,6 +56,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
+app.include_router(device_access.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -529,9 +531,10 @@ def discover_tower_snmp(tower_id: str, data: SNMPDiscoveryInput, user=Depends(ow
         if data.offset == 0:
             commit(db, user, 'tower.discover_snmp', f'{tower_id}:{network}')
         hosts, timed_out = asyncio.run(snmp_discovery.scan_batch(batch, profiles))
-        existing = set(db.scalars(select(Device.ip_address).where(Device.ip_address.in_([h['ip_address'] for h in hosts]))))
+        existing = {device.ip_address: device.id for device in db.scalars(select(Device).where(Device.ip_address.in_([h['ip_address'] for h in hosts])))}
         for host in hosts:
             host['already_added'] = host['ip_address'] in existing
+            host['device_id'] = existing.get(host['ip_address'])
         scanned = min(data.offset + len(batch), len(addresses))
         return {'network': str(network), 'scanned': scanned, 'total': len(addresses),
                 'next_offset': scanned if scanned < len(addresses) else None,
@@ -728,6 +731,25 @@ def discovery_public_profile(data: SNMPPublicProfileInput, user=Depends(owner), 
     return {**public(profile), 'version': data.version}
 
 
+@app.post('/api/snmp-profiles/discovery-match')
+def discovery_matched_profile(data: SNMPDiscoveryProfileInput, user=Depends(owner), db=Depends(get_db)):
+    source = get(db, SNMPProfile, data.source_profile_id)
+    secret = json.loads(cipher().decrypt(source.encrypted_credentials.encode()))
+    if secret.get('version') not in ('1', '2', '2c') or not secret.get('community'):
+        raise HTTPException(422, 'A saved community profile is required')
+    for profile in db.scalars(select(SNMPProfile)):
+        credentials = json.loads(cipher().decrypt(profile.encrypted_credentials.encode()))
+        if credentials.get('version') == data.version and credentials.get('community') == secret['community']:
+            return {**public(profile), 'version': data.version}
+    profile = SNMPProfile(name=f'{source.name[:70]} v{data.version} {secrets.token_hex(3)}',
+        encrypted_credentials=cipher().encrypt(json.dumps({'version': data.version,
+            'community': secret['community']}).encode()).decode())
+    db.add(profile)
+    db.flush()
+    commit(db, user, 'snmp.create', profile.id)
+    return {**public(profile), 'version': data.version}
+
+
 @app.get("/api/snmp-profiles")
 def profiles(user=Depends(settings_access), db=Depends(get_db)):
     result = []
@@ -763,6 +785,55 @@ def metrics(device_id: str, hours: int = Query(24, ge=1, le=720), user=Depends(c
 def interfaces(device_id: str, user=Depends(current_user), db=Depends(get_db)):
     check_device(db, user, device_id)
     return [public(x) for x in db.scalars(select(Interface).where(Interface.device_id == device_id))]
+
+
+def wireless_management_context(db, user, device_id):
+    device = check_device(db, user, device_id)
+    metric = db.scalar(select(Metric).where(Metric.device_id == device_id)
+                      .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1))
+    vendor = device.vendor if device.vendor != 'generic' else (metric.values.get('detected_vendor', 'generic') if metric else 'generic')
+    return device, metric, vendor
+
+
+@app.get('/api/devices/{device_id}/wireless-settings')
+def device_wireless_settings(device_id: str, user=Depends(current_user), db=Depends(get_db)):
+    device, metric, vendor = wireless_management_context(db, user, device_id)
+    if vendor != 'mikrotik':
+        return {'supported': False, 'radios': [],
+                'message': 'SSID editing for this vendor/firmware is not supported yet. Registered clients remain available.'}
+    config = tower_api.configuration(db, device.tower_id)
+    try:
+        radios = device_management.run(device.ip_address, config)
+    except device_management.ManagementError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    return {'supported': True, 'radios': radios, 'message': None if radios else 'No supported wireless interfaces found.'}
+
+
+@app.put('/api/devices/{device_id}/wireless-settings')
+def set_device_wireless_settings(device_id: str, data: WirelessSSIDInput, user=Depends(current_user), db=Depends(get_db)):
+    device, _, vendor = wireless_management_context(db, user, device_id)
+    check_tower(db, user, device.tower_id, write=True)
+    if vendor != 'mikrotik':
+        raise HTTPException(422, 'SSID editing for this vendor/firmware is not supported yet')
+    config = tower_api.configuration(db, device.tower_id)
+    try:
+        lock = cache.lock(f'wireless-settings:{device.id}', timeout=25, blocking_timeout=0)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(409, 'Another wireless change is running')
+    except RedisError:
+        raise HTTPException(503, 'Device change coordination is unavailable') from None
+    try:
+        commit(db, user, 'device.ssid.change_requested', device.id)
+        result = device_management.run(device.ip_address, config, data.model_dump())
+        device.last_poll = None
+        commit(db, user, 'device.ssid.' + result['status'], device.id)
+        return result
+    except device_management.ManagementError as exc:
+        commit(db, user, 'device.ssid.change_failed_or_unknown', device.id)
+        raise HTTPException(exc.status, str(exc)) from None
+    finally:
+        with suppress(Exception):
+            lock.release()
 
 
 @app.get('/api/devices/{device_id}/wireless-clients')

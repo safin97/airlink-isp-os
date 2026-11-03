@@ -5,12 +5,14 @@ import 'api.dart';
 class TowerDiscoveryDialog extends StatefulWidget {
   final Api api;
   final bool snmp;
+  final Future<void> Function(Map<String, dynamic>)? onManageDevice;
   final Map<String, dynamic> tower;
   const TowerDiscoveryDialog({
     super.key,
     required this.api,
     required this.tower,
     this.snmp = false,
+    this.onManageDevice,
   });
 
   @override
@@ -127,18 +129,25 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
         String? matchedProfile = host['snmp_profile_id'] as String?;
         if (widget.snmp && matchedProfile == null) {
           final version = host['snmp_version'].toString();
-          matchedProfile = publicProfiles[version];
+          final sourceId = host['source_profile_id'] as String?;
+          final cacheKey = '${sourceId ?? 'public'}:$version';
+          matchedProfile = publicProfiles[cacheKey];
           if (matchedProfile == null) {
             final profile = await widget.api.request(
-              '/snmp-profiles/discovery-public',
+              sourceId == null
+                  ? '/snmp-profiles/discovery-public'
+                  : '/snmp-profiles/discovery-match',
               method: 'POST',
-              body: {'version': version},
+              body: {
+                'version': version,
+                if (sourceId != null) 'source_profile_id': sourceId,
+              },
             );
             matchedProfile = profile['id'];
-            publicProfiles[version] = matchedProfile!;
+            publicProfiles[cacheKey] = matchedProfile!;
           }
         }
-        await widget.api.request(
+        final saved = await widget.api.request(
           '/devices',
           method: 'POST',
           body: {
@@ -150,7 +159,10 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
           },
         );
         if (!mounted) return;
-        setState(() => host['already_added'] = true);
+        setState(() {
+          host['already_added'] = true;
+          host['device_id'] = saved['id'];
+        });
       }
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -183,7 +195,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                 const SizedBox(height: 12),
                 AppText(
                   widget.snmp
-                      ? 'Discover MikroTik, Ubiquiti M5/AC and Mimosa using SNMP. Saved v1/v2/v3 profiles and public v1/v2 are tried. SNMP v3 requires a saved profile. Ping is not required.'
+                      ? 'Discover MikroTik, Ubiquiti M5/AC and Mimosa using SNMP. Automatically detect the vendor and a working SNMP version. Auto mode tries saved communities with v1/v2, public v1/v2 and saved v3 credentials. The reported version is the one that replied; a device may support more than one. SNMP v3 requires a saved profile. Ping is not required.'
                       : 'Ping the subnet containing this IP from the AirLink server. Choose the prefix that matches your network. Devices that block ping will not appear.',
                 ),
                 const SizedBox(height: 16),
@@ -211,6 +223,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                 if (widget.snmp) ...[
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
+                    isExpanded: true,
                     initialValue: profileId ?? '',
                     decoration: const InputDecoration(
                       labelText: 'SNMP profile',
@@ -218,7 +231,10 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                     items: [
                       const DropdownMenuItem(
                         value: '',
-                        child: Text('All saved profiles + public'),
+                        child: Text(
+                          'Auto detect version — saved profiles + public',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       for (final profile in profiles)
                         DropdownMenuItem(
@@ -284,14 +300,28 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                     contentPadding: EdgeInsets.zero,
                     title: Text(host['ip_address']),
                     subtitle: Text(
-                      host['already_added'] == true
+                      widget.snmp
+                          ? "${host['name']} · ${host['vendor_label']} · SNMP v${host['snmp_version'] == '2c' ? '2' : host['snmp_version']} · ${host['profile_name']}${host['already_added'] == true ? '\nAlready in inventory' : ''}"
+                          : host['already_added'] == true
                           ? 'Already in inventory'
-                          : widget.snmp
-                          ? "${host['name']} · ${host['vendor_label']} · SNMP v${host['snmp_version'] == '2c' ? '2' : host['snmp_version']} · ${host['profile_name']}"
                           : 'Responded to ping',
                     ),
                     trailing: host['already_added'] == true
-                        ? const Icon(Icons.check)
+                        ? widget.onManageDevice != null &&
+                                  host['device_id'] != null
+                              ? TextButton(
+                                  onPressed: busy
+                                      ? null
+                                      : () => widget.onManageDevice!({
+                                          'id': host['device_id'],
+                                          'name':
+                                              host['name'] ??
+                                              host['ip_address'],
+                                          'ip_address': host['ip_address'],
+                                        }),
+                                  child: const AppText('Manage'),
+                                )
+                              : const Icon(Icons.check)
                         : TextButton(
                             onPressed: busy ? null : () => addHosts([host]),
                             child: const AppText('Add'),

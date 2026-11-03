@@ -74,3 +74,49 @@ def test_batch_is_bounded_and_returns_only_responders(monkeypatch):
     monkeypatch.setattr(snmp_discovery,'identify',identify)
     hosts,limited=asyncio.run(snmp_discovery.scan_batch([f'192.0.2.{i}' for i in range(1,100)],[]))
     assert hosts==[{'ip_address':'192.0.2.1'}] and not limited and len(calls)==32
+
+
+def test_auto_version_fallback_keeps_private_community_and_reuses_profile(client, owner, monkeypatch):
+    source = client.post('/api/snmp-profiles', headers=owner, json={
+        'name': 'Private v1', 'version': '1', 'community': 'private-discovery-read'}).json()['id']
+    with SessionLocal() as db:
+        profiles = snmp_discovery.candidates(db)
+        fallback = next(p for p in profiles if p.get('source_profile_id') == source)
+        assert fallback['credentials'] == {'version': '2c', 'community': 'private-discovery-read'}
+        assert len(snmp_discovery.candidates(db, source)) == 1
+    monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
+    async def get(engine, auth, target, context, *oids, **kwargs):
+        if auth.message_processing_model == 0: return 'timeout', 0, 0, []
+        return (None, 0, 0, [('oid', '1.3.6.1.4.1.14988.1'), ('desc', 'RouterOS')]) if len(oids) == 2 else (None, 0, 0, [('name', 'Radio')])
+    monkeypatch.setattr(snmp, 'get_cmd', get)
+    found = asyncio.run(snmp_discovery.identify('192.0.2.1', profiles))
+    assert found['vendor'] == 'mikrotik' and found['snmp_version'] == '2c'
+    assert found['source_profile_id'] == source and found['snmp_profile_id'] is None
+    assert 'private-discovery-read' not in str(found)
+    payload = {'source_profile_id': source, 'version': found['snmp_version']}
+    path = '/api/snmp-profiles/discovery-match'
+    response = client.post(path, headers=owner, json=payload)
+    assert response.status_code == 200 and 'private-discovery-read' not in response.text
+    profile_id = response.json()['id']
+    assert client.post(path, headers=owner, json=payload).json()['id'] == profile_id
+    from airlink.security import cipher
+    import json
+    with SessionLocal() as db:
+        credentials = json.loads(cipher().decrypt(db.get(SNMPProfile, profile_id).encrypted_credentials.encode()))
+        assert credentials == {'version': '2c', 'community': 'private-discovery-read'}
+    _, manager = user(client, owner, 'manager', 'profile-reader')
+    assert client.post(path, headers=manager, json=payload).status_code == 403
+    v3 = client.post('/api/snmp-profiles', headers=owner, json={'name': 'v3', 'version': '3',
+        'username': 'reader', 'auth_key': 'auth-read-key', 'priv_key': 'priv-read-key'}).json()['id']
+    assert client.post(path, headers=owner, json={'source_profile_id': v3, 'version': '2c'}).status_code == 422
+
+
+def test_saved_v3_identity_is_detected_without_community_guessing(monkeypatch):
+    monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
+    async def get(engine, auth, target, context, *oids, **kwargs):
+        return (None, 0, 0, [('oid', '1.3.6.1.4.1.43356.1'), ('desc', 'Mimosa')]) if len(oids) == 2 else (None, 0, 0, [('name', 'Radio')])
+    monkeypatch.setattr(snmp, 'get_cmd', get)
+    found = asyncio.run(snmp_discovery.identify('192.0.2.1', [{'profile_id': 'v3', 'profile_name': 'v3',
+        'credentials': {'version': '3', 'username': 'reader', 'auth_key': 'auth-read-key', 'priv_key': 'priv-read-key'}}]))
+    assert found['vendor'] == 'mimosa' and found['snmp_version'] == '3'
+    assert found['snmp_profile_id'] == 'v3'

@@ -146,7 +146,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text('Choose a settings page'), findsOneWidget);
+    expect(find.text('Device API logins'), findsNothing);
+    expect(requests, isNot(contains('/api/network')));
+    await tester.tap(find.widgetWithText(ListTile, 'SNMP profiles').last);
+    await tester.pumpAndSettle();
     expect(find.text('SNMP credential profiles'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, 'Network'));
+    await tester.pumpAndSettle();
     expect(requests, contains('/api/network'));
     expect(requests, contains('/api/snmp-profiles'));
     expect(find.widgetWithText(ListTile, 'Managers'), findsNothing);
@@ -309,6 +316,8 @@ void main() {
     expect(writes, isEmpty);
     await tester.tap(find.widgetWithText(ListTile, 'Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'SNMP profiles').last);
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<FilledButton>(
@@ -317,6 +326,8 @@ void main() {
           .onPressed,
       isNull,
     );
+    await tester.tap(find.widgetWithText(ListTile, 'Network'));
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<OutlinedButton>(
@@ -325,6 +336,8 @@ void main() {
           .onPressed,
       isNull,
     );
+    await tester.tap(find.widgetWithText(ListTile, 'Audit log'));
+    await tester.pumpAndSettle();
     expect(
       tester
           .widget<FilledButton>(

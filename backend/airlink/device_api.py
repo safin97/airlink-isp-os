@@ -206,7 +206,7 @@ async def airos(client, base, credentials, inventory=False):
 
 async def collect_api(address, credentials, vendor='generic', transport=None, inventory=False):
     host = '[' + address + ']' if ':' in address else address
-    schemes = [credentials['protocol']] if credentials.get('protocol') in ('http', 'https') else (['https', 'http'] if credentials.get('allow_http') else ['https'])
+    schemes = [credentials['protocol']] if credentials.get('protocol') in ('http', 'https') else (['https', 'http'] if credentials.get('protocol') == 'both' or credentials.get('allow_http') else ['https'])
     for scheme in schemes:
         port = credentials.get('port')
         base = scheme + '://' + host + (':' + str(port) if port else '')
