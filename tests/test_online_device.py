@@ -147,3 +147,94 @@ def test_public_redirect_cannot_send_credentials_to_another_host():
         asyncio.run(online_device.collect('10.2.3.4', {
             'api_username': 'reader', 'api_password': 'secret', 'protocol': 'http'}, httpx.MockTransport(respond)))
     assert calls == ['http://10.2.3.4/']
+
+
+MANUAL = {**QUERY, 'login': {'username': 'temporary-device-user', 'password': 'temporary-device-secret'}}
+CHANGE = {'menu': 'wireless', 'radio_id': '*1', 'previous_ssid': 'Before', 'ssid': 'After'}
+
+
+def test_manual_login_needs_live_session_but_not_saved_credentials(client, owner, monkeypatch):
+    setup_login(client, owner, monkeypatch)
+    calls = []
+    monkeypatch.setattr(sas4_reports, 'fetch_managers', lambda *a: pytest.fail('Manual login must not need manager credentials'))
+    async def collect(address, config):
+        calls.append(config)
+        assert config['api_password'] == MANUAL['login']['password']
+        return {'vendor': 'MikroTik', 'wireless': []}
+    monkeypatch.setattr(online_device, 'collect', collect)
+    result = client.post(PATH + '/login', headers=owner, json=MANUAL)
+    assert result.status_code == 200, result.text
+    assert result.json()['credential_source'] == 'Temporary login'
+    assert 'temporary-device' not in result.text
+    for bad in ({'ip_address': '10.2.3.9'}, {'session_id': 'stale'}, {'username': 'wrong'}):
+        assert client.post(PATH + '/login', headers=owner, json={**MANUAL, **bad}).status_code == 409
+    assert len(calls) == 1
+    from airlink.db import SessionLocal
+    from airlink.models import DeviceLoginProfile
+    from sqlalchemy import select
+    with SessionLocal() as db:
+        assert list(db.scalars(select(DeviceLoginProfile))) == []
+
+
+def test_manual_login_read_permission_and_settings_write_permission(client, owner, monkeypatch):
+    setup_login(client, owner, monkeypatch)
+    mid, manager = user(client, owner, 'manager', 'device-reader')
+    client.put('/api/integrations/sas4', headers=manager, json={'username': 'radius-reader', 'password': 'sas-secret'}).raise_for_status()
+    client.put('/api/users/' + mid + '/sections', headers=owner,
+               json={'sections': ['isp_card'], 'editable_sections': []}).raise_for_status()
+    async def collect(*args):
+        return {'vendor': 'MikroTik'}
+    monkeypatch.setattr(online_device, 'collect', collect)
+    writes = []
+    monkeypatch.setattr(online_device.device_management, 'run', lambda address, config, change: writes.append(change) or {'status': 'accepted'})
+    assert client.post(PATH + '/login', headers=manager, json=MANUAL).status_code == 200
+    assert client.put(PATH + '/settings', headers=manager, json={**MANUAL, 'change': CHANGE}).status_code == 403
+    assert not writes
+    client.put('/api/users/' + mid + '/sections', headers=owner,
+               json={'sections': ['isp_card'], 'editable_sections': ['isp_card']}).raise_for_status()
+    result = client.put(PATH + '/settings', headers=manager, json={**MANUAL, 'change': CHANGE})
+    assert result.status_code == 200, result.text
+    assert writes == [CHANGE]
+    assert client.put(PATH + '/settings', headers=owner, json={**MANUAL, 'session_id': 'stale', 'change': CHANGE}).status_code == 409
+    assert len(writes) == 1
+    for bad in ({'ssid': 'x\ny'}, {'ssid': 'é'*17}, {'radio_id': '../system'}, {'menu': 'system'}):
+        assert client.put(PATH + '/settings', headers=owner, json={**MANUAL, 'change': {**CHANGE, **bad}}).status_code == 422
+    client.put('/api/users/' + mid + '/sections', headers=owner, json={'sections': []}).raise_for_status()
+    assert client.post(PATH + '/login', headers=manager, json=MANUAL).status_code == 403
+
+
+def test_ubiquiti_save_requires_restart_action(client, owner, monkeypatch):
+    setup_login(client, owner, monkeypatch)
+    from airlink import airos_management
+    monkeypatch.setattr(airos_management, 'connect', lambda *a: pytest.fail('Must not write without explicit restart action'))
+    request = {**MANUAL, 'login': {**MANUAL['login'], 'transport': 'airos_ssh'}, 'change': CHANGE}
+    assert client.put(PATH + '/settings', headers=owner, json=request).status_code == 422
+
+
+def test_native_write_checks_stale_and_controller_settings(monkeypatch):
+    writes, state = [], {'.id': '*1', 'ssid': 'Before'}
+    class Connection:
+        def __init__(self, *a): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): pass
+        async def read(self, *a): return [state]
+        async def command(self, *a): writes.append(a)
+    monkeypatch.setattr(online_device.routeros_native, 'Connection', Connection)
+    assert asyncio.run(online_device.native_change('10.2.3.4', {}, CHANGE)) == {'status': 'accepted'}
+    assert writes == [('/interface/wireless/set', {'.id': '*1', 'ssid': 'After'})]
+    state['ssid'] = 'Changed'
+    with pytest.raises(online_device.device_management.ManagementError):
+        asyncio.run(online_device.native_change('10.2.3.4', {}, CHANGE))
+    state.update(ssid='Before', dynamic='true')
+    with pytest.raises(online_device.device_management.ManagementError):
+        asyncio.run(online_device.native_change('10.2.3.4', {}, CHANGE))
+    assert len(writes) == 1
+
+
+def test_validation_errors_never_echo_temporary_password(client, owner):
+    result = client.post(PATH + '/login', headers=owner, json={**MANUAL, 'profile_id': 'conflicting-profile'})
+    assert result.status_code == 422
+    assert MANUAL['login']['password'] not in result.text
+    result = client.post(PATH + '/login', headers=owner,
+        json={**MANUAL, 'login': {**MANUAL['login'], 'password': 'PRIVATE' * 200}})
+    assert result.status_code == 422 and 'PRIVATE' not in result.text

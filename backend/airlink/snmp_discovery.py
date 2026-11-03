@@ -52,7 +52,7 @@ def candidates(db, profile_id=None):
     return result
 
 
-async def identify(address, profiles):
+async def identify(address, profiles, filter_vendor=True):
     from monitoring.snmp import (SnmpEngine, UdpTransportTarget, ContextData,
         ObjectType, ObjectIdentity, get_cmd, authentication)
     from pysnmp.proto.rfc1905 import NoSuchObject, NoSuchInstance, EndOfMibView
@@ -73,7 +73,9 @@ async def identify(address, profiles):
                 if not any(values):
                     continue
                 vendor = identify_vendor(values[0], values[1] if len(values) > 1 else '')
-                if not discovery_vendor_allowed(vendor, credentials.get('version', '3')):
+                if not filter_vendor and vendor == 'generic':
+                    continue
+                if filter_vendor and not discovery_vendor_allowed(vendor, credentials.get('version', '3')):
                     # Keep trying: a reply on another version may match the discovery filter.
                     continue
                 name = ''

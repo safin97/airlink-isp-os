@@ -1225,47 +1225,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
-  Widget deviceApiStatus(Map<String, dynamic> device) {
-    final status = device['api_status'] ?? 'not_configured';
-    final (label, hint, color) = switch (status) {
-      'connected' => (
-        'Connected',
-        'The latest device API poll succeeded.',
-        green,
-      ),
-      'authentication_failed' => (
-        'Login rejected',
-        'Check the API username, password and read permissions in Edit tower.',
-        red,
-      ),
-      'failed' => (
-        'Failed',
-        'Check the device API service, port, HTTPS certificate and network access.',
-        red,
-      ),
-      'disabled' => (
-        'Disabled',
-        'Monitoring is disabled for this device.',
-        muted,
-      ),
-      'stale' => ('Stale', 'Check the monitoring service.', orange),
-      'pending' => (
-        'Waiting for poll',
-        'Waiting for the next device API poll.',
-        muted,
-      ),
-      _ => (
-        'Not configured',
-        'Configure device API access in Add tower or Edit tower.',
-        muted,
-      ),
-    };
-    return Tooltip(
-      message: tr(hint),
-      child: AppText(label, style: TextStyle(color: color, fontSize: 12)),
-    );
-  }
-
   Widget wirelessClientCount(Map<String, dynamic> device) {
     final count = device['telemetry']?['wireless_clients'];
     if (count is! num) return const AppText('Unavailable');
@@ -1787,13 +1746,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
       'users' => ['Username', 'Role', 'Active', 'Created'],
       _ => [
-        'Device',
         'IP address',
         'Vendor',
         'Tower',
         'Status',
         'SNMP status',
-        'API status',
         'ether1 speed',
         'Wireless SSID',
         'Registration clients',
@@ -1890,13 +1847,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           row['created_at']?.toString().substring(0, 10),
                         ],
                         _ => [
-                          row['name'],
                           row['ip_address'],
                           row['vendor_label'] ?? row['vendor'],
                           nameOf('towers', row['tower_id']),
                           badge(row['status']),
                           snmpStatus(row),
-                          deviceApiStatus(row),
                           deviceReading(row, 'ethernet_links'),
                           deviceReading(row, 'wireless'),
                           wirelessClientCount(row),

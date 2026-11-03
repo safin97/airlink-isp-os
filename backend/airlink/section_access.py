@@ -118,6 +118,8 @@ def enforce_request(user, method, path):
         return require(('isp_card', 'noc'))
     if path == '/api/integrations/sas4/online-count':
         return require(('noc',))
+    if path == '/api/integrations/sas4/online-device/login' and method == 'POST':
+        return require_any(user, ('isp_card',))  # Credentials in body; this operation only reads.
     if path.startswith(('/api/integrations/sas4/', '/api/payments/')):
         return require(('isp_card',))
     if path.startswith('/api/reports/'):

@@ -121,8 +121,9 @@ void main() {
       expect(find.text('Devices at North'), findsOneWidget);
       expect(find.text('3 devices'), findsOneWidget);
       expect(find.text('SNMP status'), findsOneWidget);
-      expect(find.text('Connected'), findsNWidgets(2));
-      expect(find.text('API status'), findsOneWidget);
+      expect(find.text('Connected'), findsOneWidget);
+      expect(find.text('API status'), findsNothing);
+      expect(find.text('Device'), findsNothing);
       expect(find.text('ether1: 1000 Mbps'), findsOneWidget);
       expect(find.text('AirLink North'), findsOneWidget);
       expect(find.text('ether2: 100 Mbps'), findsNothing);
@@ -142,7 +143,7 @@ void main() {
       expect(find.text('Failed'), findsOneWidget);
       expect(find.text('Waiting for poll'), findsOneWidget);
       for (final name in ['North online', 'North offline', 'North unknown']) {
-        expect(find.text(name), findsOneWidget);
+        expect(find.text(name), findsNothing);
       }
       expect(find.text('North stranger'), findsNothing);
       await tester.enterText(find.byType(TextField), 'North offline');
