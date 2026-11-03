@@ -15,7 +15,7 @@ from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import device_management, device_access
+from . import device_management, device_access, online_device
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
@@ -57,6 +57,7 @@ async def lifespan(app):
 
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
 app.include_router(device_access.router)
+app.include_router(online_device.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)

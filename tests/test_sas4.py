@@ -488,3 +488,28 @@ def test_changed_cost_or_unallowed_extension_never_charges(monkeypatch):
         with pytest.raises(sas4.HTTPException):
             sas4.redeem_card(SimpleNamespace(**SETTINGS), SETTINGS['password'], 7, data, transport=transport)
     assert not writes
+
+
+def test_resolve_online_username_uses_own_account_and_exact_match(client, owner, monkeypatch):
+    _, manager = user(client, owner, 'manager', 'resolve-manager')
+    _, other = user(client, owner, 'manager', 'unconnected-manager')
+    _, viewer = user(client, owner, 'viewer', 'resolve-viewer')
+    client.put('/api/integrations/sas4', headers=manager, json=SETTINGS).raise_for_status()
+    calls = []
+    def fetch(connection, password, page, search, count):
+        assert connection.username == SETTINGS['username'] and password == SETTINGS['password']
+        assert search == 'customer' and count == 100
+        calls.append(page)
+        return {'clients':[{'id':900,'username':'another-customer'}] if page == 1 else
+                [{'id':7,'username':'customer','password':'never-expose'}], 'last_page':2}
+    monkeypatch.setattr(sas4, 'fetch_clients', fetch)
+    path = '/api/integrations/sas4/resolve-user?username=customer'
+    response = client.get(path, headers=manager)
+    assert response.status_code == 200 and response.json() == {'id':7,'username':'customer'}
+    assert calls == [1,2] and 'never-expose' not in response.text
+    for headers,status in [(other,409),(viewer,403),({},401)]:
+        assert client.get(path,headers=headers).status_code == status
+    monkeypatch.setattr(sas4,'fetch_clients',lambda *args,**kwargs: {'clients':[{'id':900,'username':'customer-other'}],'last_page':1})
+    assert client.get(path,headers=manager).status_code == 404
+    monkeypatch.setattr(sas4,'fetch_clients',lambda *args,**kwargs: {'clients':[{'id':None,'username':'customer'}],'last_page':1})
+    assert client.get(path,headers=manager).status_code == 502

@@ -320,6 +320,31 @@ def get_clients(page: int = Query(1, ge=1, le=1000000), search: str = Query('', 
         raise HTTPException(502, str(exc)) from exc
 
 
+@router.get('/resolve-user')
+def resolve_user_by_username(username: str = Query(min_length=1, max_length=200),
+                             user=Depends(sas4_access), db=Depends(get_db)):
+    connection, password = local_user_connection(db, user)
+    try:
+        for page in range(1, 6):
+            result = fetch_clients(connection, password, page=page, search=username, count=100)
+            matches = [row for row in result['clients'] if row.get('username') == username]
+            if len(matches) > 1:
+                raise HTTPException(409, 'SAS4 returned ambiguous usernames')
+            if matches:
+                try:
+                    user_id = int(str(matches[0].get('id')))
+                except (TypeError, ValueError):
+                    raise HTTPException(502, 'SAS4 did not supply a valid user ID') from None
+                if user_id < 1:
+                    raise HTTPException(502, 'SAS4 did not supply a valid user ID')
+                return {'id': user_id, 'username': username}
+            if page >= result['last_page']:
+                break
+    except SAS4Error as exc:
+        raise HTTPException(502, str(exc)) from None
+    raise HTTPException(404, 'User information was not found in your SAS4 account. Search the Users List to retry.')
+
+
 @router.get('/dashboard')
 def get_dashboard(user=Depends(sas4_access), db=Depends(get_db)):
     connection = db.get(SAS4UserConnection, user.id)

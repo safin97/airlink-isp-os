@@ -7,6 +7,7 @@ import 'api.dart';
 import 'section_access.dart';
 import 'sas4_user_details.dart';
 import 'sas4_recharge.dart';
+import 'online_device_dialog.dart';
 
 class Sas4Clients extends StatefulWidget {
   final Api api;
@@ -139,17 +140,37 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   }
 
   Future<void> openUser(dynamic row) async {
-    final id = int.tryParse('${row['id']}');
-    if (id == null || id < 1 || viewingUser) return;
+    if (viewingUser) return;
     viewingUser = true;
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => Sas4UserDetails(api: widget.api, userId: id),
-      ),
-    );
-    viewingUser = false;
-    if (mounted && saved == true) {
-      fetch(page: result?['page'] as int? ?? 1, quiet: true);
+    try {
+      var id = int.tryParse('${row['id']}');
+      if (id == null || id < 1) {
+        final username = row['username']?.toString() ?? '';
+        final resolved = await widget.api.request(
+          '/integrations/sas4/resolve-user?username=${Uri.encodeQueryComponent(username)}',
+        );
+        id = int.tryParse('${resolved['id']}');
+        if (id == null || id < 1) {
+          throw const FormatException('User information is unavailable.');
+        }
+      }
+      if (!mounted) return;
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => Sas4UserDetails(api: widget.api, userId: id!),
+        ),
+      );
+      if (mounted && saved == true) {
+        fetch(page: result?['page'] as int? ?? 1, quiet: true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      viewingUser = false;
     }
   }
 
@@ -564,6 +585,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                     if (!onlineOnly) ...['Name', 'Recharge card', 'Profile'],
                     if (onlineOnly) ...[
                       'IP address',
+                      'Device access',
                       'Device type',
                       'Ethernet speed',
                       'Signal',
@@ -607,9 +629,12 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            onTap: row['id'] == null
-                                ? null
-                                : () => openUser(row),
+                            onTap:
+                                (int.tryParse('${row['id']}') ?? 0) > 0 ||
+                                    (row['username']?.toString().isNotEmpty ??
+                                        false)
+                                ? () => openUser(row)
+                                : null,
                           ),
                           if (!onlineOnly) ...[
                             DataCell(Text(text(row['name']))),
@@ -639,6 +664,26 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                           if (onlineOnly)
                             DataCell(SelectableText(text(row['ip_address']))),
                           if (onlineOnly) ...[
+                            DataCell(
+                              TextButton.icon(
+                                onPressed:
+                                    row['ip_address'] == null ||
+                                        row['username'] == null
+                                    ? null
+                                    : () => showDialog<void>(
+                                        context: context,
+                                        builder: (_) => OnlineDeviceDialog(
+                                          api: widget.api,
+                                          row: Map<String, dynamic>.from(row),
+                                        ),
+                                      ),
+                                icon: const Icon(
+                                  Icons.router_outlined,
+                                  size: 16,
+                                ),
+                                label: const AppText('Open device'),
+                              ),
+                            ),
                             DataCell(
                               Text(
                                 row['vendor_label']?.toString() ??
