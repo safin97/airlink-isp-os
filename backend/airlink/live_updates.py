@@ -26,9 +26,9 @@ def snapshot(token):
                 rows[name] = reader(user=user, db=db)
         if user.role == 'owner':
             rows['users'] = api.users(user=user, db=db)
+        if allowed('snmp-profiles'):
+            rows['snmp-profiles'] = api.profiles(user=user, db=db)
         if user.role == 'owner' or (section_access.role_policy(user, db) is not None or user.role == 'manager'):
-            if allowed('snmp-profiles'):
-                rows['snmp-profiles'] = api.profiles(user=user, db=db)
             if allowed('access-roles'):
                 rows['access-roles'] = access_roles.groups(user=user, db=db)
         return jsonable_encoder({'user': api.public(user), 'rows': rows,

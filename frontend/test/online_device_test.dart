@@ -37,12 +37,22 @@ void main() {
               'last_page': 1,
               'per_page': 7,
             };
+          } else if (request.url.path.endsWith('/device-login-profiles')) {
+            body = [
+              {
+                'id': 'profile1',
+                'name': 'Roof devices',
+                'username': 'reader',
+                'enabled': true,
+              },
+            ];
           } else if (request.url.path.endsWith('/online-device')) {
             deviceRequests++;
             expect(request.url.queryParameters, {
               'username': 'subscriber',
               'ip_address': '10.2.3.4',
               'session_id': '90',
+              'profile_id': 'profile1',
             });
             if (deviceRequests == 2) {
               return http.Response(
@@ -98,6 +108,13 @@ void main() {
       await tester.tap(find.text('Open device'));
       await tester.pumpAndSettle();
       expect(find.byType(OnlineDeviceDialog), findsOneWidget);
+      expect(deviceRequests, 0);
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Roof devices (reader)').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
       for (final text in [
         'AirLink-Test',
         '-61 dBm',

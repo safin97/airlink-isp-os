@@ -5,7 +5,7 @@ from urllib.parse import urljoin, urlsplit
 import json
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from . import device_api, device_access, sas4, sas4_reports
+from . import device_api, device_access, sas4, sas4_reports, device_login_profiles
 from .customer_probes import valid_address
 from .db import get_db
 from .models import now
@@ -125,7 +125,7 @@ async def collect_once(address, config, transport=None):
     raise RuntimeError('No supported device API responded. Enable RouterOS REST or airOS web access and check the saved connection settings.')
 
 
-def target(db, user, username, address, session_id):
+def target(db, user, username, address, session_id, profile_id=None):
     connection, password = sas4.local_user_connection(db, user)
     found = []
     for page in range(1, 6):
@@ -139,6 +139,8 @@ def target(db, user, username, address, session_id):
         raise HTTPException(409, 'Cannot uniquely verify this online session. Narrow the user search and retry.')
     if len(found) != 1:
         raise HTTPException(409, 'This online session changed or ended. Refresh Online Users and try again.')
+    if profile_id:
+        return device_login_profiles.selected_configuration(db, user, profile_id)
     managers = sas4_reports.fetch_managers(connection, password)
     matches = [manager for manager in managers if manager['username'] == found[0].get('manager')]
     config = device_access.manager_configuration(db, user, matches[0]['id']) if len(matches) == 1 else None
@@ -151,12 +153,13 @@ def target(db, user, username, address, session_id):
 def overview(username: str = Query(min_length=1, max_length=200),
              ip_address: str = Query(min_length=1, max_length=64),
              session_id: Optional[str] = Query(default=None, max_length=128),
+             profile_id: Optional[str] = Query(default=None, min_length=1, max_length=36),
              user=Depends(sas4.sas4_access), db=Depends(get_db)):
     address = valid_address(ip_address)
     if not address:
         raise HTTPException(422, 'Invalid device IP address')
     try:
-        config, manager = target(db, user, username, address, session_id)
+        config, manager = target(db, user, username, address, session_id, profile_id)
         data = asyncio.run(collect(address, config))
     except sas4.SAS4Error as exc:
         raise HTTPException(502, 'Could not verify the current SAS4 online session.') from exc

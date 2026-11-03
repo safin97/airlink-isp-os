@@ -228,7 +228,10 @@ void main() {
       await tester.tap(find.text('Section access'));
       await tester.pumpAndSettle();
       expect(
-        find.byType(CheckboxListTile),
+        find.descendant(
+          of: find.byType(SectionAccessDialog),
+          matching: find.byType(CheckboxListTile),
+        ),
         findsNWidgets(assignableSections.length),
       );
       await tester.tap(find.text('Clear all'));

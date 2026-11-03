@@ -110,6 +110,15 @@ void main() {
             'Example-Test-Password-534!',
           );
         }
+        await tester.ensureVisible(
+          find.widgetWithText(SwitchListTile, 'Show SNMP profiles'),
+        );
+        await tester.tap(
+          find.widgetWithText(SwitchListTile, 'Show SNMP profiles'),
+        );
+        await tester.ensureVisible(
+          find.byType(DropdownButtonFormField<String>).first,
+        );
         await tester.tap(find.byType(DropdownButtonFormField<String>).first);
         await tester.pumpAndSettle();
         await tester.tap(find.text(editing ? 'Manager' : 'Support').last);
@@ -124,6 +133,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
+        expect(saved!['show_snmp_profiles'], true);
         expect(saved!['role'], 'manager');
         expect(saved!['parent_id'], editing ? isNull : 'parent');
         expect(saved!.containsKey('parent_id'), isTrue);

@@ -34,6 +34,28 @@ class ManagerParent(Base):
     __table_args__ = (CheckConstraint("user_id != parent_id", name="manager_parent_not_self"),)
 
 
+class SNMPVisibilityDefault(Base):
+    __tablename__ = 'snmp_visibility_default'
+    id = Column(Integer, primary_key=True)
+    enabled = Column(Boolean, nullable=False)
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class UserSNMPVisibility(Base):
+    __tablename__ = 'user_snmp_visibility'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    enabled = Column(Boolean, nullable=False)
+
+
+class DeviceLoginProfile(Base):
+    __tablename__ = 'device_login_profiles'
+    id = Column(String(36), primary_key=True, default=uid)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(80), nullable=False)
+    encrypted_config = Column(Text, nullable=False)
+    __table_args__ = (UniqueConstraint('user_id', 'name'),)
+
+
 class UserSectionAccess(Base):
     __tablename__ = "user_section_access"
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

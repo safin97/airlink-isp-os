@@ -49,8 +49,7 @@ def test_public_profile_reuse_is_encrypted_and_matching_version(client, owner):
     assert client.post(path,headers=owner,json={'version':'3'}).status_code==422
 
 
-@pytest.mark.parametrize('oid,vendor', [('1.3.6.1.4.1.14988.1','mikrotik'),
-    ('1.3.6.1.4.1.41112.1','ubiquiti'),('1.3.6.1.4.1.43356.1','mimosa')])
+@pytest.mark.parametrize('oid,vendor', [('1.3.6.1.4.1.14988.1','mikrotik')])
 def test_snmp_identity_and_name_without_ping(monkeypatch,oid,vendor):
     monkeypatch.setattr(snmp.UdpTransportTarget,'create',AsyncMock(return_value=object()))
     calls=[]
@@ -120,3 +119,84 @@ def test_saved_v3_identity_is_detected_without_community_guessing(monkeypatch):
         'credentials': {'version': '3', 'username': 'reader', 'auth_key': 'auth-read-key', 'priv_key': 'priv-read-key'}}]))
     assert found['vendor'] == 'mimosa' and found['snmp_version'] == '3'
     assert found['snmp_profile_id'] == 'v3'
+
+
+@pytest.mark.parametrize('version,vendor,allowed', [
+    ('1', 'ubiquiti', True), ('1', 'ubiquiti_m5', True), ('1', 'ubiquiti_ac', True),
+    ('1', 'mikrotik', False), ('1', 'mimosa', False), ('1', 'generic', False),
+    ('2', 'mikrotik', True), ('2c', 'mikrotik', True),
+    ('2c', 'ubiquiti', False), ('2c', 'ubiquiti_m5', False), ('2c', 'ubiquiti_ac', False),
+    ('2c', 'mimosa', False), ('2c', 'generic', False),
+    ('3', 'mimosa', True), ('3', 'ubiquiti', True), ('3', 'mikrotik', True),
+])
+def test_discovery_vendor_version_filter(version, vendor, allowed):
+    assert snmp_discovery.discovery_vendor_allowed(vendor, version) is allowed
+
+
+@pytest.mark.parametrize('oid,versions,expected,calls_expected', [
+    ('1.3.6.1.4.1.14988.1', ['1', '2c'], '2c', [0, 1, 1]),
+    ('1.3.6.1.4.1.41112.1', ['2c', '1'], '1', [1, 0, 0]),
+    ('1.3.6.1.4.1.14988.1', ['1'], None, [0]),
+    ('1.3.6.1.4.1.41112.1', ['2c'], None, [1]),
+    ('1.3.6.1.4.1.43356.1', ['1', '2c'], None, [0, 1]),
+])
+def test_discovery_filters_responses_and_keeps_trying_versions(monkeypatch, oid, versions, expected, calls_expected):
+    monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
+    calls = []
+    async def get(engine, auth, target, context, *oids, **kwargs):
+        calls.append(auth.message_processing_model)
+        return (None, 0, 0, [('oid', oid), ('desc', 'Radio')]) if len(oids) == 2 else (None, 0, 0, [('name', 'North radio')])
+    monkeypatch.setattr(snmp, 'get_cmd', get)
+    profiles = [{'profile_id': version, 'profile_name': 'saved',
+                 'credentials': {'version': version, 'community': 'private-read'}} for version in versions]
+    found = asyncio.run(snmp_discovery.identify('192.0.2.1', profiles))
+    assert calls == calls_expected
+    if expected is None:
+        assert found is None
+    else:
+        assert found['snmp_version'] == expected
+        assert found['snmp_profile_id'] == expected
+        assert 'private-read' not in str(found)
+
+
+def test_apply_discovered_snmp_to_existing_device_preserves_settings(client, owner, monkeypatch):
+    from airlink.models import Device, now
+    tid = client.post('/api/towers', headers=owner, json={'name':'North', 'management_ip':'192.0.2.1'}).json()['id']
+    profile = client.post('/api/snmp-profiles', headers=owner, json={
+        'name':'Discovered v2', 'version':'2', 'community':'private-community'}).json()['id']
+    device = client.post('/api/devices', headers=owner, json={
+        'tower_id': tid, 'name':'Keep this name', 'ip_address':'192.0.2.1',
+        'vendor':'mikrotik', 'model':'Keep model', 'poll_interval':120,
+        'retries':4, 'failure_threshold':7, 'cpu_threshold':85, 'enabled':False}).json()
+    with SessionLocal() as db:
+        obj = db.get(Device, device['id'])
+        obj.status = 'offline'; obj.last_poll = now(); obj.failures = 7
+        db.commit()
+    async def scan(addresses, profiles):
+        return [{'ip_address':'192.0.2.1', 'snmp_profile_id':profile, 'snmp_version':'2c',
+                 'vendor':'mikrotik', 'name':'Found name', 'profile_name':'Discovered v2'}], False
+    monkeypatch.setattr(snmp_discovery, 'scan_batch', scan)
+    discovery = client.post('/api/towers/' + tid + '/discover-snmp', headers=owner, json={'prefix':32}).json()['hosts'][0]
+    assert discovery['already_added'] and discovery['device_id'] == device['id']
+    assert discovery['device_tower_id'] == tid and discovery['assigned_snmp_profile_id'] is None
+    assert discovery['snmp_applied'] is False
+    route = '/api/devices/' + device['id'] + '/snmp-profile'
+    body = {'snmp_profile_id':profile, 'tower_id':tid, 'expected_ip_address':'192.0.2.1', 'previous_snmp_profile_id':None}
+    _, manager = user(client, owner, 'manager')
+    assert client.put(route, headers=manager, json=body).status_code == 403
+    for change in ({'tower_id':'other'}, {'expected_ip_address':'192.0.2.2'}, {'previous_snmp_profile_id':'stale'}):
+        assert client.put(route, headers=owner, json={**body, **change}).status_code == 409
+    assert client.put(route, headers=owner, json={**body, 'snmp_profile_id':'missing'}).status_code == 404
+    result = client.put(route, headers=owner, json=body)
+    assert result.status_code == 200, result.text
+    assert 'private-community' not in result.text
+    with SessionLocal() as db:
+        obj = db.get(Device, device['id'])
+        assert obj.snmp_profile_id == profile and obj.last_poll is None
+        assert obj.status == 'unknown' and obj.failures == 0
+        for key in ('name','model','vendor','tower_id','poll_interval','retries','failure_threshold','cpu_threshold','enabled'):
+            assert getattr(obj, key) == device[key]
+    assert len(client.get('/api/devices', headers=owner).json()) == 1
+    assert client.put(route, headers=owner, json=body).status_code == 409
+    repeated = client.post('/api/towers/' + tid + '/discover-snmp', headers=owner, json={'prefix':32}).json()['hosts'][0]
+    assert repeated['snmp_applied'] is True and repeated['assigned_snmp_profile_id'] == profile

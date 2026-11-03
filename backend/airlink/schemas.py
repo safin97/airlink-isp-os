@@ -35,6 +35,7 @@ class Setup(Login):
 
 
 class UserInput(Login):
+    show_snmp_profiles: Optional[bool] = None
     role: Literal["owner", "manager", "technician", "viewer"]
     manager_role_id: Optional[str] = None
     access_role_id: Optional[str] = None
@@ -111,6 +112,14 @@ class DeviceInput(Strict):
         return result
 
 
+class DeviceSNMPAssignment(Strict):
+    snmp_profile_id: str = Field(min_length=1, max_length=36)
+    tower_id: str = Field(min_length=1, max_length=36)
+    expected_ip_address: str
+    previous_snmp_profile_id: Optional[str] = Field(max_length=36)
+    _ip = field_validator('expected_ip_address')(ip)
+
+
 class ProfileInput(Strict):
     name: str = Field(min_length=1, max_length=120)
     version: Literal["1", "2c", "3"] = "3"
@@ -176,6 +185,7 @@ class SectionAccessInput(Strict):
 
 
 class ManagerUpdate(Strict):
+    show_snmp_profiles: Optional[bool] = None
     role: Optional[Literal["manager", "technician", "viewer"]] = None
     manager_role_id: Optional[str] = None
     access_role_id: Optional[str] = None

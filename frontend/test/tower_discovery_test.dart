@@ -99,8 +99,8 @@ void main() {
                           {
                             'ip_address': '192.0.2.1',
                             'name': 'North radio',
-                            'vendor': 'mimosa',
-                            'vendor_label': 'Mimosa',
+                            'vendor': 'mikrotik',
+                            'vendor_label': 'MikroTik',
                             'snmp_version': '2c',
                             'snmp_profile_id': null,
                             'source_profile_id': sourceId,
@@ -149,23 +149,124 @@ void main() {
         await tester.tap(find.text('Discover with SNMP'));
         await tester.pumpAndSettle();
         expect(offsets, [0, 32]);
-        expect(find.textContaining('Mimosa · SNMP v2'), findsOneWidget);
+        expect(find.textContaining('MikroTik · SNMP v2'), findsOneWidget);
         await tester.tap(find.text('Add all (1)'));
         await tester.pumpAndSettle();
         expect(added.single, {
           'name': 'North radio',
           'ip_address': '192.0.2.1',
           'tower_id': 'north',
-          'vendor': 'mimosa',
+          'vendor': 'mikrotik',
           'snmp_profile_id': 'public-profile',
         });
         expect(find.textContaining('Already in inventory'), findsOneWidget);
         await tester.tap(find.text('Manage'));
         await tester.pumpAndSettle();
         expect(managed.single['id'], 'new');
-        expect(find.textContaining('Mimosa · SNMP v2'), findsOneWidget);
+        expect(find.textContaining('MikroTik · SNMP v2'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
   }
+  testWidgets(
+    'existing device receives discovered SNMP without being recreated',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final applied = <dynamic>[];
+      final api = Api(
+        client: MockClient((request) async {
+          if (request.url.path == '/api/snmp-profiles') {
+            return http.Response('[]', 200);
+          }
+          if (request.url.path.endsWith('/discover-snmp')) {
+            return http.Response(
+              jsonEncode({
+                'network': '192.0.2.0/24',
+                'scanned': 254,
+                'total': 254,
+                'next_offset': null,
+                'hosts': [
+                  {
+                    'ip_address': '192.0.2.1',
+                    'name': 'Radio',
+                    'vendor': 'mikrotik',
+                    'vendor_label': 'MikroTik',
+                    'snmp_version': '2c',
+                    'snmp_profile_id': null,
+                    'source_profile_id': 'saved-private',
+                    'profile_name': 'Private',
+                    'already_added': true,
+                    'device_id': 'existing',
+                    'device_tower_id': 'north',
+                    'assigned_snmp_profile_id': null,
+                  },
+                  {
+                    'ip_address': '192.0.2.2',
+                    'name': 'Other',
+                    'vendor': 'mikrotik',
+                    'vendor_label': 'MikroTik',
+                    'snmp_version': '2c',
+                    'snmp_profile_id': 'p',
+                    'profile_name': 'Private',
+                    'already_added': true,
+                    'device_id': 'elsewhere',
+                    'device_tower_id': 'south',
+                    'assigned_snmp_profile_id': null,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          if (request.url.path.endsWith('/discovery-match')) {
+            expect(jsonDecode(request.body), {
+              'version': '2c',
+              'source_profile_id': 'saved-private',
+            });
+            return http.Response('{"id":"matched-profile"}', 200);
+          }
+          expect(request.method, 'PUT');
+          expect(request.url.path, '/api/devices/existing/snmp-profile');
+          applied.add(jsonDecode(request.body));
+          return http.Response(
+            '{"id":"existing","snmp_profile_id":"matched-profile"}',
+            200,
+          );
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: TowerDiscoveryDialog(
+              api: api,
+              snmp: true,
+              tower: {
+                'id': 'north',
+                'name': 'North',
+                'management_ip': '192.0.2.1',
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Discover with SNMP'));
+      await tester.pumpAndSettle();
+      expect(find.text('Apply SNMP'), findsOneWidget);
+      await tester.tap(find.text('Apply SNMP'));
+      await tester.pumpAndSettle();
+      expect(applied.single, {
+        'snmp_profile_id': 'matched-profile',
+        'tower_id': 'north',
+        'expected_ip_address': '192.0.2.1',
+        'previous_snmp_profile_id': null,
+      });
+      expect(find.textContaining('SNMP applied'), findsOneWidget);
+      expect(find.text('Apply SNMP'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

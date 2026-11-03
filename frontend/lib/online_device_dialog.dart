@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
+import 'device_login_profiles.dart';
 
 class OnlineDeviceDialog extends StatefulWidget {
   final Api api;
@@ -15,11 +16,43 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   Map<String, dynamic>? data;
   String? error;
   bool busy = true;
+  List<dynamic> profiles = [];
+  String profileId = '';
 
   @override
   void initState() {
     super.initState();
-    load();
+    loadProfiles();
+  }
+
+  Future<void> loadProfiles() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final result = await widget.api.request(deviceLoginProfilesPath);
+      if (mounted) {
+        setState(() {
+          profiles = (result as List)
+              .where((p) => p['enabled'] == true)
+              .toList();
+          if (profileId.isNotEmpty &&
+              !profiles.any((p) => p['id'] == profileId)) {
+            profileId = '';
+            data = null;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => error = e.toString());
+      }
+    } finally {
+      if (mounted) {
+        setState(() => busy = false);
+      }
+    }
   }
 
   Future<void> load() async {
@@ -32,6 +65,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
         queryParameters: {
           'username': '${widget.row['username']}',
           'ip_address': '${widget.row['ip_address']}',
+          if (profileId.isNotEmpty) 'profile_id': profileId,
           if (widget.row['session_id'] != null)
             'session_id': '${widget.row['session_id']}',
         },
@@ -111,10 +145,44 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SelectableText('${widget.row['ip_address']}'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: ValueKey(profileId),
+              initialValue: profileId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Device login profile',
+              ),
+              items: [
+                const DropdownMenuItem(
+                  value: '',
+                  child: Text('Automatic — SAS4 manager login'),
+                ),
+                for (final profile in profiles)
+                  DropdownMenuItem(
+                    value: profile['id'],
+                    child: Text('${profile['name']} (${profile['username']})'),
+                  ),
+              ],
+              onChanged: busy
+                  ? null
+                  : (value) => setState(() {
+                      profileId = value!;
+                      data = null;
+                      error = null;
+                    }),
+            ),
+            const AppText(
+              'Add passwords in Device Login Profiles on the left. Select a profile, then connect.',
+            ),
+            TextButton(
+              onPressed: busy ? null : loadProfiles,
+              child: const AppText('Reload profiles'),
+            ),
             if (busy) ...[
               const SizedBox(height: 12),
               const LinearProgressIndicator(),
-              const AppText('Connecting to device…'),
+              const AppText('Loading…'),
             ],
             if (error != null)
               Padding(
@@ -185,7 +253,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
     actions: [
       TextButton(
         onPressed: busy ? null : load,
-        child: const AppText('Refresh'),
+        child: AppText(data == null ? 'Connect' : 'Refresh'),
       ),
       TextButton(
         onPressed: () => Navigator.pop(context),

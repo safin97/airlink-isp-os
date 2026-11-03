@@ -26,6 +26,11 @@ const pageSections = <String, String>{
 bool usesSectionPermissions(Map<String, dynamic> user) =>
     user['role'] == 'manager' || user['access_policy_configured'] == true;
 
+bool canViewSnmpProfiles(Map<String, dynamic> user) =>
+    user['role'] == 'owner' ||
+    (user['show_snmp_profiles'] as bool? ??
+        (usesSectionPermissions(user) && hasSection(user, 'settings')));
+
 bool hasSection(Map<String, dynamic> user, String key) {
   if ((key == 'access_roles') && !usesSectionPermissions(user)) {
     return user['role'] == 'owner';
@@ -55,6 +60,7 @@ bool canDeleteSection(Map<String, dynamic> user, String key) {
 }
 
 bool canReadResource(Map<String, dynamic> user, String resource) {
+  if (resource == 'snmp-profiles') return canViewSnmpProfiles(user);
   if (!usesSectionPermissions(user)) return true;
   const readers = <String, List<String>>{
     'dashboard': ['dashboard', 'noc'],

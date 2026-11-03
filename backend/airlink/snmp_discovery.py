@@ -9,6 +9,14 @@ from .vendor_identity import identify_vendor, VENDOR_LABELS
 BATCH_SIZE = 32
 
 
+def discovery_vendor_allowed(vendor, version):
+    if version == '1':
+        return vendor in ('ubiquiti', 'ubiquiti_m5', 'ubiquiti_ac')
+    if version in ('2', '2c'):
+        return vendor == 'mikrotik'
+    return version == '3'
+
+
 def candidates(db, profile_id=None):
     query = select(SNMPProfile).order_by(SNMPProfile.name)
     if profile_id:
@@ -65,6 +73,9 @@ async def identify(address, profiles):
                 if not any(values):
                     continue
                 vendor = identify_vendor(values[0], values[1] if len(values) > 1 else '')
+                if not discovery_vendor_allowed(vendor, credentials.get('version', '3')):
+                    # Keep trying: a reply on another version may match the discovery filter.
+                    continue
                 name = ''
                 error, status, _, names = await get_cmd(engine, auth, target, ContextData(),
                     ObjectType(ObjectIdentity('1.3.6.1.2.1.1.5.0')), lookupMib=False)

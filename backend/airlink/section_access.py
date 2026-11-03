@@ -96,6 +96,11 @@ def require_any(user, sections, db=None, *, write=False, delete=False):
 
 
 def enforce_request(user, method, path):
+    if path.rstrip('/') == '/api/snmp-profiles':
+        from . import snmp_visibility
+        snmp_visibility.require(user)
+        if method in ('GET', 'HEAD', 'OPTIONS'):
+            return
     if user.role != 'manager' and role_policy(user) is None:
         return
     path = path.rstrip('/')

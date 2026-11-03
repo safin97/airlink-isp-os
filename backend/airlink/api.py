@@ -15,13 +15,13 @@ from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
-from . import device_management, device_access, online_device
+from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
 from .wireless_clients import public_clients
 from . import snmp_discovery
-from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput
+from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
@@ -58,6 +58,8 @@ async def lifespan(app):
 app = FastAPI(title="AirLink ISP OS", version=__version__, lifespan=lifespan)
 app.include_router(device_access.router)
 app.include_router(online_device.router)
+app.include_router(snmp_visibility.router)
+app.include_router(device_login_profiles.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -93,6 +95,9 @@ def public(obj):
     hidden = {"password_hash", "encrypted_credentials"}
     result = {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in hidden}
     if isinstance(obj, User):
+        result['show_snmp_profiles'] = snmp_visibility.visible(obj)
+        if obj.role == 'owner':
+            result['default_snmp_profile_visibility'] = snmp_visibility.new_account_default(obj)
         result['sections'] = section_access.effective(obj)
         result['editable_sections'] = section_access.editable(obj)
         result['deletable_sections'] = section_access.deletable(obj)
@@ -271,6 +276,7 @@ def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
     manager_parents.save(db, obj, data)
+    snmp_visibility.save(db, obj, data.show_snmp_profiles)
     commit(db, user, "user.create", obj.id)
     return public(obj)
 
@@ -299,6 +305,7 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
     manager_parents.save(db, obj, data)
+    snmp_visibility.save(db, obj, data.show_snmp_profiles)
     obj.username = data.username
     if data.password is not None:
         obj.password_hash = hasher.hash(data.password)
@@ -532,10 +539,14 @@ def discover_tower_snmp(tower_id: str, data: SNMPDiscoveryInput, user=Depends(ow
         if data.offset == 0:
             commit(db, user, 'tower.discover_snmp', f'{tower_id}:{network}')
         hosts, timed_out = asyncio.run(snmp_discovery.scan_batch(batch, profiles))
-        existing = {device.ip_address: device.id for device in db.scalars(select(Device).where(Device.ip_address.in_([h['ip_address'] for h in hosts])))}
+        existing = {device.ip_address: device for device in db.scalars(select(Device).where(Device.ip_address.in_([h['ip_address'] for h in hosts])))}
         for host in hosts:
-            host['already_added'] = host['ip_address'] in existing
-            host['device_id'] = existing.get(host['ip_address'])
+            device = existing.get(host['ip_address'])
+            host['already_added'] = device is not None
+            host['device_id'] = device.id if device else None
+            host['device_tower_id'] = device.tower_id if device else None
+            host['assigned_snmp_profile_id'] = device.snmp_profile_id if device else None
+            host['snmp_applied'] = bool(device and host.get('snmp_profile_id') and device.snmp_profile_id == host['snmp_profile_id'])
         scanned = min(data.offset + len(batch), len(addresses))
         return {'network': str(network), 'scanned': scanned, 'total': len(addresses),
                 'next_offset': scanned if scanned < len(addresses) else None,
@@ -707,6 +718,23 @@ def edit_device(device_id: str, data: DeviceInput, user=Depends(current_user), d
     return public(obj)
 
 
+@app.put('/api/devices/{device_id}/snmp-profile')
+def assign_device_snmp(device_id: str, data: DeviceSNMPAssignment, user=Depends(owner), db=Depends(get_db)):
+    obj = check_device(db, user, device_id)
+    if obj.tower_id != data.tower_id or obj.ip_address != data.expected_ip_address:
+        raise HTTPException(409, 'Device location or IP changed. Discover this tower again.')
+    if obj.snmp_profile_id != data.previous_snmp_profile_id:
+        raise HTTPException(409, 'Device SNMP profile changed. Discover this tower again.')
+    get(db, SNMPProfile, data.snmp_profile_id)
+    if obj.snmp_profile_id != data.snmp_profile_id:
+        obj.snmp_profile_id = data.snmp_profile_id
+        obj.last_poll = None
+        obj.status = 'unknown'
+        obj.failures = 0
+    commit(db, user, 'device.snmp_profile.assign', obj.id)
+    return {'id': obj.id, 'snmp_profile_id': obj.snmp_profile_id}
+
+
 @app.delete("/api/devices/{device_id}", status_code=204)
 def delete_device(device_id: str, user=Depends(current_user), db=Depends(get_db)):
     obj = check_device(db, user, device_id)
@@ -752,7 +780,8 @@ def discovery_matched_profile(data: SNMPDiscoveryProfileInput, user=Depends(owne
 
 
 @app.get("/api/snmp-profiles")
-def profiles(user=Depends(settings_access), db=Depends(get_db)):
+def profiles(user=Depends(current_user), db=Depends(get_db)):
+    snmp_visibility.require(user, db)
     result = []
     for profile in db.scalars(select(SNMPProfile)):
         item = public(profile)

@@ -1,4 +1,6 @@
 import 'app_theme.dart';
+import 'device_login_profiles.dart';
+import 'snmp_visibility_control.dart';
 import 'app_language.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -342,6 +344,7 @@ const pages = [
   'Reports',
   'Software Updates',
   'Settings',
+  'Device Login Profiles',
 ];
 const icons = [
   Icons.space_dashboard_outlined,
@@ -356,6 +359,7 @@ const icons = [
   Icons.assessment_outlined,
   Icons.system_update_alt,
   Icons.settings_outlined,
+  Icons.password_outlined,
 ];
 
 class Operations extends StatefulWidget {
@@ -413,10 +417,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       owner ||
       (usesSectionPermissions(api.user!) &&
           hasSection(api.user!, 'software_updates'));
-  bool canPage(int index) => hasSection(
-    api.user!,
-    pageSections.entries.firstWhere((entry) => entry.value == pages[index]).key,
-  );
+  bool canPage(int index) => pages[index] == 'Device Login Profiles'
+      ? owner ||
+            (usesSectionPermissions(api.user!) &&
+                hasSection(api.user!, 'isp_card'))
+      : (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
+            hasSection(
+              api.user!,
+              pageSections.entries
+                  .firstWhere((entry) => entry.value == pages[index])
+                  .key,
+            );
 
   void selectAllowedPage() {
     if (canPage(page)) return;
@@ -596,7 +607,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         'alerts',
         'links',
         if (owner) ...['users', 'access-roles'],
-        if (canManageSettings) 'snmp-profiles',
+        if (canViewSnmpProfiles(api.user!)) 'snmp-profiles',
       ].where((resource) => canReadResource(api.user!, resource)).toList();
       final data = await Future.wait([
         canReadResource(api.user!, 'dashboard')
@@ -1071,6 +1082,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         return towerFilter != null ? inventory('devices') : towersView();
       case 'ISP Card':
         return clients();
+      case 'Device Login Profiles':
+        return DeviceLoginProfiles(api: api);
       case 'Managers':
         return owner
             ? inventory('users')
@@ -1825,6 +1838,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           const SizedBox(height: 20),
         ],
         toolbar(resource),
+        if (resource == 'users' && owner)
+          SnmpVisibilityControl(
+            api: api,
+            accounts: list('users'),
+            onChanged: () => reload(quiet: true),
+          ),
         section(
           '${data.length} ${resource == 'users' ? 'accounts' : resource}',
           data.isEmpty
@@ -2058,6 +2077,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           ),
           managerParentField(account: row),
           managerPlacesField(),
+          FieldSpec(
+            'show_snmp_profiles',
+            'Show SNMP profiles',
+            kind: 'bool',
+            initial: false,
+          ),
         ],
         initial: {
           'username': row['username'],
@@ -2066,6 +2091,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               : row['role'],
           'parent_id': row['parent_id'] ?? '',
           'place_ids': row['place_ids'] ?? [],
+          'show_snmp_profiles': row['show_snmp_profiles'] == true,
         },
         save: (data) async {
           if (data['password'] != data['confirm_password']) {
@@ -2078,6 +2104,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               'username': data['username'],
               'password': data['password'],
               'role': data['role'],
+              if (data.containsKey('show_snmp_profiles'))
+                'show_snmp_profiles': data['show_snmp_profiles'],
               if (data.containsKey('parent_id')) 'parent_id': data['parent_id'],
               if (data.containsKey('place_ids')) 'place_ids': data['place_ids'],
               if (data.containsKey('access_role_id'))
@@ -2521,6 +2549,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           accountTypeField(allowOwner: true),
           managerParentField(),
           managerPlacesField(),
+          FieldSpec(
+            'show_snmp_profiles',
+            'Show SNMP profiles',
+            kind: 'bool',
+            initial: api.user?['default_snmp_profile_visibility'] == true,
+          ),
         ];
       default:
         return [
@@ -3035,10 +3069,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Widget updates() => section('Software Update Center', UpdateCenter(api: api));
 
   Map<String, IconData> get settingsPages => {
+    if (canViewSnmpProfiles(api.user!)) 'SNMP profiles': Icons.key_outlined,
     if (canManageSettings) ...{
       'Payment gateways': Icons.payments_outlined,
       if (owner) 'Device API logins': Icons.router_outlined,
-      'SNMP profiles': Icons.key_outlined,
       'Network': Icons.settings_ethernet,
       'Audit log': Icons.history,
     },
@@ -3128,13 +3162,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                     'SNMP v${p['version'] == '2c' ? '2' : p['version'] ?? '3'}',
                   ),
                 ),
-              FilledButton.icon(
-                onPressed: canEditSection(api.user!, 'settings')
-                    ? () => edit('snmp-profiles')
-                    : null,
-                icon: const Icon(Icons.add),
-                label: const AppText('Add SNMP profile'),
-              ),
+              if (canManageSettings)
+                FilledButton.icon(
+                  onPressed: canEditSection(api.user!, 'settings')
+                      ? () => edit('snmp-profiles')
+                      : null,
+                  icon: const Icon(Icons.add),
+                  label: const AppText('Add SNMP profile'),
+                ),
             ],
           ),
         );
@@ -3289,6 +3324,11 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
             data[f.key] = values[f.key];
           }
         } else if (f.kind == 'bool' || f.options != null) {
+          if (f.key == 'show_snmp_profiles' &&
+              widget.initial.containsKey(f.key) &&
+              !changedSelections.contains(f.key)) {
+            continue;
+          }
           data[f.key] = values[f.key] == '' ? null : values[f.key];
         } else {
           final text = controls[f.key]!.text;
