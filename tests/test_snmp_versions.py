@@ -7,7 +7,7 @@ from pysnmp.proto.rfc1905 import NoSuchInstance
 from sqlalchemy import select
 
 from airlink.db import SessionLocal
-from airlink.models import SNMPProfile
+from airlink.models import Device, SNMPProfile, now
 from airlink.security import cipher
 from monitoring import snmp
 from test_api import user, tower
@@ -52,13 +52,67 @@ def test_legacy_v3_profile_still_lists(client, owner):
     assert client.get('/api/snmp-profiles', headers=owner).json()[0]['version'] == '3'
 
 
-@pytest.mark.parametrize('vendor', ['mikrotik', 'ubiquiti_m5', 'ubiquiti_ac'])
+@pytest.mark.parametrize('vendor', ['mikrotik', 'ubiquiti_m5', 'ubiquiti_ac', 'mimosa'])
 def test_vendor_device_accepted(client, owner, vendor):
     tid = tower(client, owner)
     result = client.post('/api/devices', headers=owner, json={
         'name': 'Radio', 'ip_address': '192.0.2.2', 'tower_id': tid, 'vendor': vendor})
     assert result.status_code == 201, result.text
     assert result.json()['vendor'] == vendor
+
+
+def test_mimosa_v2c_device_add_and_edit_preserve_settings_and_hide_credentials(client, owner):
+    tid = tower(client, owner)
+    credentials = [
+        {'name': 'Mimosa tower read', 'version': '2c', 'community': 'mimosa-read-only-lab'},
+        {'name': 'Mimosa replacement read', 'version': '2c', 'community': 'mimosa-replacement-lab'},
+    ]
+    responses = [client.post('/api/snmp-profiles', headers=owner, json=data) for data in credentials]
+    for response in responses:
+        assert response.status_code == 201, response.text
+        assert response.json()['version'] == '2c'
+    profile_ids = [response.json()['id'] for response in responses]
+    payload = {
+        'name': 'Mimosa sector radio', 'ip_address': '192.0.2.20', 'tower_id': tid,
+        'vendor': 'mimosa', 'model': 'C5c', 'snmp_profile_id': profile_ids[0],
+        'poll_interval': 120, 'retries': 4, 'failure_threshold': 6, 'cpu_threshold': 85,
+        'enabled': True,
+    }
+    created = client.post('/api/devices', headers=owner, json=payload)
+    assert created.status_code == 201, created.text
+    device_id = created.json()['id']
+    for key, value in payload.items():
+        assert created.json()[key] == value
+
+    with SessionLocal() as db:
+        device = db.get(Device, device_id)
+        device.last_poll = now()
+        device.status = 'online'
+        device.failures = 2
+        db.commit()
+
+    replacement = {**payload, 'snmp_profile_id': profile_ids[1]}
+    edited = client.put('/api/devices/' + device_id, headers=owner, json=replacement)
+    assert edited.status_code == 200, edited.text
+    for key, value in replacement.items():
+        assert edited.json()[key] == value
+    listing = client.get('/api/devices', headers=owner)
+    assert len(listing.json()) == 1
+    assert listing.json()[0]['snmp_profile_id'] == profile_ids[1]
+    assert listing.json()[0]['snmp_status'] == 'pending'
+    profiles = client.get('/api/snmp-profiles', headers=owner)
+    for response in [*responses, created, edited, listing, profiles]:
+        assert 'encrypted_credentials' not in response.text
+        for data in credentials:
+            assert data['community'] not in response.text
+    with SessionLocal() as db:
+        device = db.get(Device, device_id)
+        assert device.last_poll is None and device.status == 'unknown' and device.failures == 0
+        for profile_id, data in zip(profile_ids, credentials):
+            encrypted = db.get(SNMPProfile, profile_id).encrypted_credentials
+            assert data['community'] not in encrypted
+            assert json.loads(cipher().decrypt(encrypted.encode())) == {
+                'version': '2c', 'community': data['community']}
 
 
 def test_authentication_versions():
@@ -79,7 +133,7 @@ def test_unavailable_textual_table_not_used(monkeypatch):
 
 
 @pytest.mark.parametrize('version', ['1', '2c', '3'])
-@pytest.mark.parametrize('vendor', ['mikrotik', 'ubiquiti_m5', 'ubiquiti_ac', 'generic'])
+@pytest.mark.parametrize('vendor', ['mikrotik', 'ubiquiti_m5', 'ubiquiti_ac', 'mimosa', 'generic'])
 def test_collection_standard_fallback_and_vendor_metrics(monkeypatch, version, vendor):
     requested = []
     family = 'ubiquiti' if vendor.startswith('ubiquiti') else vendor
@@ -115,7 +169,7 @@ def test_collection_standard_fallback_and_vendor_metrics(monkeypatch, version, v
         assert snmp.TABLES['if_rx_octets'] not in requested
         assert snmp.TABLES['if_tx_octets'] not in requested
     assert 'cpu_percent' not in result and 'memory_percent' not in result
-    if vendor == 'generic':
+    if vendor in ('generic', 'mimosa'):
         assert 'wireless_clients' not in result and 'wireless' not in result
     else:
         assert result['wireless_clients'] == 0

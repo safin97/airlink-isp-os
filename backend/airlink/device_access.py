@@ -76,7 +76,7 @@ def save(data: LoginInput, user=Depends(owner), db=Depends(get_db)):
     else:
         connection = db.get(SAS4UserConnection, user.id)
         if not connection:
-            raise HTTPException(409, 'Connect SAS4 in My account first')
+            raise HTTPException(409, 'Set up SAS4 connection below Settings first')
         try:
             managers = sas4_reports.fetch_managers(connection, cipher().decrypt(connection.encrypted_password.encode()).decode())
         except sas4.SAS4Error as exc:

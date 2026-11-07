@@ -1,4 +1,4 @@
-.PHONY: test frontend iso linux-test
+.PHONY: test frontend iso linux-test preview
 
 test:
 	.venv/bin/pytest -q
@@ -11,3 +11,6 @@ iso:
 
 linux-test:
 	docker run --rm --platform linux/amd64 -v "$(CURDIR)/tests:/tests:ro" airlink-isp-os:0.1.0-dev bash /tests/linux-integration.sh
+
+preview:
+	./scripts/preview.sh

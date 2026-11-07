@@ -1,5 +1,7 @@
 import 'live_socket_fixture.dart';
+
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -92,8 +94,74 @@ void main() {
       'summary': <String, dynamic>{},
     });
     await tester.pumpAndSettle();
-    expect(find.text('No sections assigned'), findsOneWidget);
+    expect(find.text('No sections assigned'), findsNothing);
     expect(find.widgetWithText(ListTile, 'My account'), findsOneWidget);
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'My account'))
+          .selected,
+      isTrue,
+    );
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Account profile'))
+          .selected,
+      isTrue,
+    );
+    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('Current password'), findsNothing);
+    expect(
+      find.widgetWithText(ListTile, 'Customer device access'),
+      findsNothing,
+    );
+    expect(find.widgetWithText(ListTile, 'Payment setup'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'SAS4 connection'), findsNothing);
+    expect(requests, isEmpty);
+
+    account['sections'] = ['isp_card'];
+    socket.controller.add({
+      'type': 'patch',
+      'user': Map<String, dynamic>.from(account),
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.widgetWithText(ListTile, 'Customer device access'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(find.widgetWithText(ListTile, 'Payment setup'));
+    await tester.tap(find.widgetWithText(ListTile, 'Payment setup'));
+    await tester.pumpAndSettle();
+    expect(find.text('FIB client ID'), findsOneWidget);
+    expect(requests, ['/api/payments/gateways']);
+    requests.clear();
+
+    account['sections'] = <String>[];
+    socket.controller.add({
+      'type': 'patch',
+      'user': Map<String, dynamic>.from(account),
+    });
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Account profile'))
+          .selected,
+      isTrue,
+    );
+    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('FIB client ID'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'Payment setup'), findsNothing);
+    expect(
+      find.widgetWithText(ListTile, 'Customer device access'),
+      findsNothing,
+    );
+    await tester.ensureVisible(
+      find.widgetWithText(ListTile, 'Change password'),
+    );
+    await tester.tap(find.widgetWithText(ListTile, 'Change password'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current password'), findsOneWidget);
+    expect(find.text('Role: manager'), findsNothing);
+    expect(requests, isEmpty);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

@@ -47,7 +47,7 @@ void main() {
     expect(find.byKey(const ValueKey('auth_key')), findsOneWidget);
     await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SNMP v2').last);
+    await tester.tap(find.text('SNMP v2c').last);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('auth_key')), findsNothing);
     await tester.tap(find.text('Save'));

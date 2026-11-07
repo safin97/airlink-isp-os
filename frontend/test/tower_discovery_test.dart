@@ -149,7 +149,7 @@ void main() {
         await tester.tap(find.text('Discover with SNMP'));
         await tester.pumpAndSettle();
         expect(offsets, [0, 32]);
-        expect(find.textContaining('MikroTik · SNMP v2'), findsOneWidget);
+        expect(find.textContaining('MikroTik · SNMP v2c'), findsOneWidget);
         await tester.tap(find.text('Add all (1)'));
         await tester.pumpAndSettle();
         expect(added.single, {
@@ -163,7 +163,7 @@ void main() {
         await tester.tap(find.text('Manage'));
         await tester.pumpAndSettle();
         expect(managed.single['id'], 'new');
-        expect(find.textContaining('MikroTik · SNMP v2'), findsOneWidget);
+        expect(find.textContaining('MikroTik · SNMP v2c'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );

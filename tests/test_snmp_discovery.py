@@ -49,7 +49,10 @@ def test_public_profile_reuse_is_encrypted_and_matching_version(client, owner):
     assert client.post(path,headers=owner,json={'version':'3'}).status_code==422
 
 
-@pytest.mark.parametrize('oid,vendor', [('1.3.6.1.4.1.14988.1','mikrotik')])
+@pytest.mark.parametrize('oid,vendor', [
+    ('1.3.6.1.4.1.14988.1', 'mikrotik'),
+    ('1.3.6.1.4.1.43356.1', 'mimosa'),
+])
 def test_snmp_identity_and_name_without_ping(monkeypatch,oid,vendor):
     monkeypatch.setattr(snmp.UdpTransportTarget,'create',AsyncMock(return_value=object()))
     calls=[]
@@ -125,8 +128,9 @@ def test_saved_v3_identity_is_detected_without_community_guessing(monkeypatch):
     ('1', 'ubiquiti', True), ('1', 'ubiquiti_m5', True), ('1', 'ubiquiti_ac', True),
     ('1', 'mikrotik', False), ('1', 'mimosa', False), ('1', 'generic', False),
     ('2', 'mikrotik', True), ('2c', 'mikrotik', True),
+    ('2', 'mimosa', True), ('2c', 'mimosa', True),
     ('2c', 'ubiquiti', False), ('2c', 'ubiquiti_m5', False), ('2c', 'ubiquiti_ac', False),
-    ('2c', 'mimosa', False), ('2c', 'generic', False),
+    ('2c', 'generic', False),
     ('3', 'mimosa', True), ('3', 'ubiquiti', True), ('3', 'mikrotik', True),
 ])
 def test_discovery_vendor_version_filter(version, vendor, allowed):
@@ -138,7 +142,8 @@ def test_discovery_vendor_version_filter(version, vendor, allowed):
     ('1.3.6.1.4.1.41112.1', ['2c', '1'], '1', [1, 0, 0]),
     ('1.3.6.1.4.1.14988.1', ['1'], None, [0]),
     ('1.3.6.1.4.1.41112.1', ['2c'], None, [1]),
-    ('1.3.6.1.4.1.43356.1', ['1', '2c'], None, [0, 1]),
+    ('1.3.6.1.4.1.43356.1', ['1', '2c'], '2c', [0, 1, 1]),
+    ('1.3.6.1.4.1.43356.1', ['1'], None, [0]),
 ])
 def test_discovery_filters_responses_and_keeps_trying_versions(monkeypatch, oid, versions, expected, calls_expected):
     monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))

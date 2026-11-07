@@ -134,12 +134,12 @@ def fetch_managers(connection, password, transport=None):
 def read_managers(user=Depends(sas4.sas4_access), db=Depends(get_db)):
     connection = db.get(SAS4UserConnection, user.id)
     if not connection:
-        raise HTTPException(409, 'Connect SAS4 in My account to choose a manager')
+        raise HTTPException(409, 'Set up SAS4 connection below Settings before choosing a manager')
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
         return fetch_managers(connection, password)
     except InvalidToken as exc:
-        raise HTTPException(503, 'Save your SAS4 password again in My account') from exc
+        raise HTTPException(503, 'Save your SAS4 password again in SAS4 connection below Settings') from exc
     except sas4.SAS4Error as exc:
         raise HTTPException(502, str(exc)) from exc
 
@@ -158,11 +158,11 @@ def read_report(report: str, page: int = Query(1, ge=1, le=1000000),
         raise HTTPException(422, 'From date must be before or equal to To date')
     connection = db.get(SAS4UserConnection, user.id)
     if not connection:
-        raise HTTPException(409, 'Connect SAS4 in My account to view reports')
+        raise HTTPException(409, 'Set up SAS4 connection below Settings to view reports')
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
         return fetch_report(connection, password, report, page, search, date_start, date_end, operation, period, year, month, manager_id=manager_id)
     except InvalidToken as exc:
-        raise HTTPException(503, 'Save your SAS4 password again in My account') from exc
+        raise HTTPException(503, 'Save your SAS4 password again in SAS4 connection below Settings') from exc
     except sas4.SAS4Error as exc:
         raise HTTPException(502, str(exc)) from exc

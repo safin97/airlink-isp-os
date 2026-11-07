@@ -13,7 +13,7 @@ def discovery_vendor_allowed(vendor, version):
     if version == '1':
         return vendor in ('ubiquiti', 'ubiquiti_m5', 'ubiquiti_ac')
     if version in ('2', '2c'):
-        return vendor == 'mikrotik'
+        return vendor in ('mikrotik', 'mimosa')
     return version == '3'
 
 

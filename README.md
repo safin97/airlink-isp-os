@@ -24,6 +24,10 @@ bash os/build/build.sh
 
 The image output is `dist/AirLink-ISP-OS-amd64.iso` with `dist/SHA256SUMS` and a Debian package inventory. The base image digest and Python/Flutter dependency locks are checked in. The recipe is repeatable, but exact Debian repository snapshots and bit-for-bit ISO equivalence are not yet validated. Retain the package inventory and source archive for every release. Do not describe the recipe as a bit-reproducible build.
 
+## Local preview login
+
+To review dashboard edits before pushing to GitHub, run `./scripts/preview.sh`. It creates an isolated local owner login and a local preview database. See [local preview instructions](docs/LOCAL-PREVIEW.md) for credentials, supported actions and the managed Cloud Browser workflow.
+
 ## Test
 
 ```sh

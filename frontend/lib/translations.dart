@@ -65,6 +65,7 @@ const translations = <String, List<String>>{
     "وصول آمن • شبكتك تحت سيطرتك",
   ],
   "My account": ["هەژمارا من", "حسابي"],
+  "Account profile": ["پرۆفایلا هەژمارێ", "الملف الشخصي للحساب"],
   "Change password": ["گوهۆڕینا پەیڤا نهێنی", "تغيير كلمة المرور"],
   "Current password": ["پەیڤا نهێنی یا نوکە", "كلمة المرور الحالية"],
   "New password": ["پەیڤا نهێنی یا نوو", "كلمة المرور الجديدة"],
@@ -315,9 +316,9 @@ const translations = <String, List<String>>{
     "دەستهەلاتا ڕێڤەبەری پێدڤیە بۆ گرێدان و دیتنا بەکارهێنەرێن SAS4.",
     "يلزم وصول المدير للاتصال وعرض عملاء SAS4.",
   ],
-  "Open My account below Settings in the sidebar to set up your SAS4 connection.": [
-    "هەژمارا من ل ژێر ڕێکخستنان د لیستا لاوەکی دا ڤەکە بۆ ڕێکخستنا گرێدانا SAS4.",
-    "افتح حسابي أسفل الإعدادات في القائمة الجانبية لإعداد اتصال SAS4.",
+  "Open SAS4 connection below Settings in the sidebar to set up your connection.": [
+    "گرێدانا SAS4 ل ژێر ڕێکخستنان د لیستا لاوەکی دا ڤەکە بۆ ڕێکخستنا گرێدانێ.",
+    "افتح اتصال SAS4 أسفل الإعدادات في القائمة الجانبية لإعداد اتصالك.",
   ],
   "This restarts the entire AirLink PC. Monitoring and the dashboard will be unavailable briefly. The page will reconnect when the server returns.": [
     "ئەڤە کومپیوتەرێ AirLink ژ نوو ڤە پێ دکەت. چاڤدێری و داشبۆرد بۆ دەمەکێ کورت دێ ڕاوەستن. پەڕە دێ پاش ڤەگەڕانا سێرڤەری بهێتە گرێدان.",
@@ -423,9 +424,9 @@ const translations = <String, List<String>>{
   ],
   'Expand NOC': ['شاشەیا چاڤدێریێ مەزن بکە', 'توسيع شاشة العمليات'],
   'Exit fullscreen': ['ژ شاشەیا تەمام دەرکەڤە', 'الخروج من ملء الشاشة'],
-  'Connect SAS4 in My account': [
-    'SAS4 د هەژمارا من دا گرێ بدە',
-    'اربط SAS4 في حسابي',
+  'Open SAS4 connection below Settings': [
+    'گرێدانا SAS4 ل ژێر ڕێکخستنان ڤەکە',
+    'افتح اتصال SAS4 أسفل الإعدادات',
   ],
   'SAS4 manager access required': [
     'دەستهەلاتا ڕێڤەبەرێ SAS4 پێدڤیە',

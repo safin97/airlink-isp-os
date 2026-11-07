@@ -107,7 +107,7 @@ class _SnmpProfileDialogState extends State<SnmpProfileDialog>
                   initialValue: version,
                   decoration: InputDecoration(labelText: tr('SNMP version')),
                   items: const [
-                    DropdownMenuItem(value: '2c', child: Text('SNMP v2')),
+                    DropdownMenuItem(value: '2c', child: Text('SNMP v2c')),
                     DropdownMenuItem(
                       value: '1',
                       child: AppText('SNMP v1 (legacy airMAX)'),

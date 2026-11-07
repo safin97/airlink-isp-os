@@ -236,7 +236,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                 const SizedBox(height: 12),
                 AppText(
                   widget.snmp
-                      ? 'SNMP v1 shows only Ubiquiti devices, including M5 and AC. SNMP v2 shows only MikroTik devices. SNMP v3 keeps all detected vendors. Auto mode tries saved profiles and public communities until a reply matches these filters. SNMP v3 requires a saved profile. Ping is not required.'
+                      ? 'SNMP v1 shows Ubiquiti devices, including M5 and AC. SNMP v2c shows MikroTik and Mimosa devices. SNMP v3 keeps all detected vendors. Auto mode tries saved profiles and public communities until a reply matches these filters. SNMP v3 requires a saved profile. Ping is not required.'
                       : 'Ping the subnet containing this IP from the AirLink server. Choose the prefix that matches your network. Devices that block ping will not appear.',
                 ),
                 const SizedBox(height: 16),
@@ -332,7 +332,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                   if (hosts.isEmpty && !busy)
                     AppText(
                       widget.snmp
-                          ? 'No SNMP devices match the discovery filters. v1 shows Ubiquiti only; v2 shows MikroTik only. Check profiles, UDP 161 access and the selected subnet.'
+                          ? 'No SNMP devices match the discovery filters. v1 shows Ubiquiti; v2c shows MikroTik and Mimosa. Check profiles, UDP 161 access and the selected subnet.'
                           : 'No ping replies. Check the subnet, routing, and ICMP firewall rules.',
                     ),
                 ],
@@ -342,7 +342,7 @@ class _TowerDiscoveryDialogState extends State<TowerDiscoveryDialog>
                     title: Text(host['ip_address']),
                     subtitle: Text(
                       widget.snmp
-                          ? "${host['name']} · ${host['vendor_label']} · SNMP v${host['snmp_version'] == '2c' ? '2' : host['snmp_version']} · ${host['profile_name']}${host['already_added'] == true ? '\nAlready in inventory' : ''}${host['snmp_applied'] == true ? ' · SNMP applied' : ''}"
+                          ? "${host['name']} · ${host['vendor_label']} · SNMP v${host['snmp_version'] == '2' ? '2c' : host['snmp_version']} · ${host['profile_name']}${host['already_added'] == true ? '\nAlready in inventory' : ''}${host['snmp_applied'] == true ? ' · SNMP applied' : ''}"
                           : host['already_added'] == true
                           ? 'Already in inventory'
                           : 'Responded to ping',
