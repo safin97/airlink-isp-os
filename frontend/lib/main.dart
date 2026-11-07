@@ -2,12 +2,15 @@ import 'app_theme.dart';
 import 'device_login_profiles.dart';
 import 'snmp_visibility_control.dart';
 import 'app_language.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
+
 import 'api.dart';
 import 'branding.dart';
 import 'dashboard_clock.dart';
@@ -16,6 +19,7 @@ import 'noc_screen.dart';
 import 'tower_discovery.dart';
 import 'network_map.dart';
 import 'sas4_clients.dart';
+import 'sas4_connection.dart';
 import 'sas4_reports.dart';
 import 'account_panel.dart';
 import 'payment_settings.dart';
@@ -344,6 +348,7 @@ const pages = [
   'Reports',
   'Software Updates',
   'Settings',
+  'My account',
   'Device Login Profiles',
 ];
 const icons = [
@@ -359,6 +364,7 @@ const icons = [
   Icons.assessment_outlined,
   Icons.system_update_alt,
   Icons.settings_outlined,
+  Icons.account_circle_outlined,
   Icons.password_outlined,
 ];
 
@@ -373,6 +379,7 @@ class Operations extends StatefulWidget {
 class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
+  String accountPage = 'Account profile';
   String? settingsPage;
   bool ispDashboard = true;
   bool ispReports = false;
@@ -402,6 +409,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
   bool get writer => owner || usesSectionPermissions(api.user!);
+  bool get canViewSas4Connection =>
+      writer &&
+      (hasSection(api.user!, 'isp_card') || hasSection(api.user!, 'noc'));
+  Map<String, IconData> get accountPages => accountPagesFor(api.user!);
   bool get inventoryWriter => canEditSection(api.user!, 'towers');
   bool get inventoryDeleter => canDeleteSection(api.user!, 'towers');
   bool get towerDeleter =>
@@ -417,23 +428,31 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       owner ||
       (usesSectionPermissions(api.user!) &&
           hasSection(api.user!, 'software_updates'));
-  bool canPage(int index) => pages[index] == 'Device Login Profiles'
-      ? owner ||
-            (usesSectionPermissions(api.user!) &&
-                hasSection(api.user!, 'isp_card'))
-      : (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
-            hasSection(
-              api.user!,
-              pageSections.entries
-                  .firstWhere((entry) => entry.value == pages[index])
-                  .key,
-            );
+  bool canPage(int index) {
+    if (pages[index] == 'My account') return true;
+    if (pages[index] == 'Device Login Profiles') {
+      return owner ||
+          (usesSectionPermissions(api.user!) &&
+              hasSection(api.user!, 'isp_card'));
+    }
+    return (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
+        hasSection(
+          api.user!,
+          pageSections.entries
+              .firstWhere((entry) => entry.value == pages[index])
+              .key,
+        );
+  }
 
   void selectAllowedPage() {
+    if (!accountPages.containsKey(accountPage)) {
+      accountPage = 'Account profile';
+    }
     if (canPage(page)) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     page =
         List.generate(pages.length, (i) => i).where(canPage).firstOrNull ?? 0;
+    if (pages[page] == 'My account') accountPage = 'Account profile';
     towerFilter = null;
     placeFilter = null;
     nocExpanded = false;
@@ -558,7 +577,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       if (value is int && value >= 0) count = value;
       if (count == null) message = 'Unavailable';
     } on ApiException catch (e) {
-      message = e.status == 409 ? 'Connect SAS4 in My account' : 'Unavailable';
+      message = e.status == 409
+          ? 'Open SAS4 connection below Settings'
+          : 'Unavailable';
     } catch (_) {
       message = 'Unavailable';
     } finally {
@@ -688,11 +709,23 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
-  Future<void> openAccount() async {
+  Future<void> openSas4Connection() async {
+    if (!canViewSas4Connection) return;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AccountPanel(api: api),
+      builder: (dialogContext) => AlertDialog(
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(child: Sas4Connection(api: api)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const AppText('Done'),
+          ),
+        ],
+      ),
     );
     if (mounted) setState(() => accountRevision++);
   }
@@ -703,6 +736,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     setState(() {
       page = index;
       settingsPage = null;
+      if (pages[index] == 'My account') accountPage = 'Account profile';
       mapExpanded = pages[index] == 'Network Map';
       nocExpanded = false;
       search = '';
@@ -776,6 +810,21 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   navigate(i);
                                   if (Scaffold.of(context).isDrawerOpen) {
                                     Navigator.pop(context);
+                                  } else if (pages[i] == 'My account') {
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback((_) {
+                                          if (context.mounted) {
+                                            unawaited(
+                                              Scrollable.ensureVisible(
+                                                context,
+                                                alignment: 1,
+                                                duration: const Duration(
+                                                  milliseconds: 180,
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        });
                                   }
                                 },
                               ),
@@ -805,21 +854,45 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     },
                                   ),
                                 ),
-                            if (pages[i] == 'Settings')
+                            if (pages[i] == 'Settings' && canViewSas4Connection)
                               ListTile(
                                 dense: true,
-                                leading: const Icon(
-                                  Icons.account_circle_outlined,
-                                  size: 22,
-                                ),
-                                title: const AppText('My account'),
+                                leading: const Icon(Icons.link, size: 22),
+                                title: const AppText('SAS4 connection'),
                                 onTap: () {
                                   if (Scaffold.of(context).isDrawerOpen) {
                                     Navigator.pop(context);
                                   }
-                                  openAccount();
+                                  openSas4Connection();
                                 },
                               ),
+                            if (pages[i] == 'My account' && page == i)
+                              for (final entry in accountPages.entries)
+                                Padding(
+                                  padding: const EdgeInsetsDirectional.only(
+                                    start: 24,
+                                    top: 3,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    selected: accountPage == entry.key,
+                                    selectedColor: blue,
+                                    selectedTileColor: blue.withValues(
+                                      alpha: .15,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    leading: Icon(entry.value, size: 18),
+                                    title: AppText(entry.key),
+                                    onTap: () {
+                                      setState(() => accountPage = entry.key);
+                                      if (Scaffold.of(context).isDrawerOpen) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                  ),
+                                ),
                             if (pages[i] == 'ISP Card' && page == i)
                               for (final dashboard in [true, false])
                                 Padding(
@@ -1082,6 +1155,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         return towerFilter != null ? inventory('devices') : towersView();
       case 'ISP Card':
         return clients();
+      case 'My account':
+        return AccountPanel(
+          key: ValueKey('account-$accountPage'),
+          api: api,
+          page: accountPage,
+        );
       case 'Device Login Profiles':
         return DeviceLoginProfiles(api: api);
       case 'Managers':
@@ -2539,7 +2618,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'snmp_profile_id',
             'SNMP profile',
             helperText: owner
-                ? 'Presets use community public. For another community or SNMP v3, choose a saved profile from Settings. Works with SNMP-enabled models; the device credentials must match.'
+                ? 'For Mimosa, choose SNMP v2c. Presets use the public read community. For another community or SNMP v3, choose a saved profile from Settings. Enable SNMP on the device with matching credentials.'
                 : null,
             options: owner
                 ? [
@@ -2547,17 +2626,24 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                     for (final vendor in const {
                       'mikrotik': 'MikroTik (all models)',
                       'ubiquiti': 'UBNT (M5 / AC / other models)',
-                      'mimosa': 'Mimosa (all models)',
                     }.entries)
                       for (final version in ['2c', '1'])
                         Option(
                           'preset:${vendor.key}:$version',
-                          '${vendor.value} — SNMP v${version == '2c' ? '2' : version} / public',
+                          '${vendor.value} — SNMP v$version / public',
                         ),
+                    const Option(
+                      'preset:mimosa:2c',
+                      'Mimosa — SNMP v2c / public',
+                    ),
+                    const Option(
+                      'preset:mimosa:1',
+                      'Mimosa — SNMP v1 / public',
+                    ),
                     ...list('snmp-profiles').map(
                       (profile) => Option(
                         profile['id'],
-                        '${profile['name']} — SNMP v${profile['version'] == '2c' ? '2' : profile['version'] ?? '?'}',
+                        '${profile['name']} — SNMP v${profile['version'] == '2' ? '2c' : profile['version'] ?? '?'}',
                       ),
                     ),
                   ]
@@ -3105,7 +3191,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppText(
-                'SNMP v1 / v2 communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
+                'SNMP v1 / v2c communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
                 style: TextStyle(color: muted),
               ),
               const SizedBox(height: 16),
@@ -3114,7 +3200,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   leading: const Icon(Icons.key),
                   title: Text(p['name']),
                   subtitle: Text(
-                    'SNMP v${p['version'] == '2c' ? '2' : p['version'] ?? '3'}',
+                    'SNMP v${p['version'] == '2' ? '2c' : p['version'] ?? '3'}',
                   ),
                 ),
               if (canManageSettings)

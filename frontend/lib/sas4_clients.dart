@@ -1,8 +1,11 @@
 import 'app_theme.dart';
 import 'app_language.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
 import 'api.dart';
 import 'section_access.dart';
 import 'sas4_user_details.dart';
@@ -456,7 +459,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 20),
             child: AppText(
-              'Open My account below Settings in the sidebar to set up your SAS4 connection.',
+              'Open SAS4 connection below Settings in the sidebar to set up your connection.',
             ),
           ),
         if (error != null)

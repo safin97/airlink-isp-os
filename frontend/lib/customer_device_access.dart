@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
+
 import 'api.dart';
 import 'section_access.dart';
 import 'app_language.dart';
 
 class CustomerDeviceAccess extends StatefulWidget {
-  const CustomerDeviceAccess({super.key, required this.api});
+  const CustomerDeviceAccess({
+    super.key,
+    required this.api,
+    this.embedded = false,
+  });
   final Api api;
+  final bool embedded;
   @override
   State<CustomerDeviceAccess> createState() => _CustomerDeviceAccessState();
 }
@@ -83,67 +89,70 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
   }
 
   @override
-  Widget build(BuildContext context) => ExpansionTile(
-    title: const AppText('Customer device access'),
-    subtitle: const AppText('Automatic SNMP detection'),
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
+  Widget build(BuildContext context) => widget.embedded
+      ? settingsContent()
+      : ExpansionTile(
+          title: const AppText('Customer device access'),
+          subtitle: const AppText('Automatic SNMP detection'),
           children: [
-            const AppText(
-              'Read ether1 speed, wireless signal and SSID from online users’ IP addresses using SNMP.',
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: settingsContent(),
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const AppText('Automatic detection'),
-              value: enabled,
-              onChanged: busy || !canEdit
-                  ? null
-                  : (value) => setState(() => enabled = value),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const AppText('Check SNMP with public community'),
-              subtitle: const AppText(
-                'Tries SNMP v1, then v2, then saved v3 credentials. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
-              ),
-              value: tryPublicSnmp,
-              onChanged: busy || !canEdit
-                  ? null
-                  : (value) => setState(() => tryPublicSnmp = value),
-            ),
-            if (profiles > 0)
-              Text(
-                '$profiles saved SNMP credential(s) available for detection.',
-              ),
-            TextField(
-              controller: community,
-              obscureText: true,
-              enabled: !busy && canEdit,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: tr('Read-only SNMP community'),
-                helperText: hasCommunity
-                    ? 'Leave blank to keep the saved community.'
-                    : 'Optional when saved SNMP profiles are available.',
-              ),
-            ),
-            FilledButton(
-              onPressed: busy || !canEdit ? null : save,
-              child: const AppText('Save device access'),
-            ),
-            if (busy) const LinearProgressIndicator(),
-            if (error != null)
-              Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            if (message != null) Text(message!),
           ],
+        );
+
+  Widget settingsContent() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const AppText(
+        'Read ether1 speed, wireless signal and SSID from online users’ IP addresses using SNMP.',
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const AppText('Automatic detection'),
+        value: enabled,
+        onChanged: busy || !canEdit
+            ? null
+            : (value) => setState(() => enabled = value),
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const AppText('Check SNMP with public community'),
+        subtitle: const AppText(
+          'Tries SNMP v1, then v2, then saved v3 credentials. On MikroTik, enable SNMP read access for public; trap-community alone is not enough.',
+        ),
+        value: tryPublicSnmp,
+        onChanged: busy || !canEdit
+            ? null
+            : (value) => setState(() => tryPublicSnmp = value),
+      ),
+      if (profiles > 0)
+        Text('$profiles saved SNMP credential(s) available for detection.'),
+      TextField(
+        controller: community,
+        obscureText: true,
+        enabled: !busy && canEdit,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: InputDecoration(
+          labelText: tr('Read-only SNMP community'),
+          helperText: hasCommunity
+              ? 'Leave blank to keep the saved community.'
+              : 'Optional when saved SNMP profiles are available.',
         ),
       ),
+      FilledButton(
+        onPressed: busy || !canEdit ? null : save,
+        child: const AppText('Save device access'),
+      ),
+      if (busy) const LinearProgressIndicator(),
+      if (error != null)
+        Text(
+          error!,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+      if (message != null) Text(message!),
     ],
   );
 }
