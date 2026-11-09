@@ -11,6 +11,7 @@ TABLES = {
     "if_name": "1.3.6.1.2.1.31.1.1.1.1",
     "if_type": "1.3.6.1.2.1.2.2.1.3",
     "if_status": "1.3.6.1.2.1.2.2.1.8",
+    "if_admin_status": "1.3.6.1.2.1.2.2.1.7",
     "if_speed_mbps": "1.3.6.1.2.1.31.1.1.1.15",
     "if_rx_octets": "1.3.6.1.2.1.31.1.1.1.6",
     "if_tx_octets": "1.3.6.1.2.1.31.1.1.1.10",
@@ -153,11 +154,11 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
         if total:
             values.update(memory_total_bytes=total, memory_used_bytes=used, memory_percent=100 * used / total)
         interfaces = {}
-        for index in tables["if_name"].keys() | tables["if_descr"].keys() | tables["if_status"].keys():
+        for index in tables["if_name"].keys() | tables["if_descr"].keys() | tables["if_status"].keys() | tables["if_type"].keys():
             if not index.isdecimal():
                 continue
             interface = {"name": tables["if_name"].get(index) or tables["if_descr"].get(index) or index}
-            for field in ("type", "status", "discontinuity"):
+            for field in ("type", "status", "admin_status", "discontinuity"):
                 if index in tables["if_" + field]:
                     interface[field] = tables["if_" + field][index]
             speed = tables["if_speed_mbps"].get(index)

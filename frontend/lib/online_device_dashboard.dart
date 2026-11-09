@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 class OnlineDeviceDashboard extends StatelessWidget {
   final Map<String, dynamic> data, row;
   final bool busy, stale, showDetails;
+  final bool showSubscription;
   final VoidCallback? onRefresh, onClose;
   final VoidCallback onSettings;
   final Widget details;
@@ -21,6 +22,7 @@ class OnlineDeviceDashboard extends StatelessWidget {
     required this.onClose,
     required this.onSettings,
     required this.details,
+    this.showSubscription = true,
     this.error,
     this.message,
   });
@@ -232,17 +234,20 @@ class OnlineDeviceDashboard extends StatelessWidget {
                           },
                         ),
                         const SizedBox(height: 12),
-                        _AccountCard(
-                          username: text(pppoe?['username'] ?? row['username']),
-                          status: accountStatus.isEmpty
-                              ? 'Unavailable'
-                              : accountStatus,
-                          expiry: text(row['expiration']),
-                          source: pppoe == null
-                              ? 'ISP Card / RADIUS'
-                              : 'Device PPPoE',
-                        ),
-                        if (data['pppoe_note'] != null)
+                        if (showSubscription)
+                          _AccountCard(
+                            username: text(
+                              pppoe?['username'] ?? row['username'],
+                            ),
+                            status: accountStatus.isEmpty
+                                ? 'Unavailable'
+                                : accountStatus,
+                            expiry: text(row['expiration']),
+                            source: pppoe == null
+                                ? 'ISP Card / RADIUS'
+                                : 'Device PPPoE',
+                          ),
+                        if (showSubscription && data['pppoe_note'] != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(

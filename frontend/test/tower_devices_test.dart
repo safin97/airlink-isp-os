@@ -16,6 +16,22 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final fixtures = {
+        '/api/devices/1/ethernet-ports': {
+          'supported': true,
+          'snmp_status': 'connected',
+          'poll_interval': 60,
+          'ports': [
+            {
+              'name': 'ether1',
+              'state': 'connected',
+              'speed_mbps': 1000,
+              'rx_bps': 24000000,
+              'tx_bps': 0,
+            },
+            {'name': 'ether2', 'state': 'disconnected'},
+            {'name': 'sfp1', 'state': 'disabled'},
+          ],
+        },
         '/api/devices/1/wireless-clients': {
           'status': 'available',
           'total': 2,
@@ -23,6 +39,7 @@ void main() {
             {
               'mac_address': 'AA:BB:CC:DD:EE:01',
               'interface': 'wlan1',
+              'pppoe_username': 'airlink_customer_01',
               'ssid': 'AirLink North',
               'signal_dbm': -60,
             },
@@ -50,6 +67,7 @@ void main() {
           {
             'id': '1',
             'name': 'North online',
+            'vendor': 'mikrotik',
             'snmp_status': 'connected',
             'api_status': 'connected',
             'telemetry': {
@@ -129,6 +147,27 @@ void main() {
       expect(find.text('AirLink North'), findsOneWidget);
       expect(find.text('ether2: 100 Mbps'), findsNothing);
       expect(find.text('CPU'), findsNothing);
+      final ports = find.byKey(const ValueKey('ethernet-ports-1'));
+      await tester.ensureVisible(ports);
+      await tester.tap(ports);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('3 ports · 1 connected · 1 disconnected · 1 disabled'),
+        findsOneWidget,
+      );
+      expect(find.text('24.000 Mbps'), findsOneWidget);
+      expect(find.text('0.000 Mbps'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Unavailable'),
+        ),
+        findsNWidgets(4),
+      );
+      expect(find.text('Not connected · Link down'), findsOneWidget);
+      expect(find.text('Disabled'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
       expect(find.text('Memory'), findsNothing);
       expect(find.text('Registration clients'), findsOneWidget);
       final clients = find.byKey(const ValueKey('wireless-clients-1'));
@@ -136,6 +175,10 @@ void main() {
       await tester.tap(clients);
       await tester.pumpAndSettle();
       expect(find.text('AA:BB:CC:DD:EE:01'), findsOneWidget);
+      expect(find.text('PPPoE username'), findsOneWidget);
+      expect(find.text('airlink_customer_01'), findsOneWidget);
+      expect(find.text('Interface'), findsNothing);
+      expect(find.text('wlan1'), findsNothing);
       expect(find.text('AA:BB:CC:DD:EE:02'), findsOneWidget);
       expect(find.text('-60 dBm'), findsOneWidget);
       await tester.tap(find.text('Close'));

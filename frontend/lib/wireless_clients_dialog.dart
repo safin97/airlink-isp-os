@@ -83,6 +83,15 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
               if (data!['collected_at'] != null)
                 Text('${tr('Collected')}: ${data!['collected_at']}'),
               const SizedBox(height: 12),
+              if (rows.isNotEmpty)
+                const AppText(
+                  'PPPoE usernames require a unique MAC match in active sessions. Unmatched clients show Unavailable.',
+                ),
+              if (rows.isNotEmpty &&
+                  data!['username_lookup_status'] == 'not_configured')
+                const AppText(
+                  'For SAS4 matching, configure your SAS4 connection and enable ISP Card access.',
+                ),
               if (rows.isEmpty)
                 AppText(
                   data!['status'] == 'available'
@@ -105,7 +114,7 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                         columns: [
                           for (final label in [
                             'MAC address',
-                            'Interface',
+                            'PPPoE username',
                             'SSID',
                             'Signal',
                           ])
@@ -120,9 +129,11 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                                   ),
                                   DataCell(
                                     Text(
-                                      row['interface'] == ''
-                                          ? '—'
-                                          : row['interface'] ?? '—',
+                                      row['pppoe_username'] ??
+                                          (row['pppoe_username_status'] ==
+                                                  'pending'
+                                              ? 'Checking…'
+                                              : 'Unavailable'),
                                     ),
                                   ),
                                   DataCell(

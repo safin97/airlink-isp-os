@@ -5,7 +5,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 import httpx
 from .vendor_identity import identify_vendor
-from .wireless_clients import public_clients, ssids
+from .wireless_clients import public_clients, ssids, username_map
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -130,6 +130,20 @@ async def routeros(client, base, credentials, inventory=False):
               'detected_vendor': 'mikrotik', 'vendor_detection_source': 'API'}
     if inventory:
         result.update(wireless_values)
+        if result.get('wireless_registrations'):
+            try:
+                active = await read('ppp/active?.proplist=name,caller-id,service')
+                matches = username_map([
+                    {'mac_address': row.get('caller-id'), 'username': row.get('name')}
+                    for row in active if isinstance(row, dict) and row.get('service') == 'pppoe'
+                ]) if isinstance(active, list) else {}
+                for row in result['wireless_registrations']:
+                    if row['mac_address'] in matches:
+                        row['pppoe_username'] = matches[row['mac_address']]
+                        if row['pppoe_username'] is None:
+                            row['pppoe_username_status'] = 'ambiguous'
+            except (PermissionError, httpx.HTTPError, ValueError, TypeError):
+                pass  # Optional PPP read permission must not discard radio telemetry.
         resource = await read('system/resource')
         if isinstance(resource, list) and resource:
             resource = resource[0]

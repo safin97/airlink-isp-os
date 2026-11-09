@@ -19,9 +19,11 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
+from . import towers_device_access
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
+from .registration_usernames import service as registration_username_service
 from .wireless_clients import public_clients
 from . import snmp_discovery
 from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment
@@ -50,6 +52,7 @@ async def lifespan(app):
         yield
     finally:
         customer_collector_service.stop()
+        registration_username_service.stop()
         customer_probe_service.stop()
         system_stats_service.stop()
         if task:
@@ -63,6 +66,7 @@ app.include_router(device_access.router)
 app.include_router(online_device.router)
 app.include_router(snmp_visibility.router)
 app.include_router(device_login_profiles.router)
+app.include_router(towers_device_access.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -837,6 +841,32 @@ def wireless_management_context(db, user, device_id):
     return device, metric, vendor
 
 
+@app.get('/api/devices/{device_id}/ethernet-ports')
+def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends(get_db)):
+    device, metric, vendor = wireless_management_context(db, user, device_id)
+    status = snmp_status(device, metric)
+    profile = db.get(SNMPProfile, device.snmp_profile_id) if device.snmp_profile_id else None
+    version = json.loads(cipher().decrypt(profile.encrypted_credentials.encode())).get('version', '3') if profile else None
+    supported = vendor == 'mikrotik' and version in ('2', '2c')
+    fresh = supported and status == 'connected'
+    ports = []
+    # Use the latest poll only: failed polls must not reuse old link states or rates.
+    values = metric.values if metric and device.last_poll and supported else {}
+    for index, port in sorted(values.get('interfaces', {}).items(), key=lambda item: int(item[0])):
+        if port.get('type') != 6:
+            continue  # IF-MIB Ethernet (including Ethernet SFP), not bridges/VLANs/radios.
+        state = ('disabled' if port.get('admin_status') == 2 else
+                 {1: 'connected', 2: 'disconnected', 3: 'testing', 5: 'dormant',
+                  6: 'not_present', 7: 'lower_layer_down'}.get(port.get('status'), 'unknown')) if fresh else 'unknown'
+        ports.append({'if_index': int(index), 'name': port.get('name', index), 'state': state,
+                      'speed_mbps': port.get('speed_mbps') if fresh and state == 'connected' else None,
+                      'rx_bps': port.get('rx_bps') if fresh else None,
+                      'tx_bps': port.get('tx_bps') if fresh else None})
+    return {'supported': supported, 'snmp_status': status,
+            'collected_at': metric.collected_at if values else None,
+            'poll_interval': device.poll_interval, 'ports': ports}
+
+
 @app.get('/api/devices/{device_id}/wireless-settings')
 def device_wireless_settings(device_id: str, user=Depends(current_user), db=Depends(get_db)):
     device, metric, vendor = wireless_management_context(db, user, device_id)
@@ -887,9 +917,17 @@ def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_
                  (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
     values = metric.values if fresh else {}
     clients = public_clients(values.get('wireless_registrations'))
+    lookup_status = 'not_needed'
+    unmatched = [row for row in clients if not row.get('pppoe_username') and row.get('pppoe_username_status') != 'ambiguous']
+    if unmatched:
+        matches, lookup_status = registration_username_service.lookup(db, user)
+        for row in unmatched:
+            row['pppoe_username'] = matches.get(row['mac_address'])
+            row['pppoe_username_status'] = ('matched' if row['pppoe_username'] else
+                'ambiguous' if row['mac_address'] in matches else lookup_status if lookup_status == 'pending' else 'unavailable')
     total = values.get('wireless_clients')
     available = bool(clients) or (values.get('wireless_registration_source') and total == 0)
-    return {'clients': clients, 'total': total, 'status': 'available' if available else
+    return {'clients': clients, 'total': total, 'username_lookup_status': lookup_status, 'status': 'available' if available else
             'stale' if metric and not fresh else 'unavailable',
             'source': values.get('wireless_registration_source'),
             'collected_at': metric.collected_at if fresh else None}

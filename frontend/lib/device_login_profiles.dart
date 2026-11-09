@@ -5,15 +5,24 @@ import 'app_language.dart';
 import 'section_access.dart';
 
 const deviceLoginProfilesPath = '/integrations/sas4/device-login-profiles';
+const towersApiProfilesPath = '/towers-api-profiles';
 
 class DeviceLoginProfiles extends StatefulWidget {
   final Api api;
-  const DeviceLoginProfiles({super.key, required this.api});
+  final bool towers;
+  const DeviceLoginProfiles({
+    super.key,
+    required this.api,
+    this.towers = false,
+  });
   @override
   State<DeviceLoginProfiles> createState() => _DeviceLoginProfilesState();
 }
 
 class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
+  String get path =>
+      widget.towers ? towersApiProfilesPath : deviceLoginProfilesPath;
+  String get section => widget.towers ? 'towers' : 'isp_card';
   List<dynamic> profiles = [];
   bool busy = true;
   String? error;
@@ -29,7 +38,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
       error = null;
     });
     try {
-      final result = await widget.api.request(deviceLoginProfilesPath);
+      final result = await widget.api.request(path);
       if (mounted) {
         setState(() => profiles = result as List);
       }
@@ -47,8 +56,11 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   Future<void> edit([Map<String, dynamic>? profile]) async {
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) =>
-          DeviceLoginProfileEditor(api: widget.api, profile: profile),
+      builder: (_) => DeviceLoginProfileEditor(
+        api: widget.api,
+        profile: profile,
+        path: path,
+      ),
     );
     if (saved == true && mounted) {
       await load();
@@ -76,10 +88,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
     if (confirmed != true || !mounted) return;
     setState(() => busy = true);
     try {
-      await widget.api.request(
-        '$deviceLoginProfilesPath/${profile['id']}',
-        method: 'DELETE',
-      );
+      await widget.api.request('$path/${profile['id']}', method: 'DELETE');
       if (mounted) {
         await load();
       }
@@ -97,9 +106,12 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      AppText('Device login', style: Theme.of(context).textTheme.headlineSmall),
+      AppText(
+        widget.towers ? 'Towers API' : 'Device login',
+        style: Theme.of(context).textTheme.headlineSmall,
+      ),
       const SizedBox(height: 12),
-      CustomerDeviceAccess(api: widget.api),
+      if (!widget.towers) CustomerDeviceAccess(api: widget.api),
       const SizedBox(height: 12),
       profilesCard(context),
     ],
@@ -120,7 +132,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
                 'Saved device logins',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
-              if (canEditSection(widget.api.user ?? {}, 'isp_card'))
+              if (canEditSection(widget.api.user ?? {}, section))
                 FilledButton.icon(
                   onPressed: busy ? null : () => edit(),
                   icon: const Icon(Icons.add),
@@ -133,8 +145,10 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
             ],
           ),
           const SizedBox(height: 12),
-          const AppText(
-            'Add multiple named usernames and passwords for your devices. Choose a profile in ISP Card → Online Users → Open device. Saved passwords cannot be read back.',
+          AppText(
+            widget.towers
+                ? 'Save API usernames and passwords, then choose one in Towers → devices → Login device. Profiles are also available in Device login. Saved passwords cannot be read back.'
+                : 'Add multiple named usernames and passwords for your devices. Choose a profile in ISP Card → Online Users → Open device. Saved passwords cannot be read back.',
           ),
           if (busy) const LinearProgressIndicator(),
           if (error != null)
@@ -157,7 +171,8 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (canEditSection(widget.api.user ?? {}, 'isp_card'))
+                  if (row['shared'] != true &&
+                      canEditSection(widget.api.user ?? {}, section))
                     IconButton(
                       tooltip: 'Edit profile',
                       onPressed: busy
@@ -165,7 +180,8 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
                           : () => edit(Map<String, dynamic>.from(row)),
                       icon: const Icon(Icons.edit_outlined),
                     ),
-                  if (canDeleteSection(widget.api.user ?? {}, 'isp_card'))
+                  if (row['shared'] != true &&
+                      canDeleteSection(widget.api.user ?? {}, section))
                     IconButton(
                       tooltip: 'Delete profile',
                       onPressed: busy
@@ -185,7 +201,13 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
 class DeviceLoginProfileEditor extends StatefulWidget {
   final Api api;
   final Map<String, dynamic>? profile;
-  const DeviceLoginProfileEditor({super.key, required this.api, this.profile});
+  final String path;
+  const DeviceLoginProfileEditor({
+    super.key,
+    required this.api,
+    this.profile,
+    this.path = deviceLoginProfilesPath,
+  });
   @override
   State<DeviceLoginProfileEditor> createState() =>
       _DeviceLoginProfileEditorState();
@@ -219,9 +241,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
 
   Future<void> loadManagers() async {
     try {
-      final result = await widget.api.request(
-        '$deviceLoginProfilesPath/managers',
-      );
+      final result = await widget.api.request('${widget.path}/managers');
       if (mounted) setState(() => managers = result as List);
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -245,7 +265,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
     });
     try {
       await widget.api.request(
-        '$deviceLoginProfilesPath${widget.profile == null ? '' : '/${widget.profile!['id']}'}',
+        '${widget.path}${widget.profile == null ? '' : '/${widget.profile!['id']}'}',
         method: widget.profile == null ? 'POST' : 'PUT',
         body: {
           'name': name.text.trim(),

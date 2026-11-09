@@ -82,6 +82,7 @@ def test_routeros_inventory_resources_and_ap_signal(client):
         if path == '/rest/system/resource':
             return httpx.Response(200, json={'cpu-load':'18', 'free-memory':'256', 'total-memory':'1024',
                 'uptime':'1w2d3h4m5s', 'version':'7.20', 'board-name':'RouterBoard'})
+        if path == '/rest/ppp/active': return httpx.Response(404)
         raise AssertionError(path)
     values = asyncio.run(device_api.collect_api('192.168.88.1', {
         'api_username':'monitor','api_password':'test','protocol':'https','port':8443},

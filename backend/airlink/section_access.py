@@ -124,6 +124,10 @@ def enforce_request(user, method, path):
         return require(('isp_card',))
     if path.startswith('/api/reports/'):
         return require(('reports',))
+    if path == '/api/towers-api-profiles' or path.startswith('/api/towers-api-profiles/'):
+        return require(('towers',))
+    if path.startswith('/api/devices/') and path.endswith('/login') and method == 'POST':
+        return require_any(user, ('towers',))  # API login reads device data; no configuration writes.
     if path.startswith('/api/devices/') and path.endswith('/wireless-settings'):
         return require(('towers',) if method != 'GET' else ('towers', 'noc'))
     if path.startswith('/api/devices/') and path.endswith('/wireless-clients'):

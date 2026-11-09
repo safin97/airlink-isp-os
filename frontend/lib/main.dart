@@ -28,6 +28,8 @@ import 'section_access.dart';
 import 'role_management.dart';
 import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
+import 'online_device_dialog.dart';
+import 'ethernet_ports_dialog.dart';
 import 'device_api_access_panel.dart';
 import 'diagnostics_screen.dart';
 
@@ -349,6 +351,7 @@ const pages = [
   'Diagnostics',
   'My account',
   'Device login',
+  'Towers API',
 ];
 const icons = [
   Icons.space_dashboard_outlined,
@@ -366,6 +369,7 @@ const icons = [
   Icons.health_and_safety_outlined,
   Icons.account_circle_outlined,
   Icons.password_outlined,
+  Icons.key_outlined,
 ];
 
 class Operations extends StatefulWidget {
@@ -430,6 +434,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       ? owner ||
             (usesSectionPermissions(api.user!) &&
                 hasSection(api.user!, 'settings'))
+      : pages[index] == 'Towers API'
+      ? (owner || usesSectionPermissions(api.user!)) &&
+            hasSection(api.user!, 'towers')
       : pages[index] == 'Device login'
       ? owner ||
             (usesSectionPermissions(api.user!) &&
@@ -1106,6 +1113,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           key: ValueKey('account-$accountPage-$accountRevision'),
           api: api,
           page: accountPage,
+        );
+      case 'Towers API':
+        return DeviceLoginProfiles(
+          key: const ValueKey('towers-api'),
+          api: api,
+          towers: true,
         );
       case 'Device login':
         return DeviceLoginProfiles(api: api);
@@ -1863,6 +1876,50 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     ),
                                   ),
                                 if (resource == 'devices')
+                                  if ((row['vendor'] == 'generic'
+                                          ? row['detected_vendor']
+                                          : row['vendor']) ==
+                                      'mikrotik')
+                                    IconButton(
+                                      key: ValueKey(
+                                        'ethernet-ports-${row['id']}',
+                                      ),
+                                      tooltip: 'Ethernet ports',
+                                      onPressed: () => showDialog<void>(
+                                        context: context,
+                                        builder: (_) => EthernetPortsDialog(
+                                          api: api,
+                                          device: Map<String, dynamic>.from(
+                                            row,
+                                          ),
+                                        ),
+                                      ),
+                                      icon: const Icon(
+                                        Icons.settings_ethernet,
+                                        size: 19,
+                                      ),
+                                    ),
+                                if (resource == 'devices' &&
+                                    canPage(pages.indexOf('Towers API')))
+                                  IconButton(
+                                    key: ValueKey(
+                                      'tower-device-login-${row['id']}',
+                                    ),
+                                    tooltip: 'Login device',
+                                    onPressed: () => showDialog<void>(
+                                      context: context,
+                                      builder: (_) => OnlineDeviceDialog(
+                                        api: api,
+                                        towerDeviceId: row['id'],
+                                        row: {
+                                          ...Map<String, dynamic>.from(row),
+                                          'username': row['name'],
+                                        },
+                                      ),
+                                    ),
+                                    icon: const Icon(Icons.login, size: 19),
+                                  ),
+                                if (resource == 'devices')
                                   IconButton(
                                     tooltip: 'Manage device',
                                     onPressed: () => manageDevice(
@@ -2518,12 +2575,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           FieldSpec(
             'snmp_profile_id',
             'SNMP profile',
+            kind: owner ? 'snmp_profile' : 'text',
             helperText: owner
                 ? 'Presets use community public. For another community or SNMP v3, choose a saved profile from Settings. Works with SNMP-enabled models; the device credentials must match.'
                 : null,
             options: owner
                 ? [
                     const Option('', 'None'),
+                    const Option(
+                      'preset:mikrotik_switch:2c',
+                      'MikroTik switch — SNMP v2c / public',
+                    ),
                     for (final vendor in const [
                       (
                         key: 'mikrotik',
@@ -2549,7 +2611,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                     ...list('snmp-profiles').map(
                       (profile) => Option(
                         profile['id'],
-                        '${profile['name']} — SNMP v${profile['version'] == '2c' ? '2' : profile['version'] ?? '?'}',
+                        '${profile['name']} — SNMP v${profile['version'] == '2' ? '2c' : profile['version'] ?? '?'}',
                       ),
                     ),
                   ]
@@ -3231,6 +3293,89 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
       values[f.key] = v;
       controls[f.key] = TextEditingController(text: v?.toString() ?? '');
     }
+    defaultMimosaProfile();
+  }
+
+  static const mimosaPublicProfile = 'preset:mimosa:2c';
+
+  void defaultMimosaProfile() {
+    if (values['vendor'] == 'mimosa' &&
+        (values['snmp_profile_id'] == null ||
+            values['snmp_profile_id'] == '') &&
+        !changedSelections.contains('snmp_profile_id') &&
+        widget.fields.any(
+          (f) =>
+              f.kind == 'snmp_profile' &&
+              (f.options?.any((o) => o.value == mimosaPublicProfile) ?? false),
+        )) {
+      values['snmp_profile_id'] = mimosaPublicProfile;
+    }
+  }
+
+  Widget snmpProfileField(FieldSpec field) {
+    final selected = values[field.key] as String?;
+    final preset = selected?.startsWith('preset:') == true;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<String>(
+          key: ValueKey('snmp-profile:$selected'),
+          initialValue: field.options!.any((o) => o.value == selected)
+              ? selected
+              : null,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: tr(field.label),
+            helperText: field.helperText,
+            helperMaxLines: 4,
+          ),
+          items: field.options!
+              .map(
+                (o) => DropdownMenuItem(value: o.value, child: Text(o.label)),
+              )
+              .toList(),
+          onChanged: busy
+              ? null
+              : (value) => setState(() {
+                  values[field.key] = value;
+                  changedSelections.add(field.key);
+                }),
+        ),
+        if (preset) ...[
+          const SizedBox(height: 12),
+          TextFormField(
+            key: ValueKey('snmp-version:$selected'),
+            initialValue: 'SNMPv${selected!.split(':').last}',
+            readOnly: true,
+            decoration: const InputDecoration(labelText: 'SNMP version'),
+          ),
+          const SizedBox(height: 12),
+          TextFormField(
+            initialValue: 'public',
+            readOnly: true,
+            decoration: const InputDecoration(
+              labelText: 'SNMP Community String',
+              helperText:
+                  'Choose a saved profile to use a different community.',
+              helperMaxLines: 2,
+            ),
+          ),
+        ],
+        if (values['vendor'] == 'mimosa' && selected != mimosaPublicProfile)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: OutlinedButton(
+              onPressed: busy
+                  ? null
+                  : () => setState(() {
+                      values[field.key] = mimosaPublicProfile;
+                      changedSelections.add(field.key);
+                    }),
+              child: const Text('Use Mimosa SNMPv2c / public'),
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -3362,6 +3507,8 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                               changedSelections.add(f.key);
                             }),
                           )
+                        : f.kind == 'snmp_profile'
+                        ? snmpProfileField(f)
                         : f.options != null
                         ? DropdownButtonFormField<String>(
                             initialValue:
@@ -3389,6 +3536,7 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                             onChanged: (v) => setState(() {
                               values[f.key] = v;
                               changedSelections.add(f.key);
+                              if (f.key == 'vendor') defaultMimosaProfile();
                             }),
                           )
                         : TextFormField(
