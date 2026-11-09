@@ -4,4 +4,5 @@ After=airlink-api.service airlink-monitor.service airlink-alerts.service
 ConditionPathExists=/etc/airlink/provisioned
 [Service]
 Type=oneshot
+TimeoutStartSec=150
 ExecStart=/bin/bash /opt/airlink/deployment/health.sh

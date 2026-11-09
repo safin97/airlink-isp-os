@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 import httpx
 
@@ -58,7 +59,18 @@ def main():
     meta = update.manifest()
     update.verify_package(meta)
     print('RELEASE_QA_PREINSTALL_SIGNATURE_AND_PACKAGE_OK', flush=True)
-    subprocess.run(['/usr/bin/python3', '/opt/airlink/os/updates/update.py', 'install'], check=True)
+    # Exercise the same queued systemd job used by the dashboard.
+    update.action('install', {'version': meta['version'], 'sequence': sequence})
+    deadline = time.monotonic() + 900
+    while time.monotonic() < deadline:
+        state = update.read(update.ROOT / 'state.json', {})
+        if state.get('status') == 'installed':
+            break
+        if state.get('status') in {'failed', 'rejected'}:
+            raise RuntimeError(f'Release installation failed: {state}')
+        time.sleep(2)
+    else:
+        raise RuntimeError('Timed out waiting for the queued update job')
     assert update.read(update.ROOT / 'state.json', {})['status'] == 'installed'
     assert update.read(update.ROOT / 'installed.json', {})['sequence'] == sequence
     assert hashlib.sha256(Path('/etc/airlink/airlink.env').read_bytes()).hexdigest() == key_before

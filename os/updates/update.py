@@ -255,6 +255,24 @@ def action(name, payload):
         return {"version": meta["version"], "status": name}
 
 
+def health_check():
+    result = subprocess.run(
+        ["/bin/bash", "/opt/airlink/deployment/health.sh"],
+        capture_output=True, text=True,
+    )
+    if result.stdout:
+        print(result.stdout, end="", flush=True)
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr, flush=True)
+    if result.returncode:
+        # Persist only the fixed health script's diagnostic lines, not arbitrary
+        # command output that might contain sensitive configuration.
+        details = [line for line in result.stderr.splitlines()
+                   if line.startswith("AirLink health check failed:")]
+        raise RuntimeError("; ".join(details) or
+                           f"AirLink health check failed (exit {result.returncode}); review the update journal")
+
+
 def install():
     ROOT.mkdir(parents=True, exist_ok=True)
     with open(ROOT / "lock", "w") as lock:
@@ -273,7 +291,7 @@ def install():
             verify_package(meta)
             if shutil.disk_usage("/").free < meta["size"] * 3 + 1024**3:
                 raise RuntimeError("Insufficient update/backup space")
-            subprocess.run(["/bin/bash", "/opt/airlink/deployment/health.sh"], check=True)
+            health_check()
         except Exception as exc:
             atomic(ROOT / "state.json", {"status": "rejected", "error": str(exc),
                    "finished": time.time(), "recovery_required": False})
@@ -286,7 +304,7 @@ def install():
             subprocess.run(["/bin/bash", "/opt/airlink/deployment/migrate.sh"], check=True)
             subprocess.run(["systemctl", "daemon-reload"], check=True)
             subprocess.run(["systemctl", "start", "airlink-api", "airlink-monitor", "airlink-alerts"], check=True)
-            subprocess.run(["/bin/bash", "/opt/airlink/deployment/health.sh"], check=True)
+            health_check()
             atomic(ROOT / "installed.json", meta)
             atomic(ROOT / "state.json", {"status": "installed", "version": meta["version"], "finished": time.time(), "reboot_required": meta["reboot_required"]})
         except Exception as exc:
