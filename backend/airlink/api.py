@@ -11,6 +11,9 @@ from datetime import timedelta
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, Query
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, func, text, delete, update, or_, case
 from sqlalchemy.exc import IntegrityError
 from redis import Redis
@@ -72,6 +75,15 @@ async def headers(request, call_next):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_device_login_validation(request, exc):
+    if request.url.path.rstrip('/') == '/api/integrations/sas4/device-access':
+        return JSONResponse(status_code=422, content={
+            'detail': 'Invalid device login settings. Check the username, password and connection options.'},
+            headers={'Cache-Control': 'no-store'})
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(IntegrityError)

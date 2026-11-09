@@ -120,8 +120,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Devices at North'), findsOneWidget);
       expect(find.text('3 devices'), findsOneWidget);
-      expect(find.text('SNMP status'), findsOneWidget);
-      expect(find.text('Connected'), findsOneWidget);
+      expect(find.text('Tower'), findsNothing);
+      expect(find.text('SNMP status'), findsNothing);
+      expect(find.text('Connected'), findsNothing);
       expect(find.text('API status'), findsNothing);
       expect(find.text('Device'), findsNothing);
       expect(find.text('ether1: 1000 Mbps'), findsOneWidget);
@@ -140,8 +141,8 @@ void main() {
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('1d 1h 1m'), findsOneWidget);
-      expect(find.text('Failed'), findsOneWidget);
-      expect(find.text('Waiting for poll'), findsOneWidget);
+      expect(find.text('Failed'), findsNothing);
+      expect(find.text('Waiting for poll'), findsNothing);
       for (final name in ['North online', 'North offline', 'North unknown']) {
         expect(find.text(name), findsNothing);
       }

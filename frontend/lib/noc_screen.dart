@@ -11,8 +11,6 @@ Color get _orange => themeColor(0xffffb454, 0xff995000);
 /// Read-only wallboard. All data comes from the signed-in user's API scope.
 class NocScreen extends StatelessWidget {
   final Map<String, dynamic> summary;
-  final int? onlineUsers;
-  final String? onlineUsersMessage;
   final List<dynamic> towers, devices, alerts;
   final bool hasData, expanded;
   final VoidCallback toggleExpanded, openAlerts, openMonitoring;
@@ -21,8 +19,6 @@ class NocScreen extends StatelessWidget {
   const NocScreen({
     super.key,
     required this.summary,
-    this.onlineUsers,
-    this.onlineUsersMessage,
     required this.towers,
     required this.devices,
     required this.alerts,
@@ -106,7 +102,6 @@ class NocScreen extends StatelessWidget {
         );
     final metrics = [
       ('Online devices', 'online', _green),
-      ('Online users', 'online_users', themeColor(0xff438fff, 0xff2455ca)),
       ('Offline devices', 'offline', _red),
       ('Unknown devices', 'unknown', _muted),
       ('Active alerts', 'active_alerts', _orange),
@@ -154,22 +149,13 @@ class NocScreen extends StatelessWidget {
                       AppText(metric.$1, style: TextStyle(color: _muted)),
                       const SizedBox(height: 12),
                       Text(
-                        metric.$2 == 'online_users'
-                            ? '${onlineUsers ?? '—'}'
-                            : hasData
-                            ? '${summary[metric.$2] ?? '—'}'
-                            : '—',
+                        hasData ? '${summary[metric.$2] ?? '—'}' : '—',
                         style: TextStyle(
                           fontSize: 46,
                           fontWeight: FontWeight.w700,
                           color: metric.$3,
                         ),
                       ),
-                      if (metric.$2 == 'online_users')
-                        AppText(
-                          onlineUsersMessage ?? 'From SAS4',
-                          style: TextStyle(fontSize: 12, color: _muted),
-                        ),
                     ],
                   ),
                 ),

@@ -88,6 +88,8 @@ async def routeros(client, base, config, reader=None):
                 if len(peers) == 1 and radio['signal_dbm'] is None:
                     radio['signal_dbm'] = device_api.signal(peers[0].get('signal-strength') or peers[0].get('signal'))
             break
+    if config.get('telemetry_only'):
+        return {'vendor': 'MikroTik', 'wireless': wireless, 'ethernet': ethernet}
     pppoe_data = await read('interface/pppoe-client?.proplist=.id,name,interface,user,disabled,running')
     pppoe = []
     for item in rows(pppoe_data):
@@ -140,18 +142,31 @@ async def branding(client, base):
             if response.status_code in (301, 302, 303, 307, 308):
                 target = urljoin(url, response.headers.get('location', ''))
                 if (urlsplit(target).scheme, urlsplit(target).netloc) != (urlsplit(base).scheme, urlsplit(base).netloc):
-                    return ''
+                    return '', ''
                 url = target
                 continue
             if response.status_code != 200:
-                return ''
+                return '', ''
             raw = bytearray()
             async for chunk in response.aiter_bytes():
                 raw.extend(chunk)
                 if len(raw) > device_api.MAX_RESPONSE:
                     raise ValueError('Device response too large')
-            return raw.decode('utf-8', errors='ignore').lower()
-    return ''
+            return raw.decode('utf-8', errors='ignore').lower(), urlsplit(url).path
+    return '', ''
+
+
+def airmax_branding(page, path=''):
+    """Recognize airOS M/AC login pages before sending device credentials."""
+    if path.rstrip('/').lower() == '/login.cgi':
+        return True
+    return any(marker in page for marker in (
+        'ubiquiti', 'ubnt', 'airos', 'airmax',
+        'nanostation m', 'nanostation loco m', 'nanobeam m',
+        'rocket m', 'powerbeam m', 'bullet m',
+        'nanostation 5ac', 'nanobeam 5ac', 'powerbeam 5ac',
+        'rocket 5ac', 'litebeam 5ac',
+    ))
 
 
 async def collect_once(address, config, transport=None):
@@ -168,11 +183,11 @@ async def collect_once(address, config, transport=None):
         async with httpx.AsyncClient(timeout=httpx.Timeout(2, connect=1), follow_redirects=False,
                 trust_env=False, verify=config.get('verify_tls', True), transport=transport) as client:
             try:
-                page = await branding(client, base)
+                page, landing_path = await branding(client, base)
                 if 'mikrotik' in page or 'routeros' in page or config.get('vendor_hint') == 'mikrotik':
                     result = await routeros(client, base, config)
                     return {**result, 'web_url': base}
-                if any(name in page for name in ('ubiquiti', 'ubnt', 'airos')) or config.get('vendor_hint', '').startswith('ubiquiti'):
+                if airmax_branding(page, landing_path) or config.get('vendor_hint', '').startswith('ubiquiti'):
                     data = await device_api.airos(client, base, config, inventory=True)
                     return {'vendor': 'Ubiquiti', 'wireless': [
                         {'name': 'Wireless', 'ssid': ', '.join(data.get('wireless_ssids', [])),
@@ -183,6 +198,7 @@ async def collect_once(address, config, transport=None):
                         'groups': {'System': [{k: short(v) for k, v in data.items() if k in (
                             'device_model', 'firmware_version', 'uptime_seconds', 'cpu_percent', 'memory_percent', 'wireless_clients')}]},
                         'registrations': data.get('wireless_registrations', []),
+                        'detected_vendor': data.get('detected_vendor', 'ubiquiti'),
                         'settings_note': 'For M5 / AC SSID editing, select Ubiquiti SSH. Full settings are in the device web interface.'}
             except PermissionError:
                 raise
@@ -191,7 +207,7 @@ async def collect_once(address, config, transport=None):
     raise RuntimeError('No supported device API responded. Enable RouterOS REST or airOS web access and check the saved connection settings.')
 
 
-def target(db, user, username, address, session_id, profile_id=None, manual=None):
+def target(db, user, username, address, session_id, profile_id=None, manual=None, online_login=False):
     connection, password = sas4.local_user_connection(db, user)
     found = []
     for page in range(1, 6):
@@ -207,6 +223,12 @@ def target(db, user, username, address, session_id, profile_id=None, manual=None
         raise HTTPException(409, 'This online session changed or ended. Refresh Online Users and try again.')
     if manual is not None:
         return manual, 'Temporary login'
+    if online_login:
+        from .customer_probes import configuration
+        config = configuration(db, user)
+        if not config.get('enabled') or not config.get('api_username') or not config.get('api_password'):
+            raise HTTPException(409, 'Save the device username and password in Device login in the sidebar.')
+        return {**config, 'transport': 'auto', 'protocol': 'both' if config.get('allow_http') else 'https'}, 'Online users device login'
     if profile_id:
         return device_login_profiles.selected_configuration(db, user, profile_id)
     managers = sas4_reports.fetch_managers(connection, password)
@@ -248,7 +270,7 @@ class TemporaryLogin(BaseModel):
     transport: Literal['auto', 'web', 'routeros', 'routeros_tls', 'airos_ssh'] = 'web'
     protocol: Literal['https', 'http', 'both'] = 'both'
     port: Optional[int] = Field(default=None, ge=1, le=65535)
-    verify_tls: bool = True
+    verify_tls: Literal[True] = True
     ssh_fingerprint: Optional[str] = Field(default=None, pattern=r'^SHA256:[A-Za-z0-9+/]{43}$')
     snmp_community: SecretStr = Field(default='public', min_length=1, max_length=128)
 
@@ -265,11 +287,12 @@ class DeviceLogin(BaseModel):
     session_id: Optional[str] = Field(default=None, max_length=128)
     profile_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
     login: Optional[TemporaryLogin] = None
+    use_online_login: bool = False
     ssh_fingerprint: Optional[str] = Field(default=None, pattern=r'^SHA256:[A-Za-z0-9+/]{43}$')
 
     @model_validator(mode='after')
     def single_source(self):
-        if self.login is not None and self.profile_id:
+        if sum((self.login is not None, bool(self.profile_id), self.use_online_login)) > 1:
             raise ValueError('Choose a temporary login or a saved profile')
         return self
 
@@ -295,7 +318,7 @@ def resolve_login(data, db, user):
         raise HTTPException(422, 'Invalid device IP address')
     try:
         config, source = target(db, user, data.username, address, data.session_id, data.profile_id,
-                                data.login.configuration() if data.login else None)
+                                data.login.configuration() if data.login else None, data.use_online_login)
     except sas4.SAS4Error:
         raise HTTPException(502, 'Could not verify the current SAS4 online session.') from None
     return address, config, source
@@ -304,6 +327,7 @@ def resolve_login(data, db, user):
 @router.post('/online-device/login')
 def login_device(data: DeviceLogin, user=Depends(sas4.sas4_access), db=Depends(get_db)):
     address, config, source = resolve_login(data, db, user)
+    config = {**config, 'verify_tls': True}
     if data.login is None:
         config = {**config, 'transport': 'auto', 'ssh_fingerprint': data.ssh_fingerprint}
     try:
@@ -350,6 +374,7 @@ def save_device(data: DeviceChange, user=Depends(sas4.sas4_access), db=Depends(g
     address, config, _ = resolve_login(data, db, user)
     if data.connection:
         config = {**config, **data.connection.model_dump()}
+    config['verify_tls'] = True
     if config.get('transport') == 'auto':
         raise HTTPException(409, 'Connect first so settings are saved through the detected connection.')
     if config.get('transport') == 'airos_ssh' and not data.restart_radio:

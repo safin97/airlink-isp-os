@@ -1,7 +1,7 @@
 import json
-from airlink import online_device, sas4, sas4_reports
+from airlink import device_login_profiles, online_device, sas4, sas4_reports
 from airlink.db import SessionLocal
-from airlink.models import DeviceLoginProfile
+from airlink.models import DeviceLoginProfile, DeviceLoginProfileAccess, User
 from airlink.security import cipher
 from test_api import user
 
@@ -48,6 +48,37 @@ def test_profile_permissions_and_validation(client, owner):
         assert client.post(PATH, headers=owner, json={**BODY, **change}).status_code == 422
     create(client, owner)
     assert client.post(PATH, headers=owner, json=BODY).status_code == 409
+
+
+def test_owner_shares_profiles_with_selected_managers_only(client, owner):
+    first_id, first = user(client, owner, 'manager')
+    second_id, second = user(client, owner, 'manager', name='second-manager')
+    created = client.post(PATH, headers=owner, json={**BODY, 'manager_ids': [first_id]})
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    assert profile['manager_ids'] == [first_id]
+    assert profile['assigned_managers'] == [{'id': first_id, 'username': 'manager'}]
+    visible = client.get(PATH, headers=first).json()
+    assert len(visible) == 1 and visible[0]['shared'] is True
+    assert visible[0]['username'] == BODY['username']
+    assert BODY['password'] not in json.dumps(visible)
+    assert client.get(PATH, headers=second).json() == []
+    with SessionLocal() as db:
+        manager_user = db.get(User, first_id)
+        config, source = device_login_profiles.selected_configuration(
+            db, manager_user, profile['id'])
+        assert source == BODY['name']
+        assert config['api_password'] == BODY['password']
+    assert client.put(PATH + '/' + profile['id'], headers=first, json=BODY).status_code == 404
+    updated = client.put(PATH + '/' + profile['id'], headers=owner,
+        json={**BODY, 'password': None, 'manager_ids': [second_id]})
+    assert updated.status_code == 200
+    assert client.get(PATH, headers=first).json() == []
+    assert client.get(PATH, headers=second).json()[0]['shared'] is True
+    assert client.post(PATH, headers=first, json={**BODY, 'manager_ids': [second_id]}).status_code == 403
+    with SessionLocal() as db:
+        assignments = list(db.query(DeviceLoginProfileAccess).all())
+        assert [(row.profile_id, row.manager_id) for row in assignments] == [(profile['id'], second_id)]
 
 
 def test_selected_profile_requires_verified_session_and_own_account(client, owner, monkeypatch):
@@ -97,5 +128,32 @@ def test_profile_migration_preserves_existing_accounts(client, owner):
         migration.upgrade()
         assert 'device_login_profiles' in inspect(connection).get_table_names()
         assert connection.execute(text('select id, username from users')).all() == before
+        migration.downgrade()
+        migration.upgrade()
+
+
+def test_profile_access_migration_preserves_saved_logins(client, owner):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect, text
+    from airlink.db import engine
+    profile_id = create(client, owner)
+    spec = importlib.util.spec_from_file_location('profile_access_migration',
+        Path(__file__).resolve().parents[1] /
+        'database/versions/5f1a6d9c2b40_device_login_profile_access.py')
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with engine.begin() as connection:
+        DeviceLoginProfileAccess.__table__.drop(connection)
+        before = connection.execute(text(
+            'select id, user_id, name, encrypted_config from device_login_profiles')).all()
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+        assert 'device_login_profile_access' in inspect(connection).get_table_names()
+        assert connection.execute(text(
+            'select id, user_id, name, encrypted_config from device_login_profiles')).all() == before
+        assert before[0][0] == profile_id
         migration.downgrade()
         migration.upgrade()

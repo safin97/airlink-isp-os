@@ -3,10 +3,10 @@ import json
 from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from .db import get_db
-from .models import DeviceLoginProfile, audit
-from .security import cipher
+from .models import DeviceLoginProfile, DeviceLoginProfileAccess, User, audit
+from .security import cipher, owner
 from .sas4 import sas4_access
 from .device_access import public_login
 
@@ -22,6 +22,7 @@ class ProfileInput(BaseModel):
     port: Optional[int] = Field(default=None, ge=1, le=65535)
     verify_tls: bool = True
     enabled: bool = True
+    manager_ids: Optional[list[str]] = Field(default=None, max_length=500)
 
     @field_validator('name', 'username')
     @classmethod
@@ -31,7 +32,7 @@ class ProfileInput(BaseModel):
         return value.strip()
 
 
-def get_profile(db, user, profile_id):
+def get_owned_profile(db, user, profile_id):
     row = db.scalar(select(DeviceLoginProfile).where(
         DeviceLoginProfile.id == profile_id, DeviceLoginProfile.user_id == user.id))
     if row is None:
@@ -39,16 +40,44 @@ def get_profile(db, user, profile_id):
     return row
 
 
+def visible_query(user):
+    shared = select(DeviceLoginProfileAccess.profile_id).where(
+        DeviceLoginProfileAccess.manager_id == user.id)
+    return select(DeviceLoginProfile).where(or_(
+        DeviceLoginProfile.user_id == user.id,
+        DeviceLoginProfile.id.in_(shared),
+    ))
+
+
+def get_visible_profile(db, user, profile_id):
+    row = db.scalar(visible_query(user).where(DeviceLoginProfile.id == profile_id))
+    if row is None:
+        raise HTTPException(404, 'Device login profile is not available to your account')
+    return row
+
+
 def configuration(row):
     return json.loads(cipher().decrypt(row.encrypted_config.encode()))
 
 
-def public(row):
-    return {'id': row.id, 'name': row.name, **public_login(configuration(row))}
+def assignments(db, row):
+    return [{'id': user.id, 'username': user.username} for user in db.scalars(
+        select(User).join(DeviceLoginProfileAccess,
+            DeviceLoginProfileAccess.manager_id == User.id).where(
+            DeviceLoginProfileAccess.profile_id == row.id).order_by(User.username))]
+
+
+def public(db, row, user):
+    result = {'id': row.id, 'name': row.name, **public_login(configuration(row)),
+              'shared': row.user_id != user.id}
+    if user.role == 'owner' and row.user_id == user.id:
+        result['assigned_managers'] = assignments(db, row)
+        result['manager_ids'] = [manager['id'] for manager in result['assigned_managers']]
+    return result
 
 
 def selected_configuration(db, user, profile_id):
-    row = get_profile(db, user, profile_id)
+    row = get_visible_profile(db, user, profile_id)
     config = configuration(row)
     if not config.get('enabled'):
         raise HTTPException(409, 'This device login profile is disabled')
@@ -74,15 +103,33 @@ def save(db, user, data, row=None):
         'api_username': data.username, 'api_password': password, 'protocol': data.protocol,
         'port': data.port, 'verify_tls': data.verify_tls, 'enabled': data.enabled}).encode()).decode()
     db.flush()
+    if data.manager_ids is not None:
+        if user.role != 'owner':
+            raise HTTPException(403, 'Only the owner can share device login profiles')
+        manager_ids = set(data.manager_ids)
+        managers = list(db.scalars(select(User).where(
+            User.id.in_(manager_ids), User.role == 'manager', User.active.is_(True)))) if manager_ids else []
+        if {manager.id for manager in managers} != manager_ids:
+            raise HTTPException(422, 'Select active manager accounts only')
+        db.execute(delete(DeviceLoginProfileAccess).where(
+            DeviceLoginProfileAccess.profile_id == row.id))
+        db.add_all(DeviceLoginProfileAccess(profile_id=row.id, manager_id=manager.id)
+                   for manager in managers)
     audit(db, user, 'device_login_profile.save', row.id)
     db.commit()
-    return public(row)
+    return public(db, row, user)
 
 
 @router.get('')
 def list_profiles(user=Depends(sas4_access), db=Depends(get_db)):
-    return [public(row) for row in db.scalars(select(DeviceLoginProfile).where(
-        DeviceLoginProfile.user_id == user.id).order_by(DeviceLoginProfile.name))]
+    return [public(db, row, user) for row in db.scalars(
+        visible_query(user).order_by(DeviceLoginProfile.name))]
+
+
+@router.get('/managers')
+def list_managers(user=Depends(owner), db=Depends(get_db)):
+    return [{'id': row.id, 'username': row.username} for row in db.scalars(
+        select(User).where(User.role == 'manager', User.active.is_(True)).order_by(User.username))]
 
 
 @router.post('', status_code=201)
@@ -92,11 +139,11 @@ def create_profile(data: ProfileInput, user=Depends(sas4_access), db=Depends(get
 
 @router.put('/{profile_id}')
 def update_profile(profile_id: str, data: ProfileInput, user=Depends(sas4_access), db=Depends(get_db)):
-    return save(db, user, data, get_profile(db, user, profile_id))
+    return save(db, user, data, get_owned_profile(db, user, profile_id))
 
 
 @router.delete('/{profile_id}', status_code=204)
 def delete_profile(profile_id: str, user=Depends(sas4_access), db=Depends(get_db)):
-    db.delete(get_profile(db, user, profile_id))
+    db.delete(get_owned_profile(db, user, profile_id))
     audit(db, user, 'device_login_profile.delete', profile_id)
     db.commit()

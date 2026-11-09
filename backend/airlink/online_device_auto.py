@@ -1,19 +1,8 @@
 """Sequential, bounded login selection for one already verified online session."""
 import asyncio
 import httpx
-from . import snmp_discovery, device_management, routeros_native
+from . import device_management, routeros_native
 from .vendor_identity import VENDOR_LABELS
-
-
-async def detect_vendor(address, community):
-    profiles = [{'profile_id': None, 'profile_name': 'Device detection',
-                 'credentials': {'version': version, 'community': community}}
-                for version in ('1', '2c')]
-    try:
-        # Tower discovery's vendor/version filters do not apply to customer detection.
-        return await asyncio.wait_for(snmp_discovery.identify(address, profiles, filter_vendor=False), 4)
-    except Exception:
-        return None
 
 
 def candidates(config, vendor):
@@ -33,18 +22,13 @@ def candidates(config, vendor):
         return [ssh, *web]
     if vendor == 'mikrotik':
         return [*web[:1], native[0], *web[1:], native[1]]
-    return [*web, *native, ssh]
+    return [*web, *native] + ([] if config.get('background') else [ssh])
 
 
 async def detect_and_connect(address, config, transport=None):
     from .online_device import collect_once, with_connection
-    identity = await detect_vendor(address, config.get('snmp_community', 'public'))
-    vendor = identity.get('vendor', 'generic') if identity else 'generic'
-    if vendor not in ('generic', 'mikrotik', 'ubiquiti', 'ubiquiti_m5', 'ubiquiti_ac'):
-        raise RuntimeError('SNMP identified another vendor. Automatic login supports MikroTik and Ubiquiti airOS devices.')
-    metadata = {'detected_vendor': vendor, 'device_type': VENDOR_LABELS[vendor],
-                'snmp_version': ('2' if identity.get('snmp_version') in ('2', '2c') else identity.get('snmp_version')) if identity else None,
-                'detection_source': 'SNMP' if identity and vendor != 'generic' else 'Device API'}
+    vendor = 'generic'
+    metadata = {'detected_vendor': vendor, 'device_type': VENDOR_LABELS[vendor], 'detection_source': 'Device API'}
     attempts, trust, rejected = [], None, False
     options = candidates(config, vendor)
     # A trusted SSH key means the user explicitly requested the SSH settings connection.
@@ -62,7 +46,8 @@ async def detect_and_connect(address, config, transport=None):
                 continue
             attempts.append({'connection': label, 'status': 'Connected'})
             if vendor == 'generic':
-                metadata['detected_vendor'] = 'mikrotik' if result.get('vendor') == 'MikroTik' else 'ubiquiti'
+                metadata['detected_vendor'] = ('mikrotik' if result.get('vendor') == 'MikroTik'
+                                                else result.get('detected_vendor', 'ubiquiti'))
                 metadata['device_type'] = VENDOR_LABELS[metadata['detected_vendor']]
             result = {**with_connection(result, option), **metadata, 'connection_attempts': attempts}
             if trust and result.get('vendor') == 'Ubiquiti':
@@ -81,4 +66,4 @@ async def detect_and_connect(address, config, transport=None):
         return {**trust, **metadata, 'connection_attempts': attempts}
     if rejected:
         raise PermissionError('Device login rejected')
-    raise RuntimeError('Automatic connection failed. Check the device username/password and enable its web, RouterOS API, or airOS SSH service. SNMP detection uses UDP 161.')
+    raise RuntimeError('Automatic connection failed. Check the device username/password and enable its web, RouterOS API, or airOS SSH service.')

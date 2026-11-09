@@ -362,39 +362,39 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
         ? 'Last reported reading. It will update when a new device reading is received.'
         : reading != null
         ? (ssid
-              ? 'Reported SSID from the customer device via SNMP.'
+              ? 'Reported SSID from the authenticated customer device.'
               : ethernet
               ? 'Reported Ethernet link speed from the customer device.'
               : 'Reported signal from the customer device.')
         : switch (row['telemetry_status']) {
-            'checking' =>
-              'Checking SNMP at this user IP. Results refresh automatically.',
+            'connecting' =>
+              'Signing into the device using the saved default device login.',
             'credentials_required' =>
-              'Add SNMP credentials in My account → Customer device access.',
+              'Save a device username and password in Device login in the sidebar.',
             'authentication_failed' =>
-              'The device rejected the API login. Check Customer device access in My account.',
+              'The device rejected the login. Check Device login in the sidebar.',
+            'api_unavailable' =>
+              'Device login service is unavailable. Check API/web access and connection settings.',
             'snmp_unavailable' =>
-              'Device is reachable, but SNMP did not respond. Check SNMP read access on UDP 161 for the AirLink server.',
-            'unreachable' =>
-              'No SNMP response. Check the read community, device SNMP service and network access.',
+              'SNMP v2c/v1 did not respond. Check the community and UDP 161 access.',
+            'disabled' => 'Automatic device readings are disabled.',
             'invalid_address' =>
               'This session does not have a usable customer device IP address.',
-            'pending' =>
-              'Waiting for the customer device SNMP poll. The monitoring service must be running.',
-            'stale' => 'The customer device SNMP readings are out of date.',
-            'failed' => 'The customer device SNMP poll failed.',
+            'pending' => 'Waiting for the background device login.',
+            'stale' => 'The device readings are out of date.',
+            'failed' => 'The device login failed.',
             'available' =>
               'The device did not report an unambiguous reading for this link.',
             _ =>
-              'Add the customer device with this IP address to your monitored devices and assign an SNMP profile.',
+              'Save a device username and password in Device login in the sidebar.',
           };
     return Tooltip(
       message: tr(hint),
       child: reading == null
           ? AppText(
-              (row['telemetry_status'] == 'checking' ||
+              (row['telemetry_status'] == 'connecting' ||
                       row['telemetry_status'] == 'pending')
-                  ? 'Checking…'
+                  ? '—'
                   : 'Unavailable',
             )
           : Text(reading),
@@ -702,13 +702,13 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                               Text(
                                 row['telemetry_source']?.toString() ??
                                     tr(switch (row['telemetry_status']) {
-                                      'checking' => 'Checking…',
+                                      'connecting' => 'Connecting…',
+                                      'disabled' => 'Disabled',
                                       'credentials_required' =>
                                         'Credentials needed',
                                       'authentication_failed' =>
                                         'Login rejected',
-                                      'snmp_unavailable' =>
-                                        'Reachable · SNMP unavailable',
+                                      'api_unavailable' => 'Login unavailable',
                                       'unreachable' => 'No response',
                                       'invalid_address' => 'Invalid IP',
                                       _ => '—',

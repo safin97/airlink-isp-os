@@ -56,6 +56,12 @@ class DeviceLoginProfile(Base):
     __table_args__ = (UniqueConstraint('user_id', 'name'),)
 
 
+class DeviceLoginProfileAccess(Base):
+    __tablename__ = 'device_login_profile_access'
+    profile_id = Column(String(36), ForeignKey('device_login_profiles.id', ondelete='CASCADE'), primary_key=True)
+    manager_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True, index=True)
+
+
 class UserSectionAccess(Base):
     __tablename__ = "user_section_access"
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

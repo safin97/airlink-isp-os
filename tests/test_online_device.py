@@ -137,6 +137,36 @@ def test_airos_https_fallback_and_supported_readings():
     assert 'never-return-this' not in json.dumps(result)
 
 
+@pytest.mark.parametrize(('login_page', 'model', 'expected_vendor'), [
+    ('<title>NanoStation M5</title>', 'NanoStation M5', 'ubiquiti_m5'),
+    ('<title>PowerBeam 5AC</title>', 'PowerBeam 5AC 400', 'ubiquiti_ac'),
+])
+def test_airmax_m5_and_ac_model_login_pages(login_page, model, expected_vendor):
+    calls = []
+    def respond(request):
+        calls.append((request.method, request.url.path))
+        if request.url.path == '/':
+            return httpx.Response(200, text=login_page)
+        if request.url.path == '/login.cgi':
+            body = request.read()
+            assert b'reader' in body and b'secret' in body and b'/status.cgi' in body
+            return httpx.Response(302, headers={'set-cookie': 'AIROS_SESSION=verified; Path=/'})
+        if request.url.path == '/status.cgi':
+            assert request.headers.get('cookie') == 'AIROS_SESSION=verified'
+            return httpx.Response(200, json={
+                'host': {'devmodel': model, 'fwversion': 'test'},
+                'wireless': {'mode': 'sta', 'signal': -62, 'essid': 'AirLink'},
+                'interfaces': [],
+            })
+        pytest.fail('Unexpected device request')
+    result = asyncio.run(online_device.collect_once('10.2.3.4', {
+        'api_username': 'reader', 'api_password': 'secret', 'protocol': 'http',
+    }, httpx.MockTransport(respond)))
+    assert result['detected_vendor'] == expected_vendor
+    assert result['groups']['System'][0]['device_model'] == model
+    assert calls == [('GET', '/'), ('POST', '/login.cgi'), ('GET', '/status.cgi')]
+
+
 def test_public_redirect_cannot_send_credentials_to_another_host():
     calls = []
     def respond(request):
@@ -238,3 +268,10 @@ def test_validation_errors_never_echo_temporary_password(client, owner):
     result = client.post(PATH + '/login', headers=owner,
         json={**MANUAL, 'login': {**MANUAL['login'], 'password': 'PRIVATE' * 200}})
     assert result.status_code == 422 and 'PRIVATE' not in result.text
+
+
+def test_manual_login_requires_tls_verification(client, owner):
+    result = client.post(PATH + '/login', headers=owner, json={
+        **MANUAL, 'login': {**MANUAL['login'], 'verify_tls': False}})
+    assert result.status_code == 422
+    assert MANUAL['login']['password'] not in result.text

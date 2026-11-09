@@ -513,3 +513,23 @@ def test_resolve_online_username_uses_own_account_and_exact_match(client, owner,
     assert client.get(path,headers=manager).status_code == 404
     monkeypatch.setattr(sas4,'fetch_clients',lambda *args,**kwargs: {'clients':[{'id':None,'username':'customer'}],'last_page':1})
     assert client.get(path,headers=manager).status_code == 502
+
+
+@pytest.mark.parametrize('kind,expected', [('dns','DNS settings'), ('refused','refused the connection'),
+    ('network','gateway, DNS and firewall'), ('tls','certificate verification failed'), ('timeout','timed out'),
+    ('protocol','was interrupted')])
+def test_connection_errors_explain_actual_failure_without_leaking_credentials(kind, expected):
+    import socket, ssl
+    inner={'dns':socket.gaierror(-2,'private-resolution-detail'),
+           'refused':ConnectionRefusedError('private-refusal'),
+           'tls':ssl.SSLCertVerificationError(1,'private-certificate-detail')}.get(kind)
+    error=(httpx.ReadTimeout('private-password') if kind=='timeout' else
+           httpx.RemoteProtocolError('private-password') if kind=='protocol' else
+           httpx.ConnectError('private-password'))
+    if inner is not None: error.__cause__=inner
+    def transport(request): raise error
+    with pytest.raises(sas4.SAS4Error) as raised:
+        sas4.fetch_clients(SimpleNamespace(username='test'), 'private-password', transport=httpx.MockTransport(transport))
+    message=str(raised.value)
+    assert expected in message and 'private-' not in message
+    if kind!='tls': assert 'certificate' not in message

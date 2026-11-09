@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
+import 'customer_device_access.dart';
 import 'app_language.dart';
 import 'section_access.dart';
 
@@ -93,7 +94,18 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      AppText('Device login', style: Theme.of(context).textTheme.headlineSmall),
+      const SizedBox(height: 12),
+      CustomerDeviceAccess(api: widget.api),
+      const SizedBox(height: 12),
+      profilesCard(context),
+    ],
+  );
+
+  Widget profilesCard(BuildContext context) => Card(
     child: Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -105,7 +117,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               AppText(
-                'Device Login Profiles',
+                'Saved device logins',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               if (canEditSection(widget.api.user ?? {}, 'isp_card'))
@@ -122,7 +134,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
           ),
           const SizedBox(height: 12),
           const AppText(
-            'Save device usernames and passwords for your account. Choose a profile in ISP Card → Online Users → Open device. Saved passwords cannot be read back.',
+            'Add multiple named usernames and passwords for your devices. Choose a profile in ISP Card → Online Users → Open device. Saved passwords cannot be read back.',
           ),
           if (busy) const LinearProgressIndicator(),
           if (error != null)
@@ -140,7 +152,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
               leading: const Icon(Icons.key_outlined),
               title: Text(row['name']),
               subtitle: Text(
-                '${row['username']} • ${row['protocol']} • ${row['enabled'] == true ? 'Enabled' : 'Disabled'}',
+                '${row['username']} • ${row['protocol']} • ${row['enabled'] == true ? 'Enabled' : 'Disabled'}${row['shared'] == true ? ' • Shared with you' : ''}${(row['assigned_managers'] as List? ?? []).isEmpty ? '' : ' • Managers: ${(row['assigned_managers'] as List).map((manager) => manager['username']).join(', ')}'}',
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -192,8 +204,30 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
   late String protocol = widget.profile?['protocol'] ?? 'both';
   late bool enabled = widget.profile?['enabled'] ?? true,
       verifyTls = widget.profile?['verify_tls'] ?? true;
+  List<dynamic> managers = [];
+  late final Set<String> managerIds = Set<String>.from(
+    (widget.profile?['manager_ids'] as List? ?? []).map((id) => '$id'),
+  );
   bool busy = false;
   String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.api.user?['role'] == 'owner') loadManagers();
+  }
+
+  Future<void> loadManagers() async {
+    try {
+      final result = await widget.api.request(
+        '$deviceLoginProfilesPath/managers',
+      );
+      if (mounted) setState(() => managers = result as List);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
   @override
   void dispose() {
     name.dispose();
@@ -221,6 +255,8 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
           'port': port.text.trim().isEmpty ? null : int.parse(port.text.trim()),
           'verify_tls': verifyTls,
           'enabled': enabled,
+          if (widget.api.user?['role'] == 'owner')
+            'manager_ids': managerIds.toList(),
         },
       );
       if (mounted) {
@@ -331,6 +367,43 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
                   value: enabled,
                   onChanged: busy ? null : (v) => setState(() => enabled = v),
                 ),
+                if (widget.api.user?['role'] == 'owner') ...[
+                  const Divider(),
+                  const Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: AppText(
+                      'Manager access',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: AppText(
+                      'Selected managers can choose this login in Open device. The saved password remains hidden.',
+                    ),
+                  ),
+                  if (managers.isEmpty)
+                    const Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: AppText('No active manager accounts available.'),
+                    ),
+                  for (final manager in managers)
+                    CheckboxListTile(
+                      value: managerIds.contains('${manager['id']}'),
+                      title: Text('${manager['username']}'),
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      onChanged: busy
+                          ? null
+                          : (selected) => setState(() {
+                              if (selected == true) {
+                                managerIds.add('${manager['id']}');
+                              } else {
+                                managerIds.remove('${manager['id']}');
+                              }
+                            }),
+                    ),
+                ],
                 if (error != null)
                   Text(
                     error!,

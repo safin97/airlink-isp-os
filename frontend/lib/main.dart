@@ -2,15 +2,12 @@ import 'app_theme.dart';
 import 'device_login_profiles.dart';
 import 'snmp_visibility_control.dart';
 import 'app_language.dart';
-
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
-
 import 'api.dart';
 import 'branding.dart';
 import 'dashboard_clock.dart';
@@ -19,7 +16,6 @@ import 'noc_screen.dart';
 import 'tower_discovery.dart';
 import 'network_map.dart';
 import 'sas4_clients.dart';
-import 'sas4_connection.dart';
 import 'sas4_reports.dart';
 import 'account_panel.dart';
 import 'payment_settings.dart';
@@ -348,8 +344,7 @@ const pages = [
   'Reports',
   'Software Updates',
   'Settings',
-  'My account',
-  'Device Login Profiles',
+  'Device login',
 ];
 const icons = [
   Icons.space_dashboard_outlined,
@@ -364,7 +359,6 @@ const icons = [
   Icons.assessment_outlined,
   Icons.system_update_alt,
   Icons.settings_outlined,
-  Icons.account_circle_outlined,
   Icons.password_outlined,
 ];
 
@@ -379,15 +373,11 @@ class Operations extends StatefulWidget {
 class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
-  String accountPage = 'Account profile';
   String? settingsPage;
   bool ispDashboard = true;
   bool ispReports = false;
   bool ispOnline = false;
   bool nocExpanded = false;
-  int? nocOnlineUsers;
-  bool fetchingNocUsers = false;
-  String? nocUsersMessage;
   void Function()? stopFullscreen;
   bool mapExpanded = false;
   bool loading = true;
@@ -402,17 +392,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Map<String, List<dynamic>> rows = {};
   List<dynamic> samples = [];
   String? deviceId;
-  Timer? nocTimer;
   StreamSubscription<Map<String, dynamic>>? liveSubscription;
   bool liveConnected = false;
   Api get api => widget.api;
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
   bool get writer => owner || usesSectionPermissions(api.user!);
-  bool get canViewSas4Connection =>
-      writer &&
-      (hasSection(api.user!, 'isp_card') || hasSection(api.user!, 'noc'));
-  Map<String, IconData> get accountPages => accountPagesFor(api.user!);
   bool get inventoryWriter => canEditSection(api.user!, 'towers');
   bool get inventoryDeleter => canDeleteSection(api.user!, 'towers');
   bool get towerDeleter =>
@@ -428,31 +413,23 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       owner ||
       (usesSectionPermissions(api.user!) &&
           hasSection(api.user!, 'software_updates'));
-  bool canPage(int index) {
-    if (pages[index] == 'My account') return true;
-    if (pages[index] == 'Device Login Profiles') {
-      return owner ||
-          (usesSectionPermissions(api.user!) &&
-              hasSection(api.user!, 'isp_card'));
-    }
-    return (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
-        hasSection(
-          api.user!,
-          pageSections.entries
-              .firstWhere((entry) => entry.value == pages[index])
-              .key,
-        );
-  }
+  bool canPage(int index) => pages[index] == 'Device login'
+      ? owner ||
+            (usesSectionPermissions(api.user!) &&
+                hasSection(api.user!, 'isp_card'))
+      : (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
+            hasSection(
+              api.user!,
+              pageSections.entries
+                  .firstWhere((entry) => entry.value == pages[index])
+                  .key,
+            );
 
   void selectAllowedPage() {
-    if (!accountPages.containsKey(accountPage)) {
-      accountPage = 'Account profile';
-    }
     if (canPage(page)) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     page =
         List.generate(pages.length, (i) => i).where(canPage).firstOrNull ?? 0;
-    if (pages[page] == 'My account') accountPage = 'Account profile';
     towerFilter = null;
     placeFilter = null;
     nocExpanded = false;
@@ -478,14 +455,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         if (mounted) api.startLive();
       }),
     );
-    nocTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (pages[page] == 'NOC Screen') unawaited(reloadNocUsers());
-    });
   }
 
   @override
   void dispose() {
-    nocTimer?.cancel();
     liveSubscription?.cancel();
     api.stopLive();
     stopFullscreen?.call();
@@ -563,33 +536,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       unawaited(fullscreen.enterFullscreen());
     } else {
       unawaited(fullscreen.leaveFullscreen());
-    }
-  }
-
-  Future<void> reloadNocUsers() async {
-    if (fetchingNocUsers || !writer || !hasSection(api.user!, 'noc')) return;
-    fetchingNocUsers = true;
-    int? count;
-    String? message;
-    try {
-      final data = await api.request('/integrations/sas4/online-count');
-      final value = data['online_users'];
-      if (value is int && value >= 0) count = value;
-      if (count == null) message = 'Unavailable';
-    } on ApiException catch (e) {
-      message = e.status == 409
-          ? 'Open SAS4 connection below Settings'
-          : 'Unavailable';
-    } catch (_) {
-      message = 'Unavailable';
-    } finally {
-      fetchingNocUsers = false;
-    }
-    if (mounted && (nocOnlineUsers != count || nocUsersMessage != message)) {
-      setState(() {
-        nocOnlineUsers = count;
-        nocUsersMessage = message;
-      });
     }
   }
 
@@ -709,23 +655,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
-  Future<void> openSas4Connection() async {
-    if (!canViewSas4Connection) return;
+  Future<void> openAccount() async {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        content: SizedBox(
-          width: 520,
-          child: SingleChildScrollView(child: Sas4Connection(api: api)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const AppText('Done'),
-          ),
-        ],
-      ),
+      builder: (_) => AccountPanel(api: api),
     );
     if (mounted) setState(() => accountRevision++);
   }
@@ -736,14 +670,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     setState(() {
       page = index;
       settingsPage = null;
-      if (pages[index] == 'My account') accountPage = 'Account profile';
       mapExpanded = pages[index] == 'Network Map';
       nocExpanded = false;
       search = '';
       towerFilter = null;
       placeFilter = null;
     });
-    if (pages[index] == 'NOC Screen') unawaited(reloadNocUsers());
   }
 
   void openTowerDevices(String id) {
@@ -810,21 +742,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   navigate(i);
                                   if (Scaffold.of(context).isDrawerOpen) {
                                     Navigator.pop(context);
-                                  } else if (pages[i] == 'My account') {
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          if (context.mounted) {
-                                            unawaited(
-                                              Scrollable.ensureVisible(
-                                                context,
-                                                alignment: 1,
-                                                duration: const Duration(
-                                                  milliseconds: 180,
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        });
                                   }
                                 },
                               ),
@@ -854,45 +771,21 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     },
                                   ),
                                 ),
-                            if (pages[i] == 'Settings' && canViewSas4Connection)
+                            if (pages[i] == 'Settings')
                               ListTile(
                                 dense: true,
-                                leading: const Icon(Icons.link, size: 22),
-                                title: const AppText('SAS4 connection'),
+                                leading: const Icon(
+                                  Icons.account_circle_outlined,
+                                  size: 22,
+                                ),
+                                title: const AppText('My account'),
                                 onTap: () {
                                   if (Scaffold.of(context).isDrawerOpen) {
                                     Navigator.pop(context);
                                   }
-                                  openSas4Connection();
+                                  openAccount();
                                 },
                               ),
-                            if (pages[i] == 'My account' && page == i)
-                              for (final entry in accountPages.entries)
-                                Padding(
-                                  padding: const EdgeInsetsDirectional.only(
-                                    start: 24,
-                                    top: 3,
-                                  ),
-                                  child: ListTile(
-                                    dense: true,
-                                    selected: accountPage == entry.key,
-                                    selectedColor: blue,
-                                    selectedTileColor: blue.withValues(
-                                      alpha: .15,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    leading: Icon(entry.value, size: 18),
-                                    title: AppText(entry.key),
-                                    onTap: () {
-                                      setState(() => accountPage = entry.key);
-                                      if (Scaffold.of(context).isDrawerOpen) {
-                                        Navigator.pop(context);
-                                      }
-                                    },
-                                  ),
-                                ),
                             if (pages[i] == 'ISP Card' && page == i)
                               for (final dashboard in [true, false])
                                 Padding(
@@ -1137,10 +1030,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       case 'NOC Screen':
         return NocScreen(
           summary: summary,
-          onlineUsers: nocOnlineUsers,
-          onlineUsersMessage: writer
-              ? nocUsersMessage
-              : 'SAS4 manager access required',
           towers: list('towers'),
           devices: list('devices'),
           alerts: list('alerts'),
@@ -1155,13 +1044,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         return towerFilter != null ? inventory('devices') : towersView();
       case 'ISP Card':
         return clients();
-      case 'My account':
-        return AccountPanel(
-          key: ValueKey('account-$accountPage'),
-          api: api,
-          page: accountPage,
-        );
-      case 'Device Login Profiles':
+      case 'Device login':
         return DeviceLoginProfiles(api: api);
       case 'Managers':
         return owner
@@ -1260,49 +1143,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   String value(dynamic x, {String suffix = ''}) =>
       x == null ? 'Unavailable' : '$x$suffix';
-
-  Widget snmpStatus(Map<String, dynamic> device) {
-    final status = device['snmp_status'] ?? 'pending';
-    final (label, hint, color) = switch (status) {
-      'connected' => ('Connected', 'The latest SNMP poll succeeded.', green),
-      'failed' => (
-        'Failed',
-        'The latest SNMP poll failed. Check the version, community or credentials, and UDP 161 access.',
-        red,
-      ),
-      'not_configured' => (
-        'Not configured',
-        'Assign an SNMP profile to this device.',
-        muted,
-      ),
-      'disabled' => (
-        'Disabled',
-        'Monitoring is disabled for this device.',
-        muted,
-      ),
-      'stale' => (
-        'Stale',
-        'SNMP results are out of date. Check the monitoring service.',
-        orange,
-      ),
-      _ => (
-        'Waiting for poll',
-        'No SNMP result yet. The monitoring service must be running.',
-        muted,
-      ),
-    };
-    return Tooltip(
-      message: tr(hint),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.square_rounded, size: 10, color: color),
-          const SizedBox(width: 7),
-          AppText(label, style: TextStyle(color: color, fontSize: 12)),
-        ],
-      ),
-    );
-  }
 
   Widget wirelessClientCount(Map<String, dynamic> device) {
     final count = device['telemetry']?['wireless_clients'];
@@ -1827,9 +1667,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       _ => [
         'IP address',
         'Vendor',
-        'Tower',
         'Status',
-        'SNMP status',
         'ether1 speed',
         'Wireless SSID',
         'Registration clients',
@@ -1928,9 +1766,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                         _ => [
                           row['ip_address'],
                           row['vendor_label'] ?? row['vendor'],
-                          nameOf('towers', row['tower_id']),
                           badge(row['status']),
-                          snmpStatus(row),
                           deviceReading(row, 'ethernet_links'),
                           deviceReading(row, 'wireless'),
                           wirelessClientCount(row),
@@ -2618,32 +2454,37 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'snmp_profile_id',
             'SNMP profile',
             helperText: owner
-                ? 'For Mimosa, choose SNMP v2c. Presets use the public read community. For another community or SNMP v3, choose a saved profile from Settings. Enable SNMP on the device with matching credentials.'
+                ? 'Presets use community public. For another community or SNMP v3, choose a saved profile from Settings. Works with SNMP-enabled models; the device credentials must match.'
                 : null,
             options: owner
                 ? [
                     const Option('', 'None'),
-                    for (final vendor in const {
-                      'mikrotik': 'MikroTik (all models)',
-                      'ubiquiti': 'UBNT (M5 / AC / other models)',
-                    }.entries)
-                      for (final version in ['2c', '1'])
+                    for (final vendor in const [
+                      (
+                        key: 'mikrotik',
+                        label: 'MikroTik (all models)',
+                        versions: ['2c', '1'],
+                      ),
+                      (
+                        key: 'ubiquiti',
+                        label: 'UBNT (M5 / AC / other models)',
+                        versions: ['2c', '1'],
+                      ),
+                      (
+                        key: 'mimosa',
+                        label: 'Mimosa (all models)',
+                        versions: ['2c'],
+                      ),
+                    ])
+                      for (final version in vendor.versions)
                         Option(
                           'preset:${vendor.key}:$version',
-                          '${vendor.value} — SNMP v$version / public',
+                          '${vendor.label} — SNMP v${version == '2c' ? '2c' : version} / public',
                         ),
-                    const Option(
-                      'preset:mimosa:2c',
-                      'Mimosa — SNMP v2c / public',
-                    ),
-                    const Option(
-                      'preset:mimosa:1',
-                      'Mimosa — SNMP v1 / public',
-                    ),
                     ...list('snmp-profiles').map(
                       (profile) => Option(
                         profile['id'],
-                        '${profile['name']} — SNMP v${profile['version'] == '2' ? '2c' : profile['version'] ?? '?'}',
+                        '${profile['name']} — SNMP v${profile['version'] == '2c' ? '2' : profile['version'] ?? '?'}',
                       ),
                     ),
                   ]
@@ -3191,7 +3032,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AppText(
-                'SNMP v1 / v2c communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
+                'SNMP v1 / v2 communities and SNMP v3 credentials are encrypted on the server and cannot be read back.',
                 style: TextStyle(color: muted),
               ),
               const SizedBox(height: 16),
@@ -3200,7 +3041,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   leading: const Icon(Icons.key),
                   title: Text(p['name']),
                   subtitle: Text(
-                    'SNMP v${p['version'] == '2' ? '2c' : p['version'] ?? '3'}',
+                    'SNMP v${p['version'] == '2c' ? '2' : p['version'] ?? '3'}',
                   ),
                 ),
               if (canManageSettings)

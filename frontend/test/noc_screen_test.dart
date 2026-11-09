@@ -109,8 +109,8 @@ void main() {
       await tester.tap(find.widgetWithText(ListTile, 'NOC Screen'));
       await tester.pumpAndSettle();
       expect(find.text('Network operations center'), findsOneWidget);
-      expect(find.text('Online users'), findsOneWidget);
-      expect(find.text('125'), findsOneWidget);
+      expect(find.text('Online users'), findsNothing);
+      expect(find.text('125'), findsNothing);
       await tester.tap(find.text('Expand NOC'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(ListTile, 'Dashboard'), findsNothing);

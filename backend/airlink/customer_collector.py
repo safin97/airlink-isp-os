@@ -7,7 +7,6 @@ from .db import SessionLocal
 from .models import User, SAS4UserConnection
 from .security import cipher
 from . import section_access
-from .client_telemetry import attach_telemetry
 from .customer_probes import configuration, service as probes
 
 log = logging.getLogger(__name__)
@@ -71,14 +70,15 @@ class CustomerCollector:
                     config = configuration(db, user)
                     if not config['enabled'] or not connection.encrypted_password:
                         continue
-                    if not config['snmp_candidates']:
+                    if not config.get('snmp_candidates') and not (
+                            config.get('api_username') and config.get('api_password')):
                         continue
                     page = self.pages.get(user.id, 1)
                     password = cipher().decrypt(connection.encrypted_password.encode()).decode()
                     result = sas4.fetch_clients(connection, password, page=page, count=PAGE_SIZE, online=True)
                     if self.stopped.is_set():
                         return
-                    probes.enrich(db, user, attach_telemetry(db, user, result))
+                    probes.enrich(db, user, result)
                     self.pages[user.id] = page + 1 if page < result['last_page'] else 1
                     self.retry_at.pop(user.id, None)
                 except Exception as exc:

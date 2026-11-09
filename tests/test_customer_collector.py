@@ -7,10 +7,10 @@ from test_api import user
 
 def setup_collector(client, owner, monkeypatch):
     client.put('/api/integrations/sas4', headers=owner, json={'username': 'reader', 'password': 'test-password'}).raise_for_status()
+    client.put('/api/integrations/sas4/device-access', headers=owner, json={'api_username':'device-reader','api_password':'device-password'}).raise_for_status()
     probes = ProbeService()
     probes.pool = SimpleNamespace(submit=lambda *args: None)
     monkeypatch.setattr(collector, 'probes', probes)
-    monkeypatch.setattr(collector, 'attach_telemetry', lambda db, user, result: result)
     return collector.CustomerCollector(), probes
 
 

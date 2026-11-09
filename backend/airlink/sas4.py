@@ -8,6 +8,8 @@ import hashlib
 import json
 import math
 import os
+import socket
+import ssl
 from typing import Optional, Union, Literal
 from contextlib import contextmanager
 import httpx
@@ -19,7 +21,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .db import get_db
 from .models import SAS4UserConnection, CustomerProbeSettings, now, audit
 from .security import cipher, current_user
-from .client_telemetry import attach_telemetry
 from .customer_probes import configuration as probe_configuration, service as customer_probe_service
 
 router = APIRouter(prefix='/api/integrations/sas4', tags=['SAS4'])
@@ -60,6 +61,27 @@ def wire_payload(data):
 
 class SAS4Error(Exception):
     pass
+
+
+def connection_error(exc):
+    """Describe transport failures without exposing request bodies or credentials."""
+    chain, seen, current = [], set(), exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    if any(isinstance(item, ssl.SSLCertVerificationError) or
+           'certificate_verify_failed' in str(item).lower() for item in chain):
+        return 'SAS4 HTTPS certificate verification failed. Check the AirLink PC date/time and the SAS4 server certificate.'
+    if any(isinstance(item, socket.gaierror) for item in chain):
+        return 'The AirLink PC could not resolve airlinkcom.online. Check its DNS settings.'
+    if isinstance(exc, httpx.TimeoutException):
+        return 'SAS4 timed out. Check connectivity from the AirLink PC to airlinkcom.online.'
+    if any(isinstance(item, ConnectionRefusedError) for item in chain):
+        return 'SAS4 refused the connection. Check the server web service and firewall access from the AirLink PC.'
+    if isinstance(exc, httpx.ConnectError):
+        return 'The AirLink PC could not reach SAS4 at ' + DEFAULT_SERVER + '. Check its gateway, DNS and firewall access.'
+    return 'The connection to SAS4 was interrupted. Check network access from the AirLink PC and the SAS4 web service.'
 
 
 def response_json(response, login=False):
@@ -134,10 +156,8 @@ def sas4_session(connection, password, transport=None):
             if not isinstance(token, str) or not token or len(token) > 16384:
                 raise SAS4Error('SAS4 login did not return a token. Check the API username and password.')
             yield client, {'Authorization': 'Bearer ' + token}
-    except httpx.TimeoutException as exc:
-        raise SAS4Error('SAS4 timed out. Check connectivity from the AirLink server.') from exc
     except httpx.HTTPError as exc:
-        raise SAS4Error('Could not connect to SAS4. Check the URL, network and TLS certificate.') from exc
+        raise SAS4Error(connection_error(exc)) from exc
 
 
 def online_record(row):
@@ -240,8 +260,8 @@ class ProbeSettingsInput(BaseModel):
     api_username: str = Field(default='', max_length=128)
     api_password: Optional[str] = Field(default=None, max_length=1024)
     verify_tls: bool = True
-    allow_http: bool = False
-    try_public_snmp: bool = True
+    allow_http: bool = True
+    try_public_snmp: bool = False
 
 
 def public_probe_settings(config):
@@ -373,7 +393,7 @@ def get_online_users(page: int = Query(1, ge=1, le=1000000), search: str = Query
         raise HTTPException(409, 'Configure the SAS4 connection first')
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
-        result = attach_telemetry(db, user, fetch_clients(connection, password, page, search, online=True))
+        result = fetch_clients(connection, password, page, search, online=True)
         return customer_probe_service.enrich(db, user, result)
     except InvalidToken as exc:
         raise HTTPException(503, 'SAS4 credentials cannot be decrypted. Save the password again.') from exc
