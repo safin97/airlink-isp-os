@@ -16,6 +16,7 @@ import 'noc_screen.dart';
 import 'tower_discovery.dart';
 import 'network_map.dart';
 import 'sas4_clients.dart';
+import 'sas4_connection.dart';
 import 'sas4_reports.dart';
 import 'account_panel.dart';
 import 'payment_settings.dart';
@@ -344,6 +345,7 @@ const pages = [
   'Reports',
   'Software Updates',
   'Settings',
+  'My account',
   'Device login',
 ];
 const icons = [
@@ -359,6 +361,7 @@ const icons = [
   Icons.assessment_outlined,
   Icons.system_update_alt,
   Icons.settings_outlined,
+  Icons.account_circle_outlined,
   Icons.password_outlined,
 ];
 
@@ -373,6 +376,7 @@ class Operations extends StatefulWidget {
 class _OperationsState extends State<Operations> with LanguageRebuild {
   int page = 0;
   int accountRevision = 0;
+  String accountPage = 'Account profile';
   String? settingsPage;
   bool ispDashboard = true;
   bool ispReports = false;
@@ -398,6 +402,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
   bool get writer => owner || usesSectionPermissions(api.user!);
+  bool get canViewSas4Connection =>
+      writer &&
+      (hasSection(api.user!, 'isp_card') || hasSection(api.user!, 'noc'));
+  Map<String, IconData> get accountPages => accountPagesFor(api.user!);
   bool get inventoryWriter => canEditSection(api.user!, 'towers');
   bool get inventoryDeleter => canDeleteSection(api.user!, 'towers');
   bool get towerDeleter =>
@@ -413,7 +421,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       owner ||
       (usesSectionPermissions(api.user!) &&
           hasSection(api.user!, 'software_updates'));
-  bool canPage(int index) => pages[index] == 'Device login'
+  bool canPage(int index) => pages[index] == 'My account'
+      ? true
+      : pages[index] == 'Device login'
       ? owner ||
             (usesSectionPermissions(api.user!) &&
                 hasSection(api.user!, 'isp_card'))
@@ -426,6 +436,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             );
 
   void selectAllowedPage() {
+    if (!accountPages.containsKey(accountPage)) {
+      accountPage = 'Account profile';
+    }
     if (canPage(page)) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
     page =
@@ -655,11 +668,23 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
   }
 
-  Future<void> openAccount() async {
+  Future<void> openSas4Connection() async {
+    if (!canViewSas4Connection) return;
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AccountPanel(api: api),
+      builder: (dialogContext) => AlertDialog(
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(child: Sas4Connection(api: api)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const AppText('Done'),
+          ),
+        ],
+      ),
     );
     if (mounted) setState(() => accountRevision++);
   }
@@ -670,6 +695,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     setState(() {
       page = index;
       settingsPage = null;
+      if (pages[index] == 'My account') accountPage = 'Account profile';
       mapExpanded = pages[index] == 'Network Map';
       nocExpanded = false;
       search = '';
@@ -771,19 +797,43 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     },
                                   ),
                                 ),
-                            if (pages[i] == 'Settings')
+                            if (pages[i] == 'My account' && page == i)
+                              for (final entry in accountPages.entries)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 24,
+                                    top: 3,
+                                  ),
+                                  child: ListTile(
+                                    dense: true,
+                                    selected: accountPage == entry.key,
+                                    selectedColor: blue,
+                                    selectedTileColor: blue.withValues(
+                                      alpha: .15,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    leading: Icon(entry.value, size: 18),
+                                    title: AppText(entry.key),
+                                    onTap: () {
+                                      setState(() => accountPage = entry.key);
+                                      if (Scaffold.of(context).isDrawerOpen) {
+                                        Navigator.pop(context);
+                                      }
+                                    },
+                                  ),
+                                ),
+                            if (pages[i] == 'Settings' && canViewSas4Connection)
                               ListTile(
                                 dense: true,
-                                leading: const Icon(
-                                  Icons.account_circle_outlined,
-                                  size: 22,
-                                ),
-                                title: const AppText('My account'),
+                                leading: const Icon(Icons.link, size: 22),
+                                title: const AppText('SAS4 connection'),
                                 onTap: () {
                                   if (Scaffold.of(context).isDrawerOpen) {
                                     Navigator.pop(context);
                                   }
-                                  openAccount();
+                                  openSas4Connection();
                                 },
                               ),
                             if (pages[i] == 'ISP Card' && page == i)
@@ -1044,6 +1094,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         return towerFilter != null ? inventory('devices') : towersView();
       case 'ISP Card':
         return clients();
+      case 'My account':
+        return AccountPanel(
+          key: ValueKey('account-$accountPage-$accountRevision'),
+          api: api,
+          page: accountPage,
+        );
       case 'Device login':
         return DeviceLoginProfiles(api: api);
       case 'Managers':
