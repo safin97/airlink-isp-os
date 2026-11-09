@@ -37,6 +37,11 @@ def main():
         return result.json()
 
     login()
+    starting_version = get('/api/health')['version']
+    expected = STAGE / 'expected-version.txt'
+    if expected.exists():
+        assert starting_version == expected.read_text().strip(), starting_version
+    print(f'RELEASE_QA_STARTING_VERSION={starting_version}', flush=True)
     tower = client.post('/api/towers', json={'name': tower_name, 'location': 'Disposable QA VM'})
     tower.raise_for_status()
     tower_id = tower.json()['id']
@@ -93,8 +98,10 @@ def main():
             env[key] = value
     env['QA_PROFILE_ID'] = profile_id
     check = '''import json,os
-from sqlalchemy import select
-from airlink.db import SessionLocal
+from sqlalchemy import inspect, text
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from airlink.db import Base, engine, SessionLocal
 from airlink.models import SNMPProfile
 from airlink.security import cipher
 with SessionLocal() as db:
@@ -103,7 +110,16 @@ with SessionLocal() as db:
     assert data["username"]=="release-lab"
     assert data["auth_key"]=="Release-lab-auth-2026"
     assert data["priv_key"]=="Release-lab-priv-2026"
+    config=Config('/opt/airlink/database/alembic.ini')
+    config.set_main_option('script_location','/opt/airlink/database')
+    heads=set(ScriptDirectory.from_config(config).get_heads())
+    assert set(db.execute(text('SELECT version_num FROM alembic_version')).scalars())==heads
+    inspector=inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        actual={column['name'] for column in inspector.get_columns(table.name)}
+        assert set(table.columns.keys()) <= actual, table.name
 print("RELEASE_QA_ENCRYPTED_CREDENTIALS_PRESERVED")
+print("RELEASE_QA_MIGRATION_HEAD_AND_SCHEMA_OK")
 '''
     subprocess.run(['runuser', '-u', 'airlink', '--preserve-environment', '--',
                     '/opt/airlink/venv/bin/python', '-c', check], env=env, check=True)
