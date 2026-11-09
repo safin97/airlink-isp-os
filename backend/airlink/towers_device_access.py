@@ -61,7 +61,8 @@ def login(device_id: str, data: LoginInput, user=Depends(access), db=Depends(get
     device = check_device(db, user, device_id)
     config, source = profiles.selected_configuration(db, user, data.profile_id)
     # Resolve the address from authorized inventory, never from the request body.
-    config = {**config, 'transport': 'web', 'vendor_hint': device.vendor}
+    config = {**config, 'transport': 'web',
+              'vendor_hint': 'mikrotik' if device.vendor == 'mikrotik_switch' else device.vendor}
     try:
         result = asyncio.run(online_device.collect(device.ip_address, config))
     except PermissionError:

@@ -10,14 +10,15 @@ from test_api import tower, user
 
 
 @pytest.mark.parametrize('condition', ['connected', 'stale', 'failed', 'disabled', 'pending', 'v1', 'other_vendor'])
-def test_ports_states_freshness_and_scope(client, owner, condition):
+@pytest.mark.parametrize('vendor', ['mikrotik', 'mikrotik_switch'])
+def test_ports_states_freshness_and_scope(client, owner, condition, vendor):
     uid, manager = user(client, owner, 'manager')
     tid = tower(client, owner, manager=uid)
     profile = client.post('/api/snmp-profiles', headers=owner, json={
         'name': 'Switch', 'version': '1' if condition == 'v1' else '2c', 'community': 'test-private'}).json()
     did = client.post('/api/devices', headers=owner, json={
         'name': 'Switch', 'ip_address': '192.0.2.4', 'tower_id': tid,
-        'vendor': 'mimosa' if condition == 'other_vendor' else 'mikrotik',
+        'vendor': 'mimosa' if condition == 'other_vendor' else vendor,
         'snmp_profile_id': profile['id']}).json()['id']
     stamp = now() - timedelta(minutes=10 if condition == 'stale' else 0)
     ports = {
@@ -58,7 +59,8 @@ def test_ports_states_freshness_and_scope(client, owner, condition):
     assert client.get('/api/devices/'+did+'/ethernet-ports').status_code == 401
 
 
-def test_snmp_switch_includes_down_disabled_and_unnamed_ports(monkeypatch):
+@pytest.mark.parametrize('vendor', ['mikrotik', 'mikrotik_switch'])
+def test_snmp_switch_includes_down_disabled_and_unnamed_ports(monkeypatch, vendor):
     tables = {
         snmp.TABLES['if_name']: {'1': 'ether1', '2': 'ether2'},
         snmp.TABLES['if_type']: {'1': 6, '2': 6, '3': 6},
@@ -72,7 +74,7 @@ def test_snmp_switch_includes_down_disabled_and_unnamed_ports(monkeypatch):
     monkeypatch.setattr(snmp, 'read_table', read)
     monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
     monkeypatch.setattr(snmp, 'get_cmd', AsyncMock(return_value=(None, 0, 0, [(snmp.UPTIME, 12300)])))
-    values = asyncio.run(snmp.collect('192.0.2.1', {'version': '2c', 'community': 'public'}, 0, vendor='mikrotik'))
+    values = asyncio.run(snmp.collect('192.0.2.1', {'version': '2c', 'community': 'public'}, 0, vendor=vendor))
     ports = values['interfaces']
     assert set(ports) == {'1', '2', '3'}
     assert ports['2']['admin_status'] == 2 and ports['2']['status'] == 2

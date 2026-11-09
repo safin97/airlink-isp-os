@@ -62,7 +62,8 @@ def test_invalid_api_configuration(client, owner, overrides):
     assert client.post('/api/towers', headers=owner, json=settings(**overrides)).status_code == 422
 
 
-def test_routeros_inventory_resources_and_ap_signal(client):
+@pytest.mark.parametrize('vendor', ['generic', 'mikrotik_switch'])
+def test_routeros_inventory_resources_and_ap_signal(client, vendor):
     requests = []
     def transport(request):
         requests.append(request)
@@ -86,7 +87,7 @@ def test_routeros_inventory_resources_and_ap_signal(client):
         raise AssertionError(path)
     values = asyncio.run(device_api.collect_api('192.168.88.1', {
         'api_username':'monitor','api_password':'test','protocol':'https','port':8443},
-        inventory=True, transport=httpx.MockTransport(transport)))
+        vendor=vendor, inventory=True, transport=httpx.MockTransport(transport)))
     assert values['cpu_percent'] == 18
     assert values['memory_percent'] == 75
     assert values['uptime_seconds'] == 788645

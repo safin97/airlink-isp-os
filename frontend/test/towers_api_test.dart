@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:airlink_isp_os/api.dart';
 import 'package:airlink_isp_os/main.dart';
+import 'package:airlink_isp_os/online_device_dialog.dart';
 
 void main() {
   testWidgets(
@@ -125,9 +126,33 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('North').first);
       await tester.pumpAndSettle();
-      final login = find.byKey(const ValueKey('tower-device-login-d'));
-      await tester.ensureVisible(login);
-      await tester.tap(login);
+      expect(find.byTooltip('Edit'), findsOneWidget);
+      expect(find.byTooltip('Delete'), findsOneWidget);
+      final actionButtons = tester.widgetList<IconButton>(
+        find.descendant(
+          of: find.byType(DataTable),
+          matching: find.byType(IconButton),
+        ),
+      );
+      expect(actionButtons.map((button) => button.tooltip).toList(), [
+        'Edit',
+        'Delete',
+      ]);
+      // The saved-login dialog remains covered independently of inventory actions.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OnlineDeviceDialog(
+            api: api,
+            towerDeviceId: 'd',
+            row: {
+              'id': 'd',
+              'name': 'Roof radio',
+              'username': 'Roof radio',
+              'ip_address': '192.0.2.1',
+            },
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(logins, isEmpty);
       await tester.tap(find.text('Connect'));

@@ -205,6 +205,7 @@ class Device(Base):
     model = Column(String(120), default="")
     snmp_profile_id = Column(String(36), ForeignKey("snmp_profiles.id", ondelete="RESTRICT"))
     poll_interval = Column(Integer, default=60, nullable=False)
+    connection_timeout = Column(Integer, default=2, server_default="2", nullable=False)
     retries = Column(Integer, default=2, nullable=False)
     failure_threshold = Column(Integer, default=3, nullable=False)
     cpu_threshold = Column(Float, default=90, nullable=False)
@@ -213,6 +214,7 @@ class Device(Base):
     failures = Column(Integer, default=0, nullable=False)
     last_poll = Column(DateTime(timezone=True))
     last_success = Column(DateTime(timezone=True))
+    down_since = Column(DateTime(timezone=True))
 
 
 class DeviceAssignment(Base):

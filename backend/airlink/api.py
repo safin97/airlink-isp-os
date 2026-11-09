@@ -688,10 +688,14 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
         detected = metric.values.get('detected_vendor') if metric and device.last_poll else None
         detected = detected if detected in VENDOR_LABELS and detected != 'generic' else None
         effective_vendor = device.vendor if device.vendor != 'generic' else detected or 'generic'
+        device_status = effective_status(device)
+        downtime = (max(0, int((now() - aware(device.down_since)).total_seconds()))
+                    if device_status == 'offline' and device.down_since else None)
         result.append({**public(device), 'detected_vendor': detected,
                        'vendor_label': VENDOR_LABELS.get(effective_vendor, effective_vendor),
                        'vendor_auto': device.vendor == 'generic',
-                       'status': effective_status(device), 'snmp_status': snmp_status(device, metric),
+                       'status': device_status, 'downtime_seconds': downtime,
+                       'snmp_status': snmp_status(device, metric),
                        'api_status': status, 'telemetry': telemetry,
                        'telemetry_at': metric.collected_at if fresh else None})
     return result
@@ -702,8 +706,8 @@ def device_validate(db, user, data, existing=None):
     if data.sector_id and get(db, Sector, data.sector_id).tower_id != data.tower_id:
         raise HTTPException(422, "Sector must belong to device tower")
     if user.role != "owner":
-        expected = (existing.snmp_profile_id, existing.poll_interval, existing.retries, existing.failure_threshold, existing.cpu_threshold) if existing else (None, 60, 2, 3, 90)
-        if (data.snmp_profile_id, data.poll_interval, data.retries, data.failure_threshold, data.cpu_threshold) != expected:
+        expected = (existing.snmp_profile_id, existing.poll_interval, existing.connection_timeout, existing.retries, existing.failure_threshold, existing.cpu_threshold) if existing else (None, 60, 2, 2, 3, 90)
+        if (data.snmp_profile_id, data.poll_interval, data.connection_timeout, data.retries, data.failure_threshold, data.cpu_threshold) != expected:
             raise HTTPException(403, "Only owner configures monitoring credentials and thresholds")
     if data.snmp_profile_id:
         get(db, SNMPProfile, data.snmp_profile_id)
@@ -724,10 +728,11 @@ def edit_device(device_id: str, data: DeviceInput, user=Depends(current_user), d
     obj = check_device(db, user, device_id)
     check_tower(db, user, obj.tower_id, write=True)
     device_validate(db, user, data, obj)
-    if (obj.ip_address, obj.snmp_profile_id, obj.enabled, obj.tower_id, obj.vendor) != (data.ip_address, data.snmp_profile_id, data.enabled, data.tower_id, data.vendor):
+    if (obj.ip_address, obj.snmp_profile_id, obj.enabled, obj.tower_id, obj.vendor, obj.connection_timeout, obj.poll_interval, obj.retries) != (data.ip_address, data.snmp_profile_id, data.enabled, data.tower_id, data.vendor, data.connection_timeout, data.poll_interval, data.retries):
         obj.last_poll = None
         obj.status = "unknown"
         obj.failures = 0
+        obj.down_since = None
     for key, value in data.model_dump().items():
         setattr(obj, key, value)
     commit(db, user, "device.update", obj.id)
@@ -747,6 +752,7 @@ def assign_device_snmp(device_id: str, data: DeviceSNMPAssignment, user=Depends(
         obj.last_poll = None
         obj.status = 'unknown'
         obj.failures = 0
+        obj.down_since = None
     commit(db, user, 'device.snmp_profile.assign', obj.id)
     return {'id': obj.id, 'snmp_profile_id': obj.snmp_profile_id}
 
@@ -847,7 +853,7 @@ def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends
     status = snmp_status(device, metric)
     profile = db.get(SNMPProfile, device.snmp_profile_id) if device.snmp_profile_id else None
     version = json.loads(cipher().decrypt(profile.encrypted_credentials.encode())).get('version', '3') if profile else None
-    supported = vendor == 'mikrotik' and version in ('2', '2c')
+    supported = vendor in ('mikrotik', 'mikrotik_switch') and version in ('2', '2c')
     fresh = supported and status == 'connected'
     ports = []
     # Use the latest poll only: failed polls must not reuse old link states or rates.

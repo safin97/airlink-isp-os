@@ -67,7 +67,7 @@ void main() {
           {
             'id': '1',
             'name': 'North online',
-            'vendor': 'mikrotik',
+            'vendor': 'mikrotik_switch',
             'snmp_status': 'connected',
             'api_status': 'connected',
             'telemetry': {
@@ -89,14 +89,18 @@ void main() {
           {
             'id': '2',
             'name': 'North offline',
+            'vendor': 'mikrotik',
             'snmp_status': 'failed',
             'tower_id': 'north',
             'ip_address': '192.0.2.2',
             'status': 'offline',
+            'downtime_seconds': 7200,
           },
           {
             'id': '3',
             'name': 'North unknown',
+            'vendor': 'generic',
+            'detected_vendor': 'mikrotik_switch',
             'snmp_status': 'pending',
             'tower_id': 'north',
             'ip_address': '192.0.2.3',
@@ -147,27 +151,39 @@ void main() {
       expect(find.text('AirLink North'), findsOneWidget);
       expect(find.text('ether2: 100 Mbps'), findsNothing);
       expect(find.text('CPU'), findsNothing);
-      final ports = find.byKey(const ValueKey('ethernet-ports-1'));
-      await tester.ensureVisible(ports);
-      await tester.tap(ports);
+      expect(find.byTooltip('Manage switch'), findsOneWidget);
+      expect(find.byKey(const ValueKey('manage-switch-2')), findsNothing);
+      expect(find.byKey(const ValueKey('manage-switch-3')), findsNothing);
+      final manage = find.byKey(const ValueKey('manage-switch-1'));
+      await tester.ensureVisible(manage);
+      await tester.tap(manage);
       await tester.pumpAndSettle();
       expect(
-        find.text('3 ports · 1 connected · 1 disconnected · 1 disabled'),
+        find.text('3 ports · 1 running · 2 not running · 0 unknown'),
         findsOneWidget,
       );
       expect(find.text('24.000 Mbps'), findsOneWidget);
-      expect(find.text('0.000 Mbps'), findsOneWidget);
-      expect(
-        find.descendant(
-          of: find.byType(AlertDialog),
-          matching: find.text('Unavailable'),
-        ),
-        findsNWidgets(4),
-      );
-      expect(find.text('Not connected · Link down'), findsOneWidget);
-      expect(find.text('Disabled'), findsOneWidget);
+      expect(find.text('Running'), findsOneWidget);
+      expect(find.text('Not running · Link down'), findsOneWidget);
+      expect(find.text('Not running · Disabled'), findsOneWidget);
+      expect(find.text('Receive traffic (RX)'), findsOneWidget);
+      expect(find.text('Transmit traffic (TX)'), findsOneWidget);
+      expect(find.text('ether1'), findsOneWidget);
+      expect(find.text('ether2'), findsOneWidget);
+      expect(find.text('sfp1'), findsOneWidget);
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
+      for (final action in [
+        'Ethernet ports',
+        'Login device',
+        'Manage device',
+        'Monitoring history',
+      ]) {
+        expect(find.byTooltip(action), findsNothing);
+      }
+      // A viewer still has no write actions.
+      expect(find.byTooltip('Edit'), findsNothing);
+      expect(find.byTooltip('Delete'), findsNothing);
       expect(find.text('Memory'), findsNothing);
       expect(find.text('Registration clients'), findsOneWidget);
       final clients = find.byKey(const ValueKey('wireless-clients-1'));
@@ -184,6 +200,8 @@ void main() {
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
       expect(find.text('1d 1h 1m'), findsOneWidget);
+      expect(find.text('Downtime'), findsOneWidget);
+      expect(find.text('0d 2h 0m'), findsOneWidget);
       expect(find.text('Failed'), findsNothing);
       expect(find.text('Waiting for poll'), findsNothing);
       for (final name in ['North online', 'North offline', 'North unknown']) {

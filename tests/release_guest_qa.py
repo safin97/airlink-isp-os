@@ -50,6 +50,11 @@ def main():
     profile.raise_for_status()
     profile_id = profile.json()['id']
     assert 'encrypted_credentials' not in profile.json()
+    device = client.post('/api/devices', json={'name': f'Release inventory preservation {sequence}',
+        'tower_id': tower_id, 'ip_address': f'192.0.2.{sequence}', 'vendor': 'mikrotik',
+        'snmp_profile_id': profile_id, 'poll_interval': 120, 'enabled': False})
+    device.raise_for_status()
+    device_id = device.json()['id']
     key_before = hashlib.sha256(Path('/etc/airlink/airlink.env').read_bytes()).hexdigest()
     prior_backups = set(Path('/var/backups/airlink').iterdir())
     for name in ('update-public-key.bin', 'update-source.json'):
@@ -82,6 +87,11 @@ def main():
     login()
     assert any(t['id'] == tower_id and t['name'] == tower_name for t in get('/api/towers'))
     assert any(p['id'] == profile_id for p in get('/api/snmp-profiles'))
+    preserved_device = next(d for d in get('/api/devices') if d['id'] == device_id)
+    assert preserved_device['poll_interval'] == 120 and preserved_device['enabled'] is False
+    assert preserved_device['snmp_profile_id'] == profile_id
+    assert preserved_device['connection_timeout'] == 2 and preserved_device['down_since'] is None
+    print('RELEASE_QA_DEVICE_TIMING_MIGRATION_PRESERVED', flush=True)
     assert all(s == 'active' for s in get('/api/system')['services'].values())
     updates = get('/api/updates')
     assert updates['current_version'] == release['version']

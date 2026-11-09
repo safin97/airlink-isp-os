@@ -55,3 +55,4 @@ def save(db, tower_id, data, user):
         device.last_poll = None
         device.status = 'unknown'
         device.failures = 0
+        device.down_since = None

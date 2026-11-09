@@ -58,6 +58,14 @@ async def preview_lifespan(app):
 
 api.app.router.lifespan_context = preview_lifespan
 Base.metadata.create_all(engine)
+# The local preview retains an existing SQLite database between starts.
+from sqlalchemy import inspect, text
+if 'connection_timeout' not in {column['name'] for column in inspect(engine).get_columns('devices')}:
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE devices ADD COLUMN connection_timeout INTEGER NOT NULL DEFAULT 2'))
+if 'down_since' not in {column['name'] for column in inspect(engine).get_columns('devices')}:
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE devices ADD COLUMN down_since DATETIME'))
 # Keep local accounts aligned with the production consolidation migration.
 import importlib.util
 migration_spec = importlib.util.spec_from_file_location('preview_direct_access_roles',

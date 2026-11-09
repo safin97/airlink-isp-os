@@ -95,10 +95,11 @@ class DeviceInput(Strict):
     sector_id: Optional[str] = None
     name: str = Field(min_length=1, max_length=120)
     ip_address: str
-    vendor: Literal["generic", "mikrotik", "ubiquiti", "ubiquiti_m5", "ubiquiti_ac", "mimosa"] = "generic"
+    vendor: Literal["generic", "mikrotik", "mikrotik_switch", "ubiquiti", "ubiquiti_m5", "ubiquiti_ac", "mimosa"] = "generic"
     model: str = Field(default="", max_length=120)
     snmp_profile_id: Optional[str] = None
     poll_interval: int = Field(default=60, ge=15, le=86400)
+    connection_timeout: int = Field(default=2, ge=1, le=30)
     retries: int = Field(default=2, ge=0, le=5)
     failure_threshold: int = Field(default=3, ge=1, le=20)
     cpu_threshold: float = Field(default=90, ge=1, le=100)

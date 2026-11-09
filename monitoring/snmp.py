@@ -118,11 +118,13 @@ async def read_table(engine, auth, target, oid, textual=False):
     return rows
 
 
-async def collect(address, credentials, retries, vendor="generic", link_only=False):
+async def collect(address, credentials, retries, vendor="generic", link_only=False, timeout=1):
+    if vendor == 'mikrotik_switch':
+        vendor = 'mikrotik'
     auth = authentication(credentials)
     engine = SnmpEngine()
     try:
-        target = await UdpTransportTarget.create((address, 161), timeout=1, retries=retries)
+        target = await UdpTransportTarget.create((address, 161), timeout=timeout, retries=retries)
         error, status, _, binds = await get_cmd(engine, auth, target, ContextData(), ObjectType(ObjectIdentity(UPTIME)), lookupMib=False)
         if error or status:
             raise RuntimeError("SNMP request failed (check version, credentials and device ACL)")

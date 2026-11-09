@@ -9,6 +9,9 @@ import 'package:airlink_isp_os/main.dart';
 void main() {
   for (final scenario in [
     (vendor: 'mikrotik', add: false, profile: 'private'),
+    (vendor: 'mikrotik_switch', add: false, profile: 'private'),
+    (vendor: 'mikrotik_switch', add: false, profile: null),
+    (vendor: 'mikrotik_switch', add: true, profile: null),
     (vendor: 'ubiquiti_ac', add: false, profile: 'private'),
     (vendor: 'mimosa', add: false, profile: 'private'),
     (vendor: 'mimosa', add: false, profile: null),
@@ -32,6 +35,8 @@ void main() {
           'vendor': vendor,
           'snmp_profile_id': scenario.profile,
           'status': 'online',
+          'connection_timeout': 8,
+          'poll_interval': 120,
         };
         final api = Api(
           client: MockClient((request) async {
@@ -109,7 +114,13 @@ void main() {
             find.widgetWithText(TextFormField, 'Management IP'),
             '192.0.2.1',
           );
-          for (final selection in [('Tower', 'North'), ('Vendor', 'Mimosa')]) {
+          for (final selection in [
+            ('Tower', 'North'),
+            (
+              'Vendor',
+              vendor == 'mikrotik_switch' ? 'MikroTik switch' : 'Mimosa',
+            ),
+          ]) {
             final dropdown = find.byWidgetPredicate(
               (w) =>
                   w is DropdownButtonFormField<String> &&
@@ -129,6 +140,7 @@ void main() {
         );
         final label = switch (vendor) {
           'mikrotik' => 'MikroTik switch',
+          'mikrotik_switch' => 'MikroTik switch',
           'ubiquiti_ac' => 'UBNT (M5 / AC / other models)',
           _ => 'Mimosa (all models)',
         };
@@ -168,11 +180,38 @@ void main() {
           isTrue,
         );
         expect(writes, isEmpty);
+        final timeout = find.widgetWithText(
+          TextFormField,
+          'Connection timeout (seconds)',
+        );
+        final interval = find.widgetWithText(
+          TextFormField,
+          'Update interval (seconds)',
+        );
+        expect(
+          tester.widget<TextFormField>(timeout).controller!.text,
+          scenario.add ? '2' : '8',
+        );
+        expect(
+          tester.widget<TextFormField>(interval).controller!.text,
+          scenario.add ? '60' : '120',
+        );
+        await tester.ensureVisible(timeout);
+        await tester.enterText(timeout, '0');
+        await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+        await tester.pumpAndSettle();
+        expect(writes, isEmpty);
+        expect(find.text('Enter a value from 1 to 30'), findsOneWidget);
+        await tester.enterText(timeout, '5');
+        await tester.ensureVisible(interval);
+        await tester.enterText(interval, '90');
         await tester.tap(find.widgetWithText(FilledButton, 'Save'));
         await tester.pumpAndSettle();
         expect(writes.single['snmp_profile_id'], 'public-profile');
         expect(writes.single['vendor'], vendor);
         expect(writes.single['ip_address'], '192.0.2.1');
+        expect(writes.single['connection_timeout'], 5);
+        expect(writes.single['poll_interval'], 90);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },

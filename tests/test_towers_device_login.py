@@ -32,11 +32,17 @@ def test_towers_profile_save_edit_and_no_password_readback(client, owner):
     assert client.delete(PATH+'/'+pid, headers=owner).status_code == 204
 
 
-def test_tower_login_requires_both_device_scope_and_profile_grant(client, owner, monkeypatch):
+@pytest.mark.parametrize('vendor', ['generic', 'mikrotik_switch'])
+def test_tower_login_requires_both_device_scope_and_profile_grant(client, owner, monkeypatch, vendor):
     mid, manager = user(client, owner, 'manager')
     _, other = user(client, owner, 'manager', 'other')
     tid = tower(client, owner, manager=mid)
     did = device(client, owner, tid)
+    edited = client.put('/api/devices/'+did, headers=owner, json={
+        'tower_id': tid, 'name': 'Switch', 'ip_address': '192.0.2.1', 'vendor': vendor})
+    assert edited.status_code == 200 and edited.json()['vendor'] == vendor
+    saved = client.get('/api/devices', headers=owner).json()[0]
+    assert saved['vendor_label'] == ('MikroTik switch' if vendor == 'mikrotik_switch' else 'Unknown / Generic')
     outside = device(client, owner, tower(client, owner, 'Other'), '192.0.2.2')
     pid = client.post(PATH, headers=owner, json={**BODY, 'manager_ids': [mid]}).json()['id']
     client.put('/api/users/'+mid+'/sections', headers=owner,
@@ -56,6 +62,7 @@ def test_tower_login_requires_both_device_scope_and_profile_grant(client, owner,
     assert BODY['password'] not in response.text
     address, config = collect.call_args.args
     assert address == '192.0.2.1'
+    assert config['vendor_hint'] == ('mikrotik' if vendor == 'mikrotik_switch' else 'generic')
     assert config['api_username'] == 'reader' and config['api_password'] == BODY['password']
     assert config['protocol'] == 'https' and config['port'] == 8443 and config['verify_tls'] is True
     assert collect.call_count == 1

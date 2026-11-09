@@ -1,7 +1,7 @@
 """Conservative device identity classification; unknown devices stay generic."""
 import re
 
-VENDOR_LABELS = {'generic':'Unknown / Generic', 'mikrotik':'MikroTik',
+VENDOR_LABELS = {'generic':'Unknown / Generic', 'mikrotik':'MikroTik', 'mikrotik_switch':'MikroTik switch',
     'ubiquiti':'Ubiquiti', 'ubiquiti_m5':'Ubiquiti airMAX M5',
     'ubiquiti_ac':'Ubiquiti airMAX AC', 'mimosa':'Mimosa'}
 

@@ -18,15 +18,22 @@ log = logging.getLogger("airlink.monitor")
 cache = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
 
 
-async def ping(address, retries):
+async def ping(address, retries, timeout=2):
     for _ in range(retries + 1):
-        proc = await asyncio.create_subprocess_exec("ping", "-n", "-c", "1", "-W", "2000" if sys.platform == "darwin" else "2", address,
+        proc = await asyncio.create_subprocess_exec("ping", "-n", "-c", "1", "-W", str(timeout * 1000 if sys.platform == "darwin" else timeout), address,
                                                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         try:
-            await asyncio.wait_for(proc.wait(), timeout=4)
+            await asyncio.wait_for(proc.wait(), timeout=timeout + 1)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            pass
+        finally:
+            # Also reap the child when the overall ping budget cancels this task.
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                await proc.wait()
         if proc.returncode == 0:
             return True
     return False
@@ -42,19 +49,26 @@ async def poll(device_id, semaphore):
                 device = db.get(Device, device_id)
                 if not device or not device.enabled:
                     return
-                values = {"icmp_up": await ping(device.ip_address, device.retries)}
+                # Total network budget stays below the 120-second polling lock.
+                try:
+                    icmp_up = await asyncio.wait_for(ping(device.ip_address, device.retries,
+                        timeout=device.connection_timeout), timeout=30)
+                except asyncio.TimeoutError:
+                    icmp_up = False
+                values = {"icmp_up": icmp_up}
                 if device.snmp_profile_id:
                     profile = db.get(SNMPProfile, device.snmp_profile_id)
                     try:
                         credentials = json.loads(cipher().decrypt(profile.encrypted_credentials.encode()))
-                        values.update(await asyncio.wait_for(collect(device.ip_address, credentials, device.retries, vendor="auto" if device.vendor == "generic" else device.vendor), timeout=45))
+                        values.update(await asyncio.wait_for(collect(device.ip_address, credentials, device.retries, vendor="auto" if device.vendor == "generic" else device.vendor, timeout=device.connection_timeout), timeout=45))
                     except Exception:
                         values.update(snmp_up=False, snmp_error="SNMP unavailable; check version, credentials, ACL and supported MIBs")
                 api_config = tower_configuration(db, device.tower_id)
                 if api_config['enabled']:
                     try:
                         api_values = await asyncio.wait_for(collect_api(device.ip_address, api_config,
-                            vendor=values.get('detected_vendor', device.vendor), inventory=True), timeout=30)
+                            vendor=values.get('detected_vendor', device.vendor), inventory=True,
+                            timeout=device.connection_timeout), timeout=30)
                         detected = merge_vendor(values.get('detected_vendor'), api_values.get('detected_vendor'))
                         if detected != 'generic':
                             api_values['detected_vendor'] = detected
@@ -69,11 +83,13 @@ async def poll(device_id, semaphore):
                         values.update(api_up=False, api_status='failed')
                 timestamp = now()
                 # Discard results if configuration was changed or device deleted during network I/O.
-                original = (device.ip_address, device.tower_id, device.snmp_profile_id, device.vendor)
+                original = (device.ip_address, device.tower_id, device.snmp_profile_id, device.vendor,
+                            device.connection_timeout, device.poll_interval, device.retries)
                 db.expire_all()
                 current = db.get(Device, device_id)
                 if (not current or not current.enabled or
-                    original != (current.ip_address, current.tower_id, current.snmp_profile_id, current.vendor) or
+                    original != (current.ip_address, current.tower_id, current.snmp_profile_id, current.vendor,
+                                 current.connection_timeout, current.poll_interval, current.retries) or
                     tower_configuration(db, current.tower_id) != api_config):
                     return
                 device = current
@@ -101,6 +117,11 @@ async def poll(device_id, semaphore):
                     obj.speed_mbps = interface.get("speed_mbps")
                     obj.oper_status = interface.get("status")
                 up = values["icmp_up"] or values.get("snmp_up", False) or values.get("api_up", False)
+                if up:
+                    device.down_since = None
+                elif device.down_since is None or device.failures == 0 or device.last_poll is None:
+                    # Count from the first observed failure, including threshold checks.
+                    device.down_since = timestamp
                 device.last_poll = timestamp
                 device.failures = 0 if up else device.failures + 1
                 if up:

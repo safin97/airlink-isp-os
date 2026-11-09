@@ -28,8 +28,8 @@ import 'section_access.dart';
 import 'role_management.dart';
 import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
-import 'online_device_dialog.dart';
 import 'ethernet_ports_dialog.dart';
+import 'ip_address_sort.dart';
 import 'device_api_access_panel.dart';
 import 'diagnostics_screen.dart';
 
@@ -1235,6 +1235,24 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
+  Widget deviceDowntime(Map<String, dynamic> device) {
+    final seconds = device['downtime_seconds'];
+    if (device['status'] == 'online') return const Text('—');
+    if (device['status'] != 'offline' || seconds is! num) {
+      return const AppText('Unavailable');
+    }
+    final duration = seconds.toInt();
+    return Tooltip(
+      message:
+          'Time since the first failed monitoring check'
+          '${device['down_since'] == null ? '' : '\nSince: ${device['down_since']}'}',
+      child: Text(
+        '${duration ~/ 86400}d ${(duration % 86400) ~/ 3600}h ${(duration % 3600) ~/ 60}m',
+        style: TextStyle(color: red),
+      ),
+    );
+  }
+
   Widget deviceReading(Map<String, dynamic> device, String field) {
     final data = Map<String, dynamic>.from(device['telemetry'] ?? {});
     String reading = 'Unavailable';
@@ -1738,18 +1756,22 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   );
   Widget inventory(String resource) {
     final data = filtered(resource);
+    if (resource == 'devices') {
+      data.sort((a, b) => compareIpAddresses(a['ip_address'], b['ip_address']));
+    }
     final columns = switch (resource) {
       'towers' => ['Name', 'Location', 'Management IP', 'Sectors', 'Status'],
       'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
       'users' => ['Username', 'Role', 'Active', 'Created'],
       _ => [
-        'IP address',
-        'Vendor',
-        'Status',
-        'ether1 speed',
         'Wireless SSID',
         'Registration clients',
+        'ether1 speed',
         'Uptime',
+        'Downtime',
+        'IP address',
+        'Status',
+        'Vendor',
       ],
     };
     return Column(
@@ -1842,13 +1864,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           row['created_at']?.toString().substring(0, 10),
                         ],
                         _ => [
-                          row['ip_address'],
-                          row['vendor_label'] ?? row['vendor'],
-                          badge(row['status']),
-                          deviceReading(row, 'ethernet_links'),
                           deviceReading(row, 'wireless'),
                           wirelessClientCount(row),
+                          deviceReading(row, 'ethernet_links'),
                           deviceReading(row, 'uptime_seconds'),
+                          deviceDowntime(row),
+                          row['ip_address'],
+                          badge(row['status']),
+                          row['vendor_label'] ?? row['vendor'],
                         ],
                       };
                       return DataRow(
@@ -1875,71 +1898,20 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       color: blue,
                                     ),
                                   ),
-                                if (resource == 'devices')
-                                  if ((row['vendor'] == 'generic'
-                                          ? row['detected_vendor']
-                                          : row['vendor']) ==
-                                      'mikrotik')
-                                    IconButton(
-                                      key: ValueKey(
-                                        'ethernet-ports-${row['id']}',
-                                      ),
-                                      tooltip: 'Ethernet ports',
-                                      onPressed: () => showDialog<void>(
-                                        context: context,
-                                        builder: (_) => EthernetPortsDialog(
-                                          api: api,
-                                          device: Map<String, dynamic>.from(
-                                            row,
-                                          ),
-                                        ),
-                                      ),
-                                      icon: const Icon(
-                                        Icons.settings_ethernet,
-                                        size: 19,
-                                      ),
-                                    ),
                                 if (resource == 'devices' &&
-                                    canPage(pages.indexOf('Towers API')))
+                                    row['vendor'] == 'mikrotik_switch')
                                   IconButton(
-                                    key: ValueKey(
-                                      'tower-device-login-${row['id']}',
-                                    ),
-                                    tooltip: 'Login device',
+                                    key: ValueKey('manage-switch-${row['id']}'),
+                                    tooltip: 'Manage switch',
                                     onPressed: () => showDialog<void>(
                                       context: context,
-                                      builder: (_) => OnlineDeviceDialog(
+                                      builder: (_) => EthernetPortsDialog(
                                         api: api,
-                                        towerDeviceId: row['id'],
-                                        row: {
-                                          ...Map<String, dynamic>.from(row),
-                                          'username': row['name'],
-                                        },
+                                        device: Map<String, dynamic>.from(row),
                                       ),
                                     ),
-                                    icon: const Icon(Icons.login, size: 19),
-                                  ),
-                                if (resource == 'devices')
-                                  IconButton(
-                                    tooltip: 'Manage device',
-                                    onPressed: () => manageDevice(
-                                      Map<String, dynamic>.from(row),
-                                    ),
                                     icon: const Icon(
-                                      Icons.settings_input_antenna,
-                                      size: 19,
-                                    ),
-                                  ),
-                                if (resource == 'devices' &&
-                                    hasSection(api.user!, 'monitoring'))
-                                  IconButton(
-                                    tooltip: 'Monitoring history',
-                                    onPressed: () {
-                                      navigate(pages.indexOf('Monitoring'));
-                                      loadMetrics(row['id']);
-                                    },
-                                    icon: const Icon(
-                                      Icons.show_chart,
+                                      Icons.settings_ethernet,
                                       size: 19,
                                     ),
                                   ),
@@ -2565,6 +2537,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             options: const [
               Option('generic', 'Auto detect (SNMP / API)'),
               Option('mikrotik', 'MikroTik'),
+              Option('mikrotik_switch', 'MikroTik switch'),
               Option('ubiquiti', 'Ubiquiti (other airMAX)'),
               Option('ubiquiti_m5', 'Ubiquiti airMAX M5'),
               Option('ubiquiti_ac', 'Ubiquiti airMAX AC'),
@@ -2618,10 +2591,24 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 : null,
           ),
           FieldSpec(
-            'poll_interval',
-            'Poll interval (seconds)',
+            'connection_timeout',
+            'Connection timeout (seconds)',
             kind: 'int',
+            required: true,
+            initial: 2,
+            min: 1,
+            max: 30,
+            helperText: 'Wait per monitoring connection attempt: 1–30 seconds.',
+          ),
+          FieldSpec(
+            'poll_interval',
+            'Update interval (seconds)',
+            kind: 'int',
+            required: true,
             initial: 60,
+            min: 15,
+            max: 86400,
+            helperText: 'Time between monitoring checks: 15–86400 seconds.',
           ),
           FieldSpec('retries', 'Retry limit', kind: 'int', initial: 2),
           FieldSpec(
@@ -3247,6 +3234,7 @@ class FieldSpec {
   final dynamic initial;
   final List<Option>? options;
   final String? helperText;
+  final num? min, max;
   FieldSpec(
     this.key,
     this.label, {
@@ -3255,6 +3243,8 @@ class FieldSpec {
     this.initial,
     this.options,
     this.helperText,
+    this.min,
+    this.max,
   });
 }
 
@@ -3293,22 +3283,27 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
       values[f.key] = v;
       controls[f.key] = TextEditingController(text: v?.toString() ?? '');
     }
-    defaultMimosaProfile();
+    defaultVendorProfile();
   }
 
   static const mimosaPublicProfile = 'preset:mimosa:2c';
 
-  void defaultMimosaProfile() {
-    if (values['vendor'] == 'mimosa' &&
+  void defaultVendorProfile() {
+    final preset = switch (values['vendor']) {
+      'mimosa' => mimosaPublicProfile,
+      'mikrotik_switch' => 'preset:mikrotik_switch:2c',
+      _ => null,
+    };
+    if (preset != null &&
         (values['snmp_profile_id'] == null ||
             values['snmp_profile_id'] == '') &&
         !changedSelections.contains('snmp_profile_id') &&
         widget.fields.any(
           (f) =>
               f.kind == 'snmp_profile' &&
-              (f.options?.any((o) => o.value == mimosaPublicProfile) ?? false),
+              (f.options?.any((o) => o.value == preset) ?? false),
         )) {
-      values['snmp_profile_id'] = mimosaPublicProfile;
+      values['snmp_profile_id'] = preset;
     }
   }
 
@@ -3536,13 +3531,17 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                             onChanged: (v) => setState(() {
                               values[f.key] = v;
                               changedSelections.add(f.key);
-                              if (f.key == 'vendor') defaultMimosaProfile();
+                              if (f.key == 'vendor') defaultVendorProfile();
                             }),
                           )
                         : TextFormField(
                             controller: controls[f.key],
                             obscureText: f.kind == 'password',
-                            decoration: InputDecoration(labelText: tr(f.label)),
+                            decoration: InputDecoration(
+                              labelText: tr(f.label),
+                              helperText: f.helperText,
+                              helperMaxLines: 3,
+                            ),
                             validator: (v) {
                               if (f.required && (v == null || v.isEmpty)) {
                                 return 'Required';
@@ -3558,6 +3557,12 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
                                   f.kind == 'int' &&
                                   int.tryParse(v) == null) {
                                 return 'Enter an integer';
+                              }
+                              final number = num.tryParse(v ?? '');
+                              if (number != null &&
+                                  ((f.min != null && number < f.min!) ||
+                                      (f.max != null && number > f.max!))) {
+                                return 'Enter a value from ${f.min} to ${f.max}';
                               }
                               return null;
                             },

@@ -218,13 +218,15 @@ async def airos(client, base, credentials, inventory=False):
     return airos_values(json.loads(raw), inventory=inventory)
 
 
-async def collect_api(address, credentials, vendor='generic', transport=None, inventory=False):
+async def collect_api(address, credentials, vendor='generic', transport=None, inventory=False, timeout=None):
+    if vendor == 'mikrotik_switch':
+        vendor = 'mikrotik'
     host = '[' + address + ']' if ':' in address else address
     schemes = [credentials['protocol']] if credentials.get('protocol') in ('http', 'https') else (['https', 'http'] if credentials.get('protocol') == 'both' or credentials.get('allow_http') else ['https'])
     for scheme in schemes:
         port = credentials.get('port')
         base = scheme + '://' + host + (':' + str(port) if port else '')
-        async with httpx.AsyncClient(timeout=httpx.Timeout(2, connect=1), follow_redirects=False,
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout) if timeout is not None else httpx.Timeout(2, connect=1), follow_redirects=False,
                                      trust_env=False, verify=credentials.get('verify_tls', True), transport=transport) as client:
             try:
                 status, root = await request(client, 'GET', base + '/')
