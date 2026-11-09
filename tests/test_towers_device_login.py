@@ -48,9 +48,8 @@ def test_tower_login_requires_both_device_scope_and_profile_grant(client, owner,
     client.put('/api/users/'+mid+'/sections', headers=owner,
                json={'sections': ['towers'], 'editable_sections': [], 'deletable_sections': []}).raise_for_status()
     visible = client.get(PATH, headers=manager)
-    assert visible.status_code == 200 and visible.json()[0]['id'] == pid
-    assert visible.json()[0]['shared'] is True
-    assert client.get(PATH, headers=other).json() == []
+    assert visible.status_code == 403
+    assert client.get(PATH, headers=other).status_code == 403
     assert client.post(PATH, headers=manager, json=BODY).status_code == 403
     assert client.put(PATH+'/'+pid, headers=manager, json=BODY).status_code == 403
     assert client.delete(PATH+'/'+pid, headers=manager).status_code == 403

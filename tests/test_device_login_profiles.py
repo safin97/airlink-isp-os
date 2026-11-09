@@ -27,10 +27,10 @@ def test_profiles_are_encrypted_account_scoped_and_passwords_preserved(client, o
     assert updated.status_code == 200 and updated.json()['has_password'] is True
     assert client.put(PATH + '/' + pid, headers=owner, json={**BODY, 'username': 'other', 'password': None}).status_code == 422
     _, manager = user(client, owner, 'manager')
-    assert client.get(PATH, headers=manager).json() == []
-    assert client.put(PATH + '/' + pid, headers=manager, json=BODY).status_code == 404
-    assert client.delete(PATH + '/' + pid, headers=manager).status_code == 404
-    assert client.post(PATH, headers=manager, json=BODY).status_code == 201
+    assert client.get(PATH, headers=manager).status_code == 403
+    assert client.put(PATH + '/' + pid, headers=manager, json=BODY).status_code == 403
+    assert client.delete(PATH + '/' + pid, headers=manager).status_code == 403
+    assert client.post(PATH, headers=manager, json=BODY).status_code == 403
     assert client.delete(PATH + '/' + pid, headers=owner).status_code == 204
     assert client.get(PATH, headers=owner).json() == []
 
@@ -39,7 +39,7 @@ def test_profile_permissions_and_validation(client, owner):
     mid, manager = user(client, owner, 'manager')
     assert client.put('/api/users/' + mid + '/sections', headers=owner, json={
         'sections': ['isp_card'], 'editable_sections': [], 'deletable_sections': []}).status_code == 200
-    assert client.get(PATH, headers=manager).status_code == 200
+    assert client.get(PATH, headers=manager).status_code == 403
     assert client.post(PATH, headers=manager, json=BODY).status_code == 403
     assert client.delete(PATH + '/missing', headers=manager).status_code == 403
     assert client.put('/api/users/' + mid + '/sections', headers=owner, json={'sections': []}).status_code == 200
@@ -58,23 +58,20 @@ def test_owner_shares_profiles_with_selected_managers_only(client, owner):
     profile = created.json()
     assert profile['manager_ids'] == [first_id]
     assert profile['assigned_managers'] == [{'id': first_id, 'username': 'manager'}]
-    visible = client.get(PATH, headers=first).json()
-    assert len(visible) == 1 and visible[0]['shared'] is True
-    assert visible[0]['username'] == BODY['username']
-    assert BODY['password'] not in json.dumps(visible)
-    assert client.get(PATH, headers=second).json() == []
+    assert client.get(PATH, headers=first).status_code == 403
+    assert client.get(PATH, headers=second).status_code == 403
     with SessionLocal() as db:
         manager_user = db.get(User, first_id)
         config, source = device_login_profiles.selected_configuration(
             db, manager_user, profile['id'])
         assert source == BODY['name']
         assert config['api_password'] == BODY['password']
-    assert client.put(PATH + '/' + profile['id'], headers=first, json=BODY).status_code == 404
+    assert client.put(PATH + '/' + profile['id'], headers=first, json=BODY).status_code == 403
     updated = client.put(PATH + '/' + profile['id'], headers=owner,
         json={**BODY, 'password': None, 'manager_ids': [second_id]})
     assert updated.status_code == 200
-    assert client.get(PATH, headers=first).json() == []
-    assert client.get(PATH, headers=second).json()[0]['shared'] is True
+    assert client.get(PATH, headers=first).status_code == 403
+    assert client.get(PATH, headers=second).status_code == 403
     assert client.post(PATH, headers=first, json={**BODY, 'manager_ids': [second_id]}).status_code == 403
     with SessionLocal() as db:
         assignments = list(db.query(DeviceLoginProfileAccess).all())

@@ -34,7 +34,12 @@ def test_gateway_credentials_are_encrypted_and_scoped(client, owner):
         assert CREDENTIALS['secret'] not in config.encrypted_credentials
         assert payments.decoded(config.encrypted_credentials) == CREDENTIALS
     _, manager = user(client, owner, 'manager', 'other-merchant')
-    assert not any(x['configured'] for x in client.get('/api/payments/gateways', headers=manager).json())
+    assert client.get('/api/payments/gateways', headers=manager).status_code == 403
+    assert client.get('/api/payments/methods', headers=manager).json() == [
+        {'provider': p, 'configured': False, 'environment': 'sandbox'} for p in ('fib', 'fastpay')]
+    assert client.get('/api/payments/methods', headers=owner).json() == [
+        {'provider': 'fib', 'configured': True, 'environment': 'sandbox'},
+        {'provider': 'fastpay', 'configured': False, 'environment': 'sandbox'}]
     _, viewer = user(client, owner, 'viewer', 'payment-viewer')
     assert client.get('/api/payments/gateways', headers=viewer).status_code == 403
     assert client.put('/api/payments/gateways/fib', headers=owner, json={'merchant_id': 'new-id', 'environment': 'sandbox'}).status_code == 422

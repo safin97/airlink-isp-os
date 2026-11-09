@@ -113,7 +113,7 @@ def test_delegated_settings_and_updates_are_opt_in_and_revocable(client, owner, 
         assert saved.status_code == 201
         profiles = client.get('/api/snmp-profiles', headers=manager)
         assert profiles.status_code == 200 and 'private-value' not in profiles.text
-        assert client.get('/api/payments/gateways', headers=manager).status_code == 200
+        assert client.get('/api/payments/gateways', headers=manager).status_code == 403
         assert client.get('/api/integrations/sas4/clients', headers=manager).status_code == 403
         assert client.post('/api/system/restart', headers=manager, json={'confirm':True}).status_code == 403
         assert client.get('/api/updates', headers=manager).status_code == 403
@@ -149,7 +149,10 @@ def test_readonly_manager_cannot_write_through_direct_requests(client, owner, me
     readonly_grant(client, owner, mid, list(ASSIGNABLE))
     response = client.request(method, path, headers=manager, json={})
     assert response.status_code == 403, response.text
-    assert 'Read-only' in response.json()['detail']
+    if path in ('/api/integrations/sas4/device-access', '/api/payments/gateways/fib'):
+        assert response.json()['detail'] == 'Owner access required'
+    else:
+        assert 'Read-only' in response.json()['detail']
 
 
 def test_view_and_edit_grants_are_independent_and_immediate(client, owner, monkeypatch):
@@ -183,3 +186,43 @@ def test_view_and_edit_grants_are_independent_and_immediate(client, owner, monke
     assert client.delete('/api/users/'+mid, headers=owner).status_code == 204
     with SessionLocal() as db:
         assert db.get(UserSectionEdits, mid) is None
+
+
+@pytest.mark.parametrize('role', ['manager', 'technician', 'viewer'])
+@pytest.mark.parametrize('custom_access', [False, True])
+def test_owner_configuration_cannot_be_delegated(client, owner, role, custom_access):
+    from airlink.models import AccessRole, UserAccessRole
+    uid, actor = user(client, owner, role)
+    if custom_access:
+        with SessionLocal() as db:
+            access = AccessRole(name='Every section', sections=list(ASSIGNABLE),
+                                editable_sections=list(ASSIGNABLE), deletable_sections=list(ASSIGNABLE))
+            db.add(access)
+            db.flush()
+            db.add(UserAccessRole(user_id=uid, access_role_id=access.id))
+            db.commit()
+    paths = [
+        ('GET', '/api/towers-api-profiles'),
+        ('GET', '/api/towers-api-profiles/managers'),
+        ('POST', '/api/towers-api-profiles'),
+        ('PUT', '/api/towers-api-profiles/missing'),
+        ('DELETE', '/api/towers-api-profiles/missing'),
+        ('GET', '/api/integrations/sas4/device-login-profiles'),
+        ('GET', '/api/integrations/sas4/device-login-profiles/managers'),
+        ('POST', '/api/integrations/sas4/device-login-profiles'),
+        ('PUT', '/api/integrations/sas4/device-login-profiles/missing'),
+        ('DELETE', '/api/integrations/sas4/device-login-profiles/missing'),
+        ('GET', '/api/integrations/sas4/device-access'),
+        ('PUT', '/api/integrations/sas4/device-access'),
+        ('GET', '/api/payments/gateways'),
+        ('PUT', '/api/payments/gateways/fib'),
+    ]
+    for method, path in paths:
+        response = client.request(method, path, headers=actor)
+        assert response.status_code == 403, (method, path, response.text)
+        assert response.json()['detail'] == 'Owner access required'
+    # Authentication remains available even though Account profile is hidden.
+    assert client.get('/api/auth/me', headers=actor).status_code == 200
+    for path in ('/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
+                 '/api/integrations/sas4/device-access', '/api/payments/gateways'):
+        assert client.get(path, headers=owner).status_code == 200

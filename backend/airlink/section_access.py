@@ -96,6 +96,11 @@ def require_any(user, sections, db=None, *, write=False, delete=False):
 
 
 def enforce_request(user, method, path):
+    path = path.rstrip('/')
+    owner_sections = ('/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
+                      '/api/integrations/sas4/device-access', '/api/payments/gateways')
+    if user.role != 'owner' and any(path == root or path.startswith(root + '/') for root in owner_sections):
+        raise HTTPException(403, 'Owner access required')
     if path.rstrip('/') == '/api/snmp-profiles':
         from . import snmp_visibility
         snmp_visibility.require(user)
@@ -132,7 +137,7 @@ def enforce_request(user, method, path):
         return require(('towers',) if method != 'GET' else ('towers', 'noc'))
     if path.startswith('/api/devices/') and path.endswith('/wireless-clients'):
         return require(('towers', 'noc'))
-    if path.startswith('/api/devices/') and path.endswith(('/metrics', '/interfaces')):
+    if path.startswith('/api/devices/') and path.endswith(('/metrics', '/interfaces', '/outages')):
         return require(('monitoring',))
     resource = path.removeprefix('/api/').split('/')[0]
     if resource in ('roles', 'access-roles'):

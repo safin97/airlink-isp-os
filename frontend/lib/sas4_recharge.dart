@@ -87,7 +87,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
       });
       if (selectedExtension == null) {
         try {
-          final configs = await widget.api.request('/payments/gateways');
+          final configs = await widget.api.request('/payments/methods');
           final payments = await widget.api.request(
             '/payments/users/${widget.userId}',
           );

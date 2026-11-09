@@ -5,13 +5,11 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'payment_settings.dart';
 import 'customer_device_access.dart';
-import 'section_access.dart';
 
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
-  'Account profile': Icons.person_outline,
+  if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
   'Change password': Icons.lock_outline,
-  if ((user['role'] == 'owner' || usesSectionPermissions(user)) &&
-      hasSection(user, 'isp_card')) ...{
+  if (user['role'] == 'owner') ...{
     'Customer device access': Icons.router_outlined,
     'Payment setup': Icons.payments_outlined,
   },
@@ -83,7 +81,7 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
   Widget build(BuildContext context) {
     final selectedPage = accountPagesFor(user).containsKey(widget.page)
         ? widget.page
-        : 'Account profile';
+        : accountPagesFor(user).keys.first;
     return Card(
       key: const ValueKey('account-page'),
       margin: EdgeInsets.zero,

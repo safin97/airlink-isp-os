@@ -6,8 +6,87 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:airlink_isp_os/api.dart';
 import 'package:airlink_isp_os/main.dart';
+import 'package:airlink_isp_os/account_panel.dart';
+import 'package:airlink_isp_os/section_access.dart';
 
 void main() {
+  for (final role in ['manager', 'technician', 'viewer']) {
+    testWidgets('$role cannot open owner pages with full section grants', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final reads = <String>[];
+      final api =
+          Api(
+              client: MockClient((request) async {
+                reads.add(request.url.path);
+                return http.Response(
+                  jsonEncode(request.url.path == '/api/dashboard' ? {} : []),
+                  200,
+                );
+              }),
+            )
+            ..user = {
+              'username': 'staff',
+              'role': role,
+              'access_policy_configured': true,
+              'sections': assignableSections.keys.toList(),
+              'editable_sections': assignableSections.keys.toList(),
+              'deletable_sections': assignableSections.keys.toList(),
+            };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Operations(api: api, logout: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.widgetWithText(ListTile, 'My account'));
+      await tester.tap(find.widgetWithText(ListTile, 'My account'));
+      await tester.pumpAndSettle();
+      for (final label in [
+        'Towers API',
+        'Device login',
+        'Account profile',
+        'Customer device access',
+        'Payment setup',
+      ]) {
+        expect(find.widgetWithText(ListTile, label), findsNothing);
+      }
+      expect(find.text('Current password'), findsOneWidget);
+      expect(reads, isNot(contains('/api/payments/gateways')));
+      expect(reads, isNot(contains('/api/towers-api-profiles')));
+      expect(
+        reads,
+        isNot(contains('/api/integrations/sas4/device-login-profiles')),
+      );
+      expect(reads, isNot(contains('/api/integrations/sas4/device-access')));
+      // A direct request for an owner account page falls back to Change password.
+      for (final page in [
+        'Account profile',
+        'Customer device access',
+        'Payment setup',
+      ]) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: AccountPanel(api: api, page: page),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Current password'), findsOneWidget);
+        expect(find.text('FIB client ID'), findsNothing);
+        expect(find.text('Automatic detection'), findsNothing);
+        expect(find.text('Role: $role'), findsNothing);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   testWidgets('My account shows one selected page and keeps SAS4 separate', (
     tester,
   ) async {
@@ -37,7 +116,7 @@ void main() {
           200,
         );
       }),
-    )..user = {'username': 'my-manager', 'role': 'manager'};
+    )..user = {'username': 'my-owner', 'role': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Operations(api: api, logout: () async {}),
@@ -61,7 +140,7 @@ void main() {
     expect(find.byType(Dialog), findsNothing);
     expectSelected('My account');
     expectSelected('Account profile');
-    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('Role: owner'), findsOneWidget);
     expect(find.byType(TextFormField), findsNothing);
     expect(find.text('Automatic detection'), findsNothing);
     expect(find.text('FIB client ID'), findsNothing);
@@ -70,7 +149,7 @@ void main() {
 
     await openPage('Change password');
     expectSelected('Change password');
-    expect(find.text('Role: manager'), findsNothing);
+    expect(find.text('Role: owner'), findsNothing);
     expect(find.text('Automatic detection'), findsNothing);
     expect(find.text('FIB client ID'), findsNothing);
     expect(find.byType(TextFormField), findsNWidgets(3));
@@ -114,7 +193,7 @@ void main() {
     expect(find.text('Automatic detection'), findsOneWidget);
     expect(find.text('Read-only SNMP community'), findsOneWidget);
     expect(find.text('Current password'), findsNothing);
-    expect(find.text('Role: manager'), findsNothing);
+    expect(find.text('Role: owner'), findsNothing);
     expect(find.text('FIB client ID'), findsNothing);
     expect(find.byType(ExpansionTile), findsNothing);
 
@@ -124,7 +203,7 @@ void main() {
     expect(find.text('FastPay store ID'), findsOneWidget);
     expect(find.text('Automatic detection'), findsNothing);
     expect(find.text('Current password'), findsNothing);
-    expect(find.text('Role: manager'), findsNothing);
+    expect(find.text('Role: owner'), findsNothing);
     expect(find.byType(ExpansionTile), findsNothing);
     expect(reads, [
       '/api/integrations/sas4/device-access',
@@ -141,7 +220,7 @@ void main() {
     await openPage('My account');
     expect(find.byType(Dialog), findsNothing);
     expectSelected('Account profile');
-    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('Role: owner'), findsOneWidget);
     expect(find.byType(TextFormField), findsNothing);
     await openPage('Change password');
     expect(
@@ -170,7 +249,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsNothing);
     expect(find.text('Current password'), findsNothing);
-    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('Role: owner'), findsOneWidget);
     expectSelected('My account');
     expectSelected('Account profile');
     expect(writes, hasLength(1));

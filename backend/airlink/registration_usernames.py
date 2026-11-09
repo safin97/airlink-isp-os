@@ -51,6 +51,16 @@ class UsernameLookup:
         connection = db.get(SAS4UserConnection, user.id)
         if not connection:
             return {}, 'not_configured'
+        from .online_sessions import service as sessions
+        if sessions.running:
+            snapshot = sessions.snapshot(db, user)
+            if snapshot is None:
+                status = sessions.page(db, user)['collection_status']
+                return {}, 'unavailable' if status == 'unavailable' else 'pending'
+            # Never present an expired session-to-MAC association as a current username.
+            if snapshot['collection_status'] != 'available':
+                return {}, 'unavailable'
+            return snapshot['matches'], 'available'
         key = (user.id, hashlib.sha256((connection.username + '\0' + connection.encrypted_password).encode()).hexdigest())
         with self.lock:
             clock = time.monotonic()

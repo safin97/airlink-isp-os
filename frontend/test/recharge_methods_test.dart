@@ -37,7 +37,7 @@ void main() {
                 200,
               );
             }
-            if (request.url.path.endsWith('/gateways')) {
+            if (request.url.path.endsWith('/methods')) {
               return http.Response(
                 '[{"provider":"fib","configured":true,"environment":"sandbox"}]',
                 200,

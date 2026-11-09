@@ -243,6 +243,17 @@ class Metric(Base):
     __table_args__ = (Index("ix_metrics_device_time", "device_id", "collected_at"),)
 
 
+class DeviceOutage(Base):
+    __tablename__ = "device_outages"
+    id = Column(String(36), primary_key=True, default=uid)
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (UniqueConstraint("device_id", "started_at"),
+                     CheckConstraint("ended_at >= started_at"),
+                     Index("ix_device_outages_device_end", "device_id", "ended_at"))
+
+
 class Alert(Base):
     __tablename__ = "alerts"
     id = Column(String(36), primary_key=True, default=uid)

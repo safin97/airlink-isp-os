@@ -31,7 +31,7 @@ from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
 from .db import get_db, SessionLocal
-from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device,
+from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device, DeviceOutage,
                      UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, UserAccessRole, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
                        current_user, owner, settings_access, updates_access, resolve_user, cipher, bearer)
@@ -831,6 +831,15 @@ def metrics(device_id: str, hours: int = Query(24, ge=1, le=720), user=Depends(c
     rows = db.scalars(select(Metric).where(Metric.device_id == device_id, Metric.collected_at >= now() - timedelta(hours=hours))
                       .order_by(Metric.collected_at.desc()).limit(2000)).all()
     return [public(x) for x in reversed(rows)]
+
+
+@app.get("/api/devices/{device_id}/outages")
+def device_outages(device_id: str, limit: int = Query(100, ge=1, le=500), user=Depends(current_user), db=Depends(get_db)):
+    check_device(db, user, device_id)
+    rows = db.scalars(select(DeviceOutage).where(DeviceOutage.device_id == device_id)
+                      .order_by(DeviceOutage.ended_at.desc(), DeviceOutage.id.desc()).limit(limit))
+    return [{**public(row), 'duration_seconds': max(0, int((aware(row.ended_at) - aware(row.started_at)).total_seconds()))}
+            for row in rows]
 
 
 @app.get("/api/devices/{device_id}/interfaces")

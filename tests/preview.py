@@ -120,7 +120,7 @@ def preview_fetch_dashboard(connection, password, transport=None):
             'about_to_expire': 0, 'balance': '0', 'reward_points': 0, 'warnings': [],
             'fetched_at': now().isoformat()}
 
-def preview_enrich(db, user, result):
+def preview_enrich(db, user, result, **kwargs):
     rows = []
     for row in result['clients']:
         rows.append({**row, 'telemetry_status': 'available', 'device_reachable': True,

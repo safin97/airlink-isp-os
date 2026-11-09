@@ -33,6 +33,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   Future<void> load() async {
+    if (widget.api.user?['role'] != 'owner') return;
     setState(() {
       busy = true;
       error = null;
@@ -54,6 +55,7 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   Future<void> edit([Map<String, dynamic>? profile]) async {
+    if (widget.api.user?['role'] != 'owner') return;
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => DeviceLoginProfileEditor(
@@ -103,19 +105,21 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      AppText(
-        widget.towers ? 'Towers API' : 'Device login',
-        style: Theme.of(context).textTheme.headlineSmall,
-      ),
-      const SizedBox(height: 12),
-      if (!widget.towers) CustomerDeviceAccess(api: widget.api),
-      const SizedBox(height: 12),
-      profilesCard(context),
-    ],
-  );
+  Widget build(BuildContext context) => widget.api.user?['role'] != 'owner'
+      ? const SizedBox.shrink()
+      : Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppText(
+              widget.towers ? 'Towers API' : 'Device login',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 12),
+            if (!widget.towers) CustomerDeviceAccess(api: widget.api),
+            const SizedBox(height: 12),
+            profilesCard(context),
+          ],
+        );
 
   Widget profilesCard(BuildContext context) => Card(
     child: Padding(

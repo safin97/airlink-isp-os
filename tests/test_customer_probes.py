@@ -29,7 +29,7 @@ def test_device_access_secrets_scoped_and_encrypted(client, owner):
     assert saved.json()['has_community'] and saved.json()['has_api_password']
     assert 'private-' not in saved.text
     assert 'private-' not in client.get(path, headers=owner).text
-    assert not client.get(path, headers=manager).json()['has_api_password']
+    assert client.get(path, headers=manager).status_code == 403
     assert client.get(path, headers=viewer).status_code == 403
     assert client.put(path, headers=viewer, json=body).status_code == 403
     with SessionLocal() as db:
@@ -43,7 +43,7 @@ def test_device_access_secrets_scoped_and_encrypted(client, owner):
             {'version': '1', 'community': 'private-snmp'},
         ]
     disabled = client.put(path, headers=manager, json={'try_public_snmp':False})
-    assert disabled.status_code == 200 and disabled.json()['try_public_snmp'] is False
+    assert disabled.status_code == 403
     with SessionLocal() as db:
         assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == []
     assert client.put(path, headers=owner, json={'api_username':'changed'}).status_code == 422
@@ -304,3 +304,14 @@ def test_invalid_device_password_is_not_echoed(client, owner):
     result=client.put('/api/integrations/sas4/device-access',headers=owner,
         json={'api_username':'device','api_password':'DO-NOT-ECHO-'*100})
     assert result.status_code==422 and 'DO-NOT-ECHO' not in result.text
+
+
+def test_read_only_enrichment_never_starts_device_checks(monkeypatch):
+    monkeypatch.setattr(probes, 'configuration', lambda *a: LOGIN_CONFIG)
+    service = probes.ProbeService()
+    service.pool = SimpleNamespace(submit=lambda *args: pytest.fail('Page queued a device connection'))
+    account = SimpleNamespace(id='account')
+    result = service.enrich(None, account, {'clients': [
+        {'username': 'user', 'session_id': 1, 'ip_address': '192.168.1.1'}]}, schedule=False)
+    assert result['clients'][0]['telemetry_status'] == 'pending'
+    assert not service.pending

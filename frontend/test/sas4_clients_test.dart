@@ -9,6 +9,86 @@ import 'package:airlink_isp_os/sas4_clients.dart';
 import 'package:airlink_isp_os/sas4_connection.dart';
 
 void main() {
+  testWidgets('background warmup, stale results and recovery are explicit', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    var status = 'warming';
+    final api = Api(
+      client: MockClient((request) async {
+        if (request.url.path == '/api/integrations/sas4') {
+          return http.Response('{"configured":true}', 200);
+        }
+        final ready = status == 'stale' || status == 'available';
+        return http.Response(
+          jsonEncode({
+            'clients': ready
+                ? [
+                    {
+                      'username': 'cached-customer',
+                      'online': true,
+                      'ip_address': '10.0.0.1',
+                      'signal_dbm': -60,
+                      'ssid': 'North',
+                      'telemetry_status': 'available',
+                      'ethernet_links': [],
+                    },
+                  ]
+                : [],
+            'total': ready ? 1 : null,
+            'page': 1,
+            'last_page': 1,
+            'fetched_at': ready ? '2026-11-09T10:00:00+00:00' : null,
+            'collection_status': status,
+          }),
+          200,
+        );
+      }),
+    )..user = {'role': 'owner'};
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Sas4Clients(api: api, showDashboard: false, showOnline: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Collecting online sessions in the background'),
+      findsOneWidget,
+    );
+    expect(find.text('0 online users'), findsNothing);
+    expect(find.text('null online users'), findsNothing);
+    expect(find.text('No users match this search.'), findsNothing);
+    status = 'stale';
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('cached-customer'), findsOneWidget);
+    expect(
+      find.textContaining('Background refresh is delayed'),
+      findsOneWidget,
+    );
+    status = 'unavailable';
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('cached-customer'), findsNothing);
+    expect(
+      find.textContaining('Online sessions are temporarily unavailable'),
+      findsOneWidget,
+    );
+    status = 'available';
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('cached-customer'), findsOneWidget);
+    expect(find.text('1 online users'), findsOneWidget);
+    expect(find.textContaining('Background refresh is delayed'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'dashboard, users, online users, pagination and automatic refresh',
     (tester) async {
@@ -192,6 +272,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('online-1'), findsOneWidget);
+      expect(find.text('Device access'), findsNothing);
+      expect(find.text('Connection'), findsNothing);
+      expect(find.text('Open device'), findsNothing);
       expect(find.text('Ethernet speed'), findsOneWidget);
       expect(find.text('Signal'), findsOneWidget);
       expect(find.text('eth0: 1 Gbps'), findsOneWidget);

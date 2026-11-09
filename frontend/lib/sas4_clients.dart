@@ -10,7 +10,6 @@ import 'api.dart';
 import 'section_access.dart';
 import 'sas4_user_details.dart';
 import 'sas4_recharge.dart';
-import 'online_device_dialog.dart';
 
 class Sas4Clients extends StatefulWidget {
   final Api api;
@@ -435,6 +434,10 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     final rows = (result?['clients'] as List?) ?? [];
     final page = result?['page'] as int? ?? 1;
     final lastPage = result?['last_page'] as int? ?? 1;
+    final collectionStatus = result?['collection_status'];
+    final waitingForSnapshot =
+        onlineOnly &&
+        (collectionStatus == 'warming' || collectionStatus == 'unavailable');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -553,11 +556,24 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
         ],
         if (result != null && !viewingDashboard) ...[
           const SizedBox(height: 12),
-          Text(
-            '${result!['total']} ${onlineOnly ? 'online users' : 'users'}',
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-          ),
-          if (rows.isEmpty)
+          if (onlineOnly && collectionStatus == 'stale')
+            const AppText(
+              'Background refresh is delayed. Showing the last collected sessions.',
+            ),
+          if (waitingForSnapshot)
+            AppText(
+              collectionStatus == 'warming'
+                  ? 'Collecting online sessions in the background. This page will update automatically.'
+                  : 'Online sessions are temporarily unavailable. Background collection will retry automatically.',
+            ),
+          if (!waitingForSnapshot)
+            Text(
+              '${result!['total']} ${onlineOnly ? 'online users' : 'users'}',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+            ),
+          if (waitingForSnapshot)
+            const SizedBox.shrink()
+          else if (rows.isEmpty)
             const Padding(
               padding: EdgeInsets.all(24),
               child: AppText('No users match this search.'),
@@ -588,12 +604,10 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                     if (!onlineOnly) ...['Name', 'Recharge card', 'Profile'],
                     if (onlineOnly) ...[
                       'IP address',
-                      'Device access',
                       'Device type',
                       'Ethernet speed',
                       'Signal',
                       'SSID',
-                      'Connection',
                     ],
                     'Expiration',
                     'SAS4 manager',
@@ -668,26 +682,6 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                             DataCell(SelectableText(text(row['ip_address']))),
                           if (onlineOnly) ...[
                             DataCell(
-                              TextButton.icon(
-                                onPressed:
-                                    row['ip_address'] == null ||
-                                        row['username'] == null
-                                    ? null
-                                    : () => showDialog<void>(
-                                        context: context,
-                                        builder: (_) => OnlineDeviceDialog(
-                                          api: widget.api,
-                                          row: Map<String, dynamic>.from(row),
-                                        ),
-                                      ),
-                                icon: const Icon(
-                                  Icons.router_outlined,
-                                  size: 16,
-                                ),
-                                label: const AppText('Open device'),
-                              ),
-                            ),
-                            DataCell(
                               Text(
                                 row['vendor_label']?.toString() ??
                                     tr('Unknown / Generic'),
@@ -697,23 +691,6 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                             DataCell(telemetryCell(row, ethernet: false)),
                             DataCell(
                               telemetryCell(row, ethernet: false, ssid: true),
-                            ),
-                            DataCell(
-                              Text(
-                                row['telemetry_source']?.toString() ??
-                                    tr(switch (row['telemetry_status']) {
-                                      'connecting' => 'Connecting…',
-                                      'disabled' => 'Disabled',
-                                      'credentials_required' =>
-                                        'Credentials needed',
-                                      'authentication_failed' =>
-                                        'Login rejected',
-                                      'api_unavailable' => 'Login unavailable',
-                                      'unreachable' => 'No response',
-                                      'invalid_address' => 'Invalid IP',
-                                      _ => '—',
-                                    }),
-                              ),
                             ),
                           ],
                           DataCell(Text(text(row['expiration']))),
@@ -760,7 +737,11 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                 label: const AppText('Next'),
               ),
               Text(
-                'Fetched ${DateTime.tryParse(result!['fetched_at'] ?? '')?.toLocal().toString().split('.').first ?? 'now'}',
+                result!['fetched_at'] == null
+                    ? (onlineOnly
+                          ? 'Waiting for the first background collection'
+                          : 'Collection time unavailable')
+                    : 'Fetched ${DateTime.tryParse(result!['fetched_at'])?.toLocal().toString().split('.').first ?? result!['fetched_at']}',
                 style: TextStyle(
                   fontSize: 12,
                   color: themeColor(0xff99acc6, 0xff52627a),

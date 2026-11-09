@@ -285,7 +285,7 @@ void main() {
   }
 
   testWidgets(
-    'Open device uses session identity and displays read-only readings',
+    'Hidden device access retains standalone session identity and read-only readings',
     (tester) async {
       tester.view.physicalSize = const Size(1800, 1200);
       tester.view.devicePixelRatio = 1;
@@ -385,7 +385,22 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(deviceRequests, 0);
-      await tester.tap(find.text('Open device'));
+      expect(find.text('Device access'), findsNothing);
+      expect(find.text('Connection'), findsNothing);
+      expect(find.text('Open device'), findsNothing);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OnlineDeviceDialog(
+            api: api,
+            row: const {
+              'id': 7,
+              'session_id': 90,
+              'username': 'subscriber',
+              'ip_address': '10.2.3.4',
+            },
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
       expect(find.byType(OnlineDeviceDialog), findsOneWidget);
       expect(deviceRequests, 0);

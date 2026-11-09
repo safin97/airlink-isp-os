@@ -29,6 +29,7 @@ import 'role_management.dart';
 import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
 import 'ethernet_ports_dialog.dart';
+import 'device_downtime_history.dart';
 import 'ip_address_sort.dart';
 import 'device_api_access_panel.dart';
 import 'diagnostics_screen.dart';
@@ -435,12 +436,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             (usesSectionPermissions(api.user!) &&
                 hasSection(api.user!, 'settings'))
       : pages[index] == 'Towers API'
-      ? (owner || usesSectionPermissions(api.user!)) &&
-            hasSection(api.user!, 'towers')
+      ? owner
       : pages[index] == 'Device login'
-      ? owner ||
-            (usesSectionPermissions(api.user!) &&
-                hasSection(api.user!, 'isp_card'))
+      ? owner
       : (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
             hasSection(
               api.user!,
@@ -451,7 +449,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   void selectAllowedPage() {
     if (!accountPages.containsKey(accountPage)) {
-      accountPage = 'Account profile';
+      accountPage = accountPages.keys.first;
     }
     if (canPage(page)) return;
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
@@ -709,7 +707,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     setState(() {
       page = index;
       settingsPage = null;
-      if (pages[index] == 'My account') accountPage = 'Account profile';
+      if (pages[index] == 'My account') accountPage = accountPages.keys.first;
       mapExpanded = pages[index] == 'Network Map';
       nocExpanded = false;
       search = '';
@@ -2671,6 +2669,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             ),
           ),
           const SizedBox(height: 24),
+          if (deviceId != null) ...[
+            DeviceDowntimeHistory(api: api, deviceId: deviceId!),
+            const SizedBox(height: 24),
+          ],
           if (samples.isEmpty)
             SizedBox(
               height: 160,

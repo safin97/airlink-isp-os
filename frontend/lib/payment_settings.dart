@@ -3,7 +3,6 @@ import 'app_language.dart';
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import 'section_access.dart';
 
 class PaymentSettings extends StatefulWidget {
   final Api api;
@@ -21,9 +20,7 @@ class PaymentSettings extends StatefulWidget {
 
 class _PaymentSettingsState extends State<PaymentSettings>
     with LanguageRebuild {
-  bool get canEdit =>
-      canEditSection(widget.api.user ?? {}, 'settings') ||
-      canEditSection(widget.api.user ?? {}, 'isp_card');
+  bool get canEdit => widget.api.user?['role'] == 'owner';
   final merchants = {
     for (final p in ['fib', 'fastpay']) p: TextEditingController(),
   };
@@ -50,6 +47,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
   }
 
   Future<void> load() async {
+    if (!canEdit) return;
     if (loaded || busy) return;
     setState(() => busy = true);
     try {
@@ -104,7 +102,9 @@ class _PaymentSettingsState extends State<PaymentSettings>
   }
 
   @override
-  Widget build(BuildContext context) => widget.embedded
+  Widget build(BuildContext context) => !canEdit
+      ? const SizedBox.shrink()
+      : widget.embedded
       ? Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: settingsContent(),

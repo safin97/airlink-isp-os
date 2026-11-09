@@ -391,6 +391,10 @@ def get_online_users(page: int = Query(1, ge=1, le=1000000), search: str = Query
     connection = db.get(SAS4UserConnection, user.id)
     if not connection:
         raise HTTPException(409, 'Configure the SAS4 connection first')
+    from .online_sessions import service as sessions
+    if sessions.running:
+        result = sessions.page(db, user, page, search)
+        return customer_probe_service.enrich(db, user, result, schedule=False)
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
         result = fetch_clients(connection, password, page, search, online=True)

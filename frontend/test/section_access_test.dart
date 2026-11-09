@@ -104,12 +104,12 @@ void main() {
     );
     expect(
       tester
-          .widget<ListTile>(find.widgetWithText(ListTile, 'Account profile'))
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Change password'))
           .selected,
       isTrue,
     );
-    expect(find.text('Role: manager'), findsOneWidget);
-    expect(find.text('Current password'), findsNothing);
+    expect(find.text('Role: manager'), findsNothing);
+    expect(find.text('Current password'), findsOneWidget);
     expect(
       find.widgetWithText(ListTile, 'Customer device access'),
       findsNothing,
@@ -126,13 +126,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       find.widgetWithText(ListTile, 'Customer device access'),
-      findsOneWidget,
+      findsNothing,
     );
-    await tester.ensureVisible(find.widgetWithText(ListTile, 'Payment setup'));
-    await tester.tap(find.widgetWithText(ListTile, 'Payment setup'));
-    await tester.pumpAndSettle();
-    expect(find.text('FIB client ID'), findsOneWidget);
-    expect(requests, ['/api/payments/gateways']);
+    expect(find.widgetWithText(ListTile, 'Payment setup'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'Device login'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'Towers API'), findsNothing);
+    expect(find.text('FIB client ID'), findsNothing);
+    expect(requests, isEmpty);
     requests.clear();
 
     account['sections'] = <String>[];
@@ -143,11 +143,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester
-          .widget<ListTile>(find.widgetWithText(ListTile, 'Account profile'))
+          .widget<ListTile>(find.widgetWithText(ListTile, 'Change password'))
           .selected,
       isTrue,
     );
-    expect(find.text('Role: manager'), findsOneWidget);
+    expect(find.text('Role: manager'), findsNothing);
     expect(find.text('FIB client ID'), findsNothing);
     expect(find.widgetWithText(ListTile, 'Payment setup'), findsNothing);
     expect(

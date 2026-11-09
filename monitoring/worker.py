@@ -7,7 +7,7 @@ from sqlalchemy import select, delete
 from redis import Redis
 from airlink.config import settings
 from airlink.db import SessionLocal
-from airlink.models import Device, SNMPProfile, Metric, Interface, Alert, now
+from airlink.models import Device, DeviceOutage, SNMPProfile, Metric, Interface, Alert, now
 from airlink.security import aware, cipher
 from .snmp import collect, interface_rate
 from airlink.device_api import collect_api
@@ -118,6 +118,12 @@ async def poll(device_id, semaphore):
                     obj.oper_status = interface.get("status")
                 up = values["icmp_up"] or values.get("snmp_up", False) or values.get("api_up", False)
                 if up:
+                    if device.status == 'offline' and device.down_since is not None:
+                        # Save the completed outage atomically with the recovery sample.
+                        # Brief failures below the configured threshold are not outages.
+                        start = aware(device.down_since)
+                        db.add(DeviceOutage(device_id=device_id, started_at=start,
+                                            ended_at=max(timestamp, start)))
                     device.down_since = None
                 elif device.down_since is None or device.failures == 0 or device.last_poll is None:
                     # Count from the first observed failure, including threshold checks.

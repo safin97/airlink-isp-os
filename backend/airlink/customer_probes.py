@@ -7,7 +7,7 @@ import ipaddress
 import json
 import threading
 import time
-from .models import CustomerProbeSettings
+from .models import CustomerProbeSettings, SAS4UserConnection, now
 from .security import cipher
 from .vendor_identity import VENDOR_LABELS
 
@@ -141,17 +141,20 @@ class ProbeService:
                                 result[field] = previous[1][field]
                                 stale_fields.append(field)
                     result['telemetry_stale_fields'] = stale_fields
+                    result['telemetry_collected_at'] = now().isoformat()
                     self.cache[key] = (time.monotonic(), result)
                     self.cache.move_to_end(key)
-                    while len(self.cache) > 2048:
+                    while len(self.cache) > 10000:
                         self.cache.popitem(last=False)
         finally:
             with self.lock:
                 self.pending.discard(key)
 
-    def enrich(self, db, user, result):
+    def enrich(self, db, user, result, *, schedule=True):
         config = configuration(db, user)
-        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
+        connection = db.get(SAS4UserConnection, user.id) if db is not None else None
+        scope = (connection.username + '\0' + connection.encrypted_password) if connection else ''
+        fingerprint = hashlib.sha256((json.dumps(config, sort_keys=True) + scope).encode()).hexdigest()
         for row in result.get('clients', []):
             # Online users never inherit inventory/SNMP readings or source labels.
             row.update(ethernet_links=[], signal_dbm=None, ssid=None, telemetry_source=None,
@@ -175,7 +178,10 @@ class ProbeService:
                     for field, value in cached[1].items():
                         row[field] = value
                 if not fresh:
-                    if self.pool is not None and key not in self.pending and len(self.pending) < 128:
+                    row['telemetry_refreshing'] = bool(cached)
+                    if not cached:
+                        row['telemetry_status'] = 'pending'
+                    if schedule and self.pool is not None and key not in self.pending and len(self.pending) < 128:
                         self.pending.add(key)
                         self.pool.submit(self.run, key, address, config)
                     if key in self.pending:

@@ -66,6 +66,14 @@ def gateways(user=Depends(sas4.sas4_access), db=Depends(get_db)):
     return [gateway_status(configs[p]) if p in configs else {'provider': p, 'configured': False, 'environment': 'sandbox', 'merchant_id': '', 'has_secret': False} for p in ('fib', 'fastpay')]
 
 
+@router.get('/methods')
+def payment_methods(user=Depends(sas4.sas4_access), db=Depends(get_db)):
+    # Checkout only needs availability; merchant configuration stays owner-only.
+    configs = {c.provider: c for c in db.scalars(select(PaymentGateway).where(PaymentGateway.user_id == user.id))}
+    return [{'provider': p, 'configured': p in configs,
+             'environment': configs[p].environment if p in configs else 'sandbox'} for p in ('fib', 'fastpay')]
+
+
 @router.put('/gateways/{provider}')
 def save_gateway(provider: Provider, data: GatewayInput, user=Depends(sas4.sas4_access), db=Depends(get_db)):
     merchant = data.merchant_id.strip()

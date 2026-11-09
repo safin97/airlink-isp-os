@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
-import 'section_access.dart';
 import 'app_language.dart';
 
 class CustomerDeviceAccess extends StatefulWidget {
@@ -30,7 +29,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
       hasCommunity = false,
       tryPublicSnmp = false;
   String? error, message;
-  bool get canEdit => canEditSection(widget.api.user ?? {}, 'isp_card');
+  bool get canEdit => widget.api.user?['role'] == 'owner';
 
   @override
   void initState() {
@@ -57,6 +56,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
   }
 
   Future<void> load() async {
+    if (!canEdit) return;
     try {
       final data = await widget.api.request('/integrations/sas4/device-access');
       if (mounted) setState(() => apply(Map<String, dynamic>.from(data)));
@@ -121,6 +121,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
 
   @override
   Widget build(BuildContext context) {
+    if (!canEdit) return const SizedBox.shrink();
     final content = Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
