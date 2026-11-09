@@ -993,6 +993,11 @@ def system(user=Depends(settings_access)):
     return broker("status")
 
 
+@app.get("/api/diagnostics")
+def diagnostics(user=Depends(settings_access)):
+    return broker("diagnostics.status")
+
+
 @app.post("/api/system/restart", status_code=202)
 def restart_system(payload: dict, user=Depends(updates_access), db=Depends(get_db)):
     if payload.get("confirm") is not True:

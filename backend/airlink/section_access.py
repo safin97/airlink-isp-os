@@ -110,7 +110,7 @@ def enforce_request(user, method, path):
         return require_any(user, sections, write=method not in ('GET', 'HEAD', 'OPTIONS'), delete=method == 'DELETE')
     if path == '/api/updates' or path.startswith('/api/updates/') or path == '/api/system/restart':
         return require(('software_updates',))
-    if path in ('/api/system', '/api/network', '/api/audit', '/api/snmp-profiles') or path.startswith('/api/network/'):
+    if path in ('/api/system', '/api/diagnostics', '/api/network', '/api/audit', '/api/snmp-profiles') or path.startswith('/api/network/'):
         return require(('settings',))
     if path == '/api/payments/gateways' or path.startswith('/api/payments/gateways/'):
         return require(('settings', 'isp_card'))

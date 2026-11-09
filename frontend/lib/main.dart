@@ -29,6 +29,7 @@ import 'role_management.dart';
 import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
 import 'device_api_access_panel.dart';
+import 'diagnostics_screen.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -345,6 +346,7 @@ const pages = [
   'Reports',
   'Software Updates',
   'Settings',
+  'Diagnostics',
   'My account',
   'Device login',
 ];
@@ -361,6 +363,7 @@ const icons = [
   Icons.assessment_outlined,
   Icons.system_update_alt,
   Icons.settings_outlined,
+  Icons.health_and_safety_outlined,
   Icons.account_circle_outlined,
   Icons.password_outlined,
 ];
@@ -423,6 +426,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           hasSection(api.user!, 'software_updates'));
   bool canPage(int index) => pages[index] == 'My account'
       ? true
+      : pages[index] == 'Diagnostics'
+      ? owner ||
+            (usesSectionPermissions(api.user!) &&
+                hasSection(api.user!, 'settings'))
       : pages[index] == 'Device login'
       ? owner ||
             (usesSectionPermissions(api.user!) &&
@@ -1131,6 +1138,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 'Owner access required',
                 'Software Updates access must be enabled by the owner.',
               );
+      case 'Diagnostics':
+        return DiagnosticsScreen(api: api);
       default:
         return settings();
     }
