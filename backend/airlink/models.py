@@ -291,7 +291,7 @@ class AuditLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("users.id"))
     action = Column(String(120), nullable=False)
-    target = Column(String(120))
+    target = Column(Text)
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 

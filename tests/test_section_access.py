@@ -226,3 +226,19 @@ def test_owner_configuration_cannot_be_delegated(client, owner, role, custom_acc
     for path in ('/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
                  '/api/integrations/sas4/device-access', '/api/payments/gateways'):
         assert client.get(path, headers=owner).status_code == 200
+
+
+def test_full_manager_permissions_preserve_the_complete_audit_record(client, owner):
+    from sqlalchemy import select
+    from airlink.models import AuditLog
+    mid, manager = user(client, owner, 'manager')
+    grants = list(ASSIGNABLE)
+    result = client.put('/api/users/'+mid+'/sections', headers=owner, json={
+        'sections': grants, 'editable_sections': grants, 'deletable_sections': grants})
+    assert result.status_code == 200, result.text
+    assert client.get('/api/auth/me', headers=manager).json()['sections'] == grants
+    expected = mid + ':view=' + ','.join(grants) + ';edit=' + ','.join(grants) + ';delete=' + ','.join(grants)
+    assert len(expected) > 120
+    with SessionLocal() as db:
+        row = db.scalar(select(AuditLog).where(AuditLog.action == 'user.sections'))
+        assert row.target == expected
