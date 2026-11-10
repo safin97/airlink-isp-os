@@ -39,3 +39,14 @@ def test_cache_policy_preserves_existing_https_configuration(tmp_path):
     assert 'ssl_certificate /custom/domain.crt;' in path.read_text()
     assert 'no-cache, max-age=0, must-revalidate' in path.read_text()
     assert not https.refresh_web_config(path)
+
+
+def test_oauth_callback_logging_rule_is_installed_on_existing_appliance(tmp_path):
+    path = tmp_path/'airlink'
+    path.write_text('server {\n    ssl_certificate /custom/domain.crt;\n    root /opt/airlink/frontend/build/web;\n    location /api/ {\n        proxy_pass http://127.0.0.1:8000;\n    }\n}\n')
+    assert https.refresh_web_config(path)
+    content = path.read_text()
+    assert 'location = /api/backups/google-drive/callback' in content
+    assert 'access_log off;' in content
+    assert 'ssl_certificate /custom/domain.crt;' in content
+    assert not https.refresh_web_config(path)

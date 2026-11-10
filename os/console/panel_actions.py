@@ -2,6 +2,7 @@
 import fcntl
 import ipaddress
 import json
+import os
 import re
 import subprocess
 import time
@@ -41,8 +42,8 @@ def api(method, path, token='', data=None):
         raise ValueError(str(detail)) from None
 
 
-def run(args, timeout=30):
-    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+def run(args, timeout=30, **options):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout, **options)
     if result.returncode:
         raise ValueError((result.stderr or result.stdout or 'System command failed').strip())
     return result.stdout.strip()
@@ -149,7 +150,8 @@ def local_action(name, data, token):
             selected = data.get('backup')
             if selected not in backup_paths():
                 raise ValueError('Select an existing local backup')
-            result = run(['bash', '/opt/airlink/os/recovery/restore.sh', str(BACKUPS / selected), 'RESTORE'], timeout=600)
+            result = run(['bash', '/opt/airlink/os/recovery/restore.sh', str(BACKUPS / selected), 'RESTORE'], timeout=600,
+                         pass_fds=(lock.fileno(),), env={**os.environ, 'AIRLINK_MAINTENANCE_FD': str(lock.fileno())})
             result += '\nDatabase restored. Sign in again. Configuration archives require manual recovery review.'
         else:
             run(['systemctl', 'restart', 'airlink-api', 'airlink-monitor', 'airlink-alerts', 'nginx'], timeout=120)

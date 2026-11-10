@@ -26,7 +26,7 @@ The image output is `dist/AirLink-ISP-OS-amd64.iso` with `dist/SHA256SUMS` and a
 
 ## Local preview login
 
-To review dashboard edits before pushing to GitHub, run `./scripts/preview.sh`. It creates an isolated local owner login and a local preview database. See [local preview instructions](docs/LOCAL-PREVIEW.md) for credentials, supported actions and the managed Cloud Browser workflow.
+For real SAS4 data and background monitoring from your VS Code terminal, run `./scripts/live.sh` and open `http://127.0.0.1:18080`. To review the dashboard with sample SAS4 data, use `./scripts/preview.sh`. See [local run instructions](docs/LOCAL-PREVIEW.md) for saved data, startup and limitations.
 
 ## Test
 

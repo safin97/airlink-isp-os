@@ -30,8 +30,10 @@ import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
 import 'ethernet_ports_dialog.dart';
 import 'device_downtime_history.dart';
+import 'google_drive_backup.dart';
 import 'ip_address_sort.dart';
 import 'device_api_access_panel.dart';
+import 'online_device_dialog.dart';
 import 'diagnostics_screen.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
@@ -1897,6 +1899,27 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     ),
                                   ),
                                 if (resource == 'devices' &&
+                                    [
+                                      'mikrotik',
+                                      'mikrotik_switch',
+                                    ].contains(row['vendor']) &&
+                                    (owner ||
+                                        role == 'manager' ||
+                                        api.user?['access_policy_configured'] ==
+                                            true))
+                                  IconButton(
+                                    tooltip: 'Login via API',
+                                    onPressed: () => showDialog<void>(
+                                      context: context,
+                                      builder: (_) => OnlineDeviceDialog(
+                                        api: api,
+                                        towerDeviceId: row['id'],
+                                        row: {...row, 'username': row['name']},
+                                      ),
+                                    ),
+                                    icon: const Icon(Icons.login, size: 19),
+                                  ),
+                                if (resource == 'devices' &&
                                     row['vendor'] == 'mikrotik_switch')
                                   IconButton(
                                     key: ValueKey('manage-switch-${row['id']}'),
@@ -2548,44 +2571,20 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             'SNMP profile',
             kind: owner ? 'snmp_profile' : 'text',
             helperText: owner
-                ? 'Presets use community public. For another community or SNMP v3, choose a saved profile from Settings. Works with SNMP-enabled models; the device credentials must match.'
+                ? 'Choose the SNMP version, then the matching saved credentials or public community.'
                 : null,
             options: owner
-                ? [
-                    const Option('', 'None'),
-                    const Option(
-                      'preset:mikrotik_switch:2c',
-                      'MikroTik switch — SNMP v2c / public',
-                    ),
-                    for (final vendor in const [
-                      (
-                        key: 'mikrotik',
-                        label: 'MikroTik (all models)',
-                        versions: ['2c', '1'],
-                      ),
-                      (
-                        key: 'ubiquiti',
-                        label: 'UBNT (M5 / AC / other models)',
-                        versions: ['2c', '1'],
-                      ),
-                      (
-                        key: 'mimosa',
-                        label: 'Mimosa (all models)',
-                        versions: ['2c'],
-                      ),
-                    ])
-                      for (final version in vendor.versions)
-                        Option(
-                          'preset:${vendor.key}:$version',
-                          '${vendor.label} — SNMP v${version == '2c' ? '2c' : version} / public',
+                ? list('snmp-profiles')
+                      .map(
+                        (profile) => Option(
+                          profile['id'],
+                          profile['name'],
+                          snmpVersion: profile['version'] == '2'
+                              ? '2c'
+                              : profile['version'] ?? '3',
                         ),
-                    ...list('snmp-profiles').map(
-                      (profile) => Option(
-                        profile['id'],
-                        '${profile['name']} — SNMP v${profile['version'] == '2' ? '2c' : profile['version'] ?? '?'}',
-                      ),
-                    ),
-                  ]
+                      )
+                      .toList()
                 : null,
           ),
           FieldSpec(
@@ -3069,7 +3068,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Map<String, IconData> get settingsPages => {
     if (canViewSnmpProfiles(api.user!)) 'SNMP profiles': Icons.key_outlined,
     if (canManageSettings) ...{
-      'Payment gateways': Icons.payments_outlined,
+      if (owner) 'Google Drive backup': Icons.cloud_upload_outlined,
+      if (owner) 'Payment gateways': Icons.payments_outlined,
       if (owner) 'Device API logins': Icons.router_outlined,
       'Network': Icons.settings_ethernet,
       'Audit log': Icons.history,
@@ -3137,6 +3137,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   Widget settingsContent(String selected) {
     switch (selected) {
+      case 'Google Drive backup':
+        return GoogleDriveBackup(api: api);
       case 'Payment gateways':
         return card(PaymentSettings(api: api, initiallyExpanded: true));
       case 'Device API logins':
@@ -3156,9 +3158,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 ListTile(
                   leading: const Icon(Icons.key),
                   title: Text(p['name']),
-                  subtitle: Text(
-                    'SNMP v${p['version'] == '2c' ? '2' : p['version'] ?? '3'}',
-                  ),
+                  subtitle: Text('SNMP v${p['version'] ?? '3'}'),
                 ),
               if (canManageSettings)
                 FilledButton.icon(
@@ -3227,7 +3227,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
 class Option {
   final String value, label;
-  const Option(this.value, this.label);
+  final String? snmpVersion;
+  const Option(this.value, this.label, {this.snmpVersion});
 }
 
 class FieldSpec {
@@ -3288,23 +3289,20 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
     defaultVendorProfile();
   }
 
-  static const mimosaPublicProfile = 'preset:mimosa:2c';
+  String? selectedSnmpVersion;
+  static const publicV2cProfile = 'preset:2c';
 
   void defaultVendorProfile() {
     final preset = switch (values['vendor']) {
-      'mimosa' => mimosaPublicProfile,
-      'mikrotik_switch' => 'preset:mikrotik_switch:2c',
+      'mimosa' => publicV2cProfile,
+      'mikrotik_switch' => publicV2cProfile,
       _ => null,
     };
     if (preset != null &&
         (values['snmp_profile_id'] == null ||
             values['snmp_profile_id'] == '') &&
         !changedSelections.contains('snmp_profile_id') &&
-        widget.fields.any(
-          (f) =>
-              f.kind == 'snmp_profile' &&
-              (f.options?.any((o) => o.value == preset) ?? false),
-        )) {
+        widget.fields.any((f) => f.kind == 'snmp_profile')) {
       values['snmp_profile_id'] = preset;
     }
   }
@@ -3312,40 +3310,98 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
   Widget snmpProfileField(FieldSpec field) {
     final selected = values[field.key] as String?;
     final preset = selected?.startsWith('preset:') == true;
+    final saved = field.options!.where((o) => o.value == selected).firstOrNull;
+    final version =
+        selectedSnmpVersion ??
+        (preset ? selected!.split(':').last : saved?.snmpVersion);
+    final wireVersion = version == '2' ? '2c' : version;
+    final profiles = field.options!
+        .where((o) => o.snmpVersion == wireVersion)
+        .toList();
+    final publicId = 'preset:$wireVersion';
+    final credentialOptions = [
+      if (wireVersion != null && wireVersion != '3') Option(publicId, 'public'),
+      ...profiles,
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         DropdownButtonFormField<String>(
-          key: ValueKey('snmp-profile:$selected'),
-          initialValue: field.options!.any((o) => o.value == selected)
-              ? selected
-              : null,
+          key: ValueKey('snmp-profile-version:$version'),
+          initialValue: version,
           isExpanded: true,
           decoration: InputDecoration(
             labelText: tr(field.label),
             helperText: field.helperText,
-            helperMaxLines: 4,
+            helperMaxLines: 3,
+            suffixIcon: version == null
+                ? null
+                : IconButton(
+                    tooltip: 'Remove SNMP profile',
+                    onPressed: busy
+                        ? null
+                        : () => setState(() {
+                            values[field.key] = null;
+                            selectedSnmpVersion = null;
+                            changedSelections.add(field.key);
+                          }),
+                    icon: const Icon(Icons.clear),
+                  ),
           ),
-          items: field.options!
-              .map(
-                (o) => DropdownMenuItem(value: o.value, child: Text(o.label)),
-              )
-              .toList(),
+          items: const [
+            DropdownMenuItem(value: '1', child: Text('SNMP v1')),
+            DropdownMenuItem(value: '2', child: Text('SNMP v2')),
+            DropdownMenuItem(value: '3', child: Text('SNMP v3')),
+            DropdownMenuItem(value: '2c', child: Text('SNMP v2c')),
+          ],
           onChanged: busy
               ? null
               : (value) => setState(() {
-                  values[field.key] = value;
+                  selectedSnmpVersion = value;
+                  final wire = value == '2' ? '2c' : value;
+                  if (wire != wireVersion) {
+                    values[field.key] = wire == '3'
+                        ? field.options!
+                              .where((o) => o.snmpVersion == '3')
+                              .firstOrNull
+                              ?.value
+                        : 'preset:$wire';
+                  }
                   changedSelections.add(field.key);
                 }),
         ),
-        if (preset) ...[
+        if (version != null) ...[
           const SizedBox(height: 12),
-          TextFormField(
-            key: ValueKey('snmp-version:$selected'),
-            initialValue: 'SNMPv${selected!.split(':').last}',
-            readOnly: true,
-            decoration: const InputDecoration(labelText: 'SNMP version'),
+          DropdownButtonFormField<String>(
+            key: ValueKey('snmp-credentials:$version:$selected'),
+            initialValue: credentialOptions.any((o) => o.value == selected)
+                ? selected
+                : null,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'SNMP credentials',
+              helperText: wireVersion == '3' && profiles.isEmpty
+                  ? 'Add an SNMP v3 profile in Settings → SNMP profiles first.'
+                  : 'Saved profiles keep their configured credentials.',
+              helperMaxLines: 3,
+            ),
+            items: credentialOptions
+                .map(
+                  (o) => DropdownMenuItem(value: o.value, child: Text(o.label)),
+                )
+                .toList(),
+            validator: (value) => value == null || value.isEmpty
+                ? 'Choose matching SNMP credentials'
+                : null,
+            onChanged: busy
+                ? null
+                : (value) => setState(() {
+                    values[field.key] = value;
+                    changedSelections.add(field.key);
+                  }),
           ),
+        ],
+        if (preset) ...[
           const SizedBox(height: 12),
           TextFormField(
             initialValue: 'public',
@@ -3353,24 +3409,11 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
             decoration: const InputDecoration(
               labelText: 'SNMP Community String',
               helperText:
-                  'Choose a saved profile to use a different community.',
+                  'Choose saved credentials to use a different community.',
               helperMaxLines: 2,
             ),
           ),
         ],
-        if (values['vendor'] == 'mimosa' && selected != mimosaPublicProfile)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: OutlinedButton(
-              onPressed: busy
-                  ? null
-                  : () => setState(() {
-                      values[field.key] = mimosaPublicProfile;
-                      changedSelections.add(field.key);
-                    }),
-              child: const Text('Use Mimosa SNMPv2c / public'),
-            ),
-          ),
       ],
     );
   }

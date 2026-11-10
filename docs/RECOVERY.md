@@ -9,3 +9,5 @@ Database restore: run `/opt/airlink/os/recovery/restore.sh /var/backups/airlink/
 If the installed system cannot boot, boot the AirLink USB in Recovery Mode. This grants local recovery tools to the person with physical control of the boot media. Inspect `lsblk -f` before mounting any filesystem. Mount the installed root read-only first; preserve logs and backups before making changes. No disk is automatically erased in recovery. The development ISO is not a defense against an attacker who can boot alternate media.
 
 A valid recovery rehearsal must include a restore on a spare VM, database validation, API startup and SNMP credential decryption. Consult PROGRESS.md for the tests actually performed on this release.
+
+For encrypted off-site copies and password-based decryption, see [Google Drive backups](GOOGLE-DRIVE-BACKUPS.md).

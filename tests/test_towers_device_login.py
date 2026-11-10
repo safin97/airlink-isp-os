@@ -92,3 +92,65 @@ def test_failed_or_disabled_login_is_safe(client, owner, monkeypatch, failure, c
     _, viewer = user(client, owner, 'viewer')
     assert client.get(PATH, headers=viewer).status_code == 403
     assert client.post('/api/devices/'+did+'/login', headers=viewer, json={'profile_id': pid}).status_code == 403
+
+
+@pytest.mark.parametrize('transport,port', [('routeros',None), ('routeros_tls',None), ('routeros',18728)])
+def test_native_profile_routes_to_routeros_with_saved_credentials(client, owner, monkeypatch, transport, port):
+    from airlink import routeros_native
+    tid = tower(client, owner)
+    did = device(client, owner, tid)
+    profile = client.post(PATH, headers=owner, json={**BODY, 'transport': transport, 'port': port})
+    assert profile.status_code == 201, profile.text
+    assert profile.json()['transport'] == transport
+    pid = profile.json()['id']
+    observed = []
+    class Connection:
+        def __init__(self, address, config): observed.append((address, config))
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def read(self, path, payload=None):
+            if path.startswith('interface/ethernet?'):
+                return [{'.id':'*1', 'name':'ether1', 'running':'true'}]
+            if path == 'interface/ethernet/monitor':
+                return [{'status':'link-ok', 'rate':'1Gbps'}]
+            if path.startswith('system/identity'): return [{'name':'Roof Router'}]
+            return []
+    monkeypatch.setattr(routeros_native, 'Connection', Connection)
+    result = client.post('/api/devices/'+did+'/login', headers=owner, json={'profile_id':pid})
+    assert result.status_code == 200, result.text
+    assert result.json()['ethernet'][0]['speed_mbps'] == 1000
+    assert result.json()['connection']['transport'] == transport
+    assert observed[0][0] == '192.0.2.1'
+    assert observed[0][1]['port'] == port
+    assert observed[0][1]['api_password'] == BODY['password']
+    assert BODY['password'] not in result.text
+    # Old clients omitting the new field cannot silently change a saved API transport.
+    edited = client.put(PATH+'/'+pid, headers=owner, json={**BODY, 'password': None, 'port':port})
+    assert edited.status_code == 200 and edited.json()['transport'] == transport
+
+
+def test_login_profile_picker_is_device_scoped_and_grant_filtered(client, owner):
+    mid, manager = user(client, owner, 'manager')
+    did = device(client, owner, tower(client, owner, manager=mid))
+    outside = device(client, owner, tower(client, owner, 'Outside'), '192.0.2.2')
+    shared = client.post(PATH, headers=owner, json={**BODY,'manager_ids':[mid]}).json()['id']
+    client.post(PATH, headers=owner, json={**BODY,'name':'Owner only'}).raise_for_status()
+    path = '/api/devices/'+did+'/login-profiles'
+    response = client.get(path, headers=manager)
+    assert response.status_code == 200, response.text
+    assert [p['id'] for p in response.json()] == [shared]
+    assert BODY['password'] not in response.text
+    assert client.get('/api/devices/'+outside+'/login-profiles', headers=manager).status_code == 404
+    client.put(PATH+'/'+shared, headers=owner, json={**BODY,'manager_ids':[]}).raise_for_status()
+    assert client.get(path, headers=manager).json() == []
+    assert client.get(PATH, headers=manager).status_code == 403
+
+
+@pytest.mark.parametrize('failure', ['native', 'eof'])
+def test_native_failure_does_not_expose_device_response(client, owner, monkeypatch, failure):
+    from airlink.routeros_native import APIError
+    did = device(client, owner, tower(client, owner))
+    pid = client.post(PATH, headers=owner, json={**BODY, 'transport':'routeros'}).json()['id']
+    monkeypatch.setattr(online_device, 'collect', AsyncMock(side_effect=(APIError if failure == 'native' else EOFError)('private-device-message')))
+    result = client.post('/api/devices/'+did+'/login', headers=owner, json={'profile_id':pid})
+    assert result.status_code == 502 and 'private-device-message' not in result.text

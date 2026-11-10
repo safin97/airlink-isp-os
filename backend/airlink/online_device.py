@@ -24,7 +24,7 @@ class DeviceRoute(APIRoute):
             except RequestValidationError:
                 # FastAPI's default errors echo invalid inputs, including submitted passwords.
                 return JSONResponse(status_code=422, content={'detail':
-                    'Invalid device login or setting. Check credentials, port, connection type and SSID (1–32 UTF-8 bytes).'},
+                    'Invalid device login or setting. Check required fields, credentials, port, IP prefixes, numeric values and SSID (1–32 UTF-8 bytes).'},
                     headers={'Cache-Control': 'no-store'})
         return safe_validation
 
@@ -51,6 +51,10 @@ async def routeros(client, base, config, reader=None):
         if status in (401, 403):
             raise PermissionError()
         return json.loads(raw) if status == 200 else None
+
+    if config.get('tower_panel'):
+        from .tower_routeros import snapshot
+        return await snapshot(read)
 
     async def monitor(path, row):
         if not isinstance(row.get('.id'), str):
@@ -123,7 +127,7 @@ async def collect(address, config, transport=None):
     if config.get('transport') == 'auto':
         from .online_device_auto import detect_and_connect
         return await asyncio.wait_for(detect_and_connect(address, config, transport), timeout=60)
-    result = await asyncio.wait_for(collect_once(address, config, transport), timeout=25)
+    result = await asyncio.wait_for(collect_once(address, config, transport), timeout=60 if config.get('tower_panel') else 25)
     return with_connection(result, config)
 
 
@@ -328,7 +332,7 @@ def resolve_login(data, db, user):
 def login_device(data: DeviceLogin, user=Depends(sas4.sas4_access), db=Depends(get_db)):
     address, config, source = resolve_login(data, db, user)
     config = {**config, 'verify_tls': True}
-    if data.login is None:
+    if data.login is None and config.get('transport') not in ('routeros', 'routeros_tls'):
         config = {**config, 'transport': 'auto', 'ssh_fingerprint': data.ssh_fingerprint}
     try:
         result = asyncio.run(collect(address, config))

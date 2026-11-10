@@ -1,53 +1,41 @@
-# Local review login
+# Run AirLink locally in VS Code
 
-The local preview runs the Flutter dashboard against an isolated FastAPI backend. It creates a separate SQLite database, an owner named `preview-owner`, and a random initial password. Preview data and keys are stored under the ignored `test-results/local-preview/` directory so the login and local edits survive ordinary server restarts. It does not use an inherited production database or start monitoring/payment workers.
+The local application is available at **http://127.0.0.1:18080/**. It uses the saved local database and accounts. The Mac's internet connection is used for outgoing SAS4 and device requests; no public hosting or port forwarding is needed.
 
-## Run on your computer
+## Live mode
 
-Install a compatible Flutter SDK (the checked-in package lock uses Flutter 3.47/Dart 3.13) and Python 3.11 or newer, then run from the repository root:
+In the repository's VS Code terminal, run:
 
 ```sh
-./scripts/preview.sh
+./scripts/live.sh
 ```
 
-The supplied preview ZIP already includes the built dashboard. With Python 3.11 or newer installed, you can start it without installing Flutter:
+Equivalent: `make live`. This uses the existing web build, enables real SAS4 calls and polls enabled inventory devices in the background using their saved ICMP, SNMP and device API settings. Online-user snapshots and customer telemetry refresh even when no page is open. The terminal prints `AirLink local mode: LIVE` at startup. Keep the process running while using the app; Ctrl+C stops it.
+
+Use **SAS4 connection** to save your real SAS4 login for your local account. Existing real connections are preserved. Live mode removes only the exact synthetic SAS4 connection fixtures originally created by the demo launcher; it preserves their accounts. It never replaces live readings with sample online-user data. Saved private device IPs still need a working LAN or VPN route from the Mac; internet access alone cannot reach an isolated tower subnet.
+
+The server binds only to `127.0.0.1`. It is a local development runtime using SQLite and an in-process Redis substitute, not the installed Linux appliance. Automatic payment processing and outbound alert dispatch are not started by this local launcher. Appliance networking, OS updates/restarts and scheduled Google Drive archive creation require the installed Linux system.
+
+## Build changes or use demo mode
+
+After editing Flutter code, build and start live mode with:
+
+```sh
+FLUTTER_BIN='/absolute/path/to/flutter/bin/flutter' ./scripts/preview.sh --live
+```
+
+For demo SAS4 data without background device polling:
 
 ```sh
 ./scripts/preview.sh --skip-build
 ```
 
-The first launch installs the Python dependencies. Keep the terminal open while reviewing. The login and local edits persist across ordinary restarts of the same extracted project folder. If you edit Flutter source files, run the regular build workflow before reviewing those changes.
+Omit `--skip-build` to rebuild the dashboard first. Stop the existing local process before starting another on the same port. Use `./scripts/live.sh --port 18081` for another port, but do not run multiple live monitors against the same local database.
 
-If Flutter is not on your PATH:
+## Local data and login
 
-```sh
-FLUTTER_BIN=/absolute/path/to/flutter/bin/flutter ./scripts/preview.sh
-```
+The current launcher stores data in `/tmp/airlink-browser-qa.sqlite`. It reuses existing accounts, passwords, inventory and credential profiles on restart. If there is no existing database, it initializes the development owner defined in `tests/preview.py`. A restart refreshes local session signing keys; the browser can refresh a saved session or you can sign in again with your existing local account.
 
-The script installs missing Python dependencies and builds the web dashboard. Open `http://127.0.0.1:18080/` on the same computer. Read the generated login from `test-results/local-preview-login.json`; this file is ignored by Git and has owner-only filesystem permissions. Never commit preview credentials.
+This `/tmp` database is temporary development storage and should be backed up before cleanup or reinstalling the Mac. Before the first switch to live mode, the existing database was copied to `/tmp/airlink-browser-qa-before-live-20261110T084432Z.sqlite`. It includes the previous readings and demo connection state. Keep database copies private because they include account data and encrypted device credentials.
 
-To use a different local port:
-
-```sh
-./scripts/preview.sh --port 18081
-```
-
-Stop the process with Ctrl+C. Restarting reuses the local database and authentication keys. If you change your password in My account, your chosen password remains in effect; the login file records the initial password. This is still temporary workspace storage, not production hosting or a backup. Rebuilding frontend assets while keeping the server running preserves the current preview data and login.
-
-## Managed Cloud Browser preview
-
-In the managed workspace, the supported `sites-preview` launcher owns the server. The checkout-local, ignored `package.json` uses this development command:
-
-```json
-{"scripts":{"dev":".venv/bin/python -u tests/preview.py > test-results/managed-preview.log 2>&1"}}
-```
-
-After building the frontend and installing Python dependencies, run `sites-preview start` with the absolute checkout path. Open the exact URL returned by that command in Cloud Browser. A Cloud Browser loopback address is local to the cloud environment; it is not a public website or the localhost of your own computer.
-
-## Available actions
-
-The owner can review every dashboard screen and edit local accounts, permissions, inventory and saved device-login profiles. My account contains separate Account profile, Change password, Customer device access and Payment setup pages. SAS4 connection is directly below Settings in the sidebar.
-
-Live SAS4 calls, payment operations, network discovery, device commands, appliance changes, update installation and restart are disabled. Public signed update metadata can be checked. Unpolled devices remain unknown; the preview does not invent online/offline results.
-
-These local changes do not commit or push anything to GitHub. Review the preview before publishing code or deploying to your AirLink server.
+The live launcher does not publish to GitHub or change your separate installed AirLink server. Internet, routing and authentication failures are shown as actual errors or unavailable readings; check the local terminal log and the relevant saved connection settings.

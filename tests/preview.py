@@ -1,9 +1,17 @@
-"""Local-only browser QA server, ephemeral DB and sessions; not production."""
+"""Loopback-only dashboard, with opt-in live SAS4 and device monitoring."""
+import argparse
+import asyncio
 import os
 import sys
 import secrets
 import json
 from pathlib import Path
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--live', action='store_true', help='Use saved SAS4 connections and monitor saved devices')
+parser.add_argument('--port', type=int, default=18080)
+args = parser.parse_args()
+if not 1024 <= args.port <= 65535:
+    parser.error('Choose a local port between 1024 and 65535')
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 sys.path.insert(0,str(ROOT/'backend'))
@@ -30,6 +38,13 @@ update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
 appliance_broker = api.broker
 
 def preview_broker(action, payload=None):
+    if action.startswith('backups.google-drive.'):
+        from cloud_backups import service as cloud_backups
+        cloud_backups.ROOT = Path('/tmp/airlink-google-drive-preview')
+        try:
+            return cloud_backups.service.action(action.removeprefix('backups.google-drive.'), payload or {})
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
     if action == 'system.restart':
         raise HTTPException(409, 'Restart from the dashboard hosted on your AirLink PC. This is a local preview.')
     if action.startswith('updates.'):
@@ -47,14 +62,31 @@ def preview_broker(action, payload=None):
 
 api.broker = preview_broker
 api.cache=fakeredis.FakeRedis(decode_responses=True)
-from contextlib import asynccontextmanager
-original_lifespan = api.app.router.lifespan_context
+from contextlib import asynccontextmanager, suppress
 
 @asynccontextmanager
 async def preview_lifespan(app):
-    async with original_lifespan(app):
-        # Local UI preview must not poll saved inventory or contact device IPs.
+    api.settings.validate()
+    monitor_task = None
+    api.system_stats_service.start()
+    if args.live:
+        from monitoring import worker
+        worker.cache = api.cache
+        api.customer_probe_service.start()
+        api.customer_collector_service.start()
+        monitor_task = asyncio.create_task(worker.main())
+    print('AirLink local mode: ' + ('LIVE — real SAS4 and device monitoring' if args.live else 'DEMO — sample SAS4 data'), flush=True)
+    try:
         yield
+    finally:
+        if monitor_task:
+            monitor_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await monitor_task
+        api.customer_collector_service.stop()
+        api.registration_username_service.stop()
+        api.customer_probe_service.stop()
+        api.system_stats_service.stop()
 
 api.app.router.lifespan_context = preview_lifespan
 Base.metadata.create_all(engine)
@@ -81,21 +113,26 @@ with SessionLocal() as db:
         db.add(user);db.flush();db.add(Initialization(id=1,owner_id=user.id));db.commit()
     owner = db.query(User).filter(User.role == 'owner').first()
     manager = db.query(User).filter(User.username == 'preview-manager').first()
-    if manager is None:
+    if manager is None and not args.live:
         manager = User(username='preview-manager', role='manager',
             password_hash=hasher.hash('Preview-Manager-Password-2026!'))
         db.add(manager);db.flush()
-    manager_connection = db.get(SAS4UserConnection, manager.id)
-    if manager_connection is None:
+    manager_connection = db.get(SAS4UserConnection, manager.id) if manager else None
+    if manager_connection is None and not args.live:
         manager_connection = SAS4UserConnection(user_id=manager.id,
             username='preview-manager-sas4',
             encrypted_password=cipher().encrypt(b'preview-only').decode())
         db.add(manager_connection)
     connection = db.get(SAS4UserConnection, owner.id)
-    if connection is None:
+    if connection is None and not args.live:
         connection = SAS4UserConnection(user_id=owner.id, username='preview-sas4',
             encrypted_password=cipher().encrypt(b'preview-only').decode())
         db.add(connection)
+    if args.live:
+        # Remove only exact synthetic connection fixtures; retain real profiles and all accounts.
+        for saved in db.query(SAS4UserConnection).filter(SAS4UserConnection.username.in_(('preview-sas4', 'preview-manager-sas4'))):
+            if cipher().decrypt(saved.encrypted_password.encode()) == b'preview-only':
+                db.delete(saved)
     db.commit()
 
 # Local-preview-only SAS4 listing. Explicit device login uses the real API adapters.
@@ -129,8 +166,9 @@ def preview_enrich(db, user, result, **kwargs):
             'signal_dbm': -61, 'ssid': 'AirLink Demo', 'telemetry_source': 'airOS HTTPS'})
     return {**result, 'clients': rows}
 
-sas4.fetch_clients = preview_fetch_clients
-sas4.fetch_dashboard = preview_fetch_dashboard
-sas4.customer_probe_service.enrich = preview_enrich
+if not args.live:
+    sas4.fetch_clients = preview_fetch_clients
+    sas4.fetch_dashboard = preview_fetch_dashboard
+    sas4.customer_probe_service.enrich = preview_enrich
 api.app.mount('/',StaticFiles(directory=ROOT/'frontend/build/web',html=True),name='dashboard')
-uvicorn.run(api.app,host='127.0.0.1',port=18080)
+uvicorn.run(api.app,host='127.0.0.1',port=args.port)

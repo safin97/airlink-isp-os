@@ -138,29 +138,27 @@ void main() {
               w is DropdownButtonFormField<String> &&
               w.decoration.labelText == 'SNMP profile',
         );
-        final label = switch (vendor) {
-          'mikrotik' => 'MikroTik switch',
-          'mikrotik_switch' => 'MikroTik switch',
-          'ubiquiti_ac' => 'UBNT (M5 / AC / other models)',
-          _ => 'Mimosa (all models)',
-        };
         if (scenario.profile != null) {
           // Opening an existing device must preserve its custom profile.
-          expect(find.text('Private profile — SNMP v3'), findsOneWidget);
+          expect(find.text('Private profile'), findsOneWidget);
           expect(find.text('SNMP Community String'), findsNothing);
           await tester.ensureVisible(select);
           await tester.tap(select);
           await tester.pumpAndSettle();
-          final preset = find.text('$label — SNMP v2c / public').last;
-          if (vendor == 'mimosa' || vendor == 'mikrotik') {
-            expect(find.text('$label — SNMP v1 / public'), findsNothing);
-          }
-          await tester.ensureVisible(preset);
-          await tester.tap(preset);
+          final dropdown = tester.widget<DropdownButton<String>>(
+            find.descendant(
+              of: select,
+              matching: find.byType(DropdownButton<String>),
+            ),
+          );
+          expect(
+            dropdown.items!.map((item) => (item.child as Text).data).toList(),
+            ['SNMP v1', 'SNMP v2', 'SNMP v3', 'SNMP v2c'],
+          );
+          await tester.tap(find.text('SNMP v2c').last);
           await tester.pumpAndSettle();
         }
-        expect(find.text('$label — SNMP v2c / public'), findsOneWidget);
-        expect(find.text('SNMPv2c'), findsOneWidget);
+        expect(find.text('SNMP v2c'), findsOneWidget);
         final community = tester.widget<TextFormField>(
           find.widgetWithText(TextFormField, 'SNMP Community String'),
         );

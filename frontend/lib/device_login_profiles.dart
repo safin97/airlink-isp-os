@@ -170,7 +170,11 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
               leading: const Icon(Icons.key_outlined),
               title: Text(row['name']),
               subtitle: Text(
-                '${row['username']} • ${row['protocol']} • ${row['enabled'] == true ? 'Enabled' : 'Disabled'}${row['shared'] == true ? ' • Shared with you' : ''}${(row['assigned_managers'] as List? ?? []).isEmpty ? '' : ' • Managers: ${(row['assigned_managers'] as List).map((manager) => manager['username']).join(', ')}'}',
+                '${row['username']} • ${row['transport'] == 'routeros'
+                    ? 'MikroTik API'
+                    : row['transport'] == 'routeros_tls'
+                    ? 'MikroTik API-SSL'
+                    : row['protocol']} • ${row['enabled'] == true ? 'Enabled' : 'Disabled'}${row['shared'] == true ? ' • Shared with you' : ''}${(row['assigned_managers'] as List? ?? []).isEmpty ? '' : ' • Managers: ${(row['assigned_managers'] as List).map((manager) => manager['username']).join(', ')}'}',
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -228,6 +232,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
     text: widget.profile?['port']?.toString() ?? '',
   );
   late String protocol = widget.profile?['protocol'] ?? 'both';
+  late String transport = widget.profile?['transport'] ?? 'web';
   late bool enabled = widget.profile?['enabled'] ?? true,
       verifyTls = widget.profile?['verify_tls'] ?? true;
   List<dynamic> managers = [];
@@ -276,6 +281,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
           'username': username.text.trim(),
           'password': password.text.isEmpty ? null : password.text,
           'protocol': protocol,
+          'transport': transport,
           'port': port.text.trim().isEmpty ? null : int.parse(port.text.trim()),
           'verify_tls': verifyTls,
           'enabled': enabled,
@@ -354,23 +360,58 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  initialValue: protocol,
-                  decoration: const InputDecoration(labelText: 'Connection'),
+                  initialValue: transport,
+                  decoration: const InputDecoration(labelText: 'Login type'),
                   items: const [
+                    DropdownMenuItem(value: 'web', child: Text('Web / REST')),
                     DropdownMenuItem(
-                      value: 'both',
-                      child: Text('HTTPS + HTTP (automatic)'),
+                      value: 'routeros',
+                      child: Text('MikroTik API'),
                     ),
-                    DropdownMenuItem(value: 'https', child: Text('HTTPS')),
-                    DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                    DropdownMenuItem(
+                      value: 'routeros_tls',
+                      child: Text('MikroTik API-SSL'),
+                    ),
                   ],
-                  onChanged: busy ? null : (v) => setState(() => protocol = v!),
+                  onChanged: busy
+                      ? null
+                      : (value) => setState(() {
+                          transport = value!;
+                          port.clear();
+                        }),
                 ),
+                if (transport != 'web') ...[
+                  const SizedBox(height: 12),
+                  const AppText(
+                    'Enable the matching API service on the MikroTik and allow this AirLink computer to connect. The saved user needs API and read permissions.',
+                  ),
+                ],
+                if (transport == 'web')
+                  DropdownButtonFormField<String>(
+                    initialValue: protocol,
+                    decoration: const InputDecoration(labelText: 'Connection'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'both',
+                        child: Text('HTTPS + HTTP (automatic)'),
+                      ),
+                      DropdownMenuItem(value: 'https', child: Text('HTTPS')),
+                      DropdownMenuItem(value: 'http', child: Text('HTTP')),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (v) => setState(() => protocol = v!),
+                  ),
                 TextFormField(
                   controller: port,
                   enabled: !busy,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Port (optional)',
+                    helperText: transport == 'routeros'
+                        ? 'Default: 8728'
+                        : transport == 'routeros_tls'
+                        ? 'Default: 8729'
+                        : 'Default: 443 for HTTPS, 80 for HTTP',
                   ),
                   keyboardType: TextInputType.number,
                   validator: (v) =>
@@ -381,11 +422,18 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
                       ? null
                       : 'Enter a port from 1 to 65535',
                 ),
-                SwitchListTile(
-                  title: const AppText('Verify HTTPS certificate'),
-                  value: verifyTls,
-                  onChanged: busy ? null : (v) => setState(() => verifyTls = v),
-                ),
+                if (transport != 'routeros')
+                  SwitchListTile(
+                    title: AppText(
+                      transport == 'routeros_tls'
+                          ? 'Verify API-SSL certificate'
+                          : 'Verify HTTPS certificate',
+                    ),
+                    value: verifyTls,
+                    onChanged: busy
+                        ? null
+                        : (v) => setState(() => verifyTls = v),
+                  ),
                 SwitchListTile(
                   title: const AppText('Enabled'),
                   value: enabled,

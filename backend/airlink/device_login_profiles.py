@@ -19,6 +19,7 @@ class ProfileInput(BaseModel):
     username: str = Field(min_length=1, max_length=128)
     password: Optional[str] = Field(default=None, max_length=1024)
     protocol: Literal['https', 'http', 'both'] = 'both'
+    transport: Literal['web', 'routeros', 'routeros_tls'] = 'web'
     port: Optional[int] = Field(default=None, ge=1, le=65535)
     verify_tls: bool = True
     enabled: bool = True
@@ -68,7 +69,9 @@ def assignments(db, row):
 
 
 def public(db, row, user):
-    result = {'id': row.id, 'name': row.name, **public_login(configuration(row)),
+    config = configuration(row)
+    result = {'id': row.id, 'name': row.name, **public_login(config),
+              'transport': config.get('transport', 'web'),
               'shared': row.user_id != user.id}
     if user.role == 'owner' and row.user_id == user.id:
         result['assigned_managers'] = assignments(db, row)
@@ -101,6 +104,7 @@ def save(db, user, data, row=None):
     row.name = data.name
     row.encrypted_config = cipher().encrypt(json.dumps({
         'api_username': data.username, 'api_password': password, 'protocol': data.protocol,
+        'transport': data.transport if 'transport' in data.model_fields_set else old.get('transport', 'web'),
         'port': data.port, 'verify_tls': data.verify_tls, 'enabled': data.enabled}).encode()).decode()
     db.flush()
     if data.manager_ids is not None:

@@ -52,3 +52,25 @@ def test_oversized_or_reserved_words_are_rejected():
             await connection.read_word()
     asyncio.run(check(b'\xf8'))
     asyncio.run(check(b'\xf0\x00\x20\x00\x00'))
+
+
+@pytest.mark.parametrize('port', [None, 18729])
+def test_api_ssl_default_and_custom_port_keep_certificate_verification(monkeypatch, port):
+    async def check():
+        reader = asyncio.StreamReader()
+        reader.feed_data(ros.word('!done') + b'\0')
+        class Writer:
+            def write(self, data): pass
+            async def drain(self): pass
+            def close(self): pass
+            async def wait_closed(self): pass
+        async def open_connection(address, actual_port, ssl=None):
+            import ssl as tls
+            assert address == '192.0.2.10' and actual_port == (port or 8729)
+            assert ssl.check_hostname and ssl.verify_mode == tls.CERT_REQUIRED
+            return reader, Writer()
+        monkeypatch.setattr(asyncio, 'open_connection', open_connection)
+        async with ros.Connection('192.0.2.10', {'transport':'routeros_tls','port':port,
+                'api_username':'reader','api_password':'private','verify_tls':True}):
+            pass
+    asyncio.run(check())

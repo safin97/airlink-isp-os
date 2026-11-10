@@ -86,12 +86,23 @@ def ensure_certificate(directory, addresses):
 def refresh_web_config(path):
     path = Path(path)
     source = path.read_text()
+    original = source
     header = '    add_header Cache-Control "no-cache, max-age=0, must-revalidate" always;\n'
     if 'root /opt/airlink/frontend/build/web;' in source and 'add_header Cache-Control' not in source:
         source = source.replace('    root /opt/airlink/frontend/build/web;', header + '    root /opt/airlink/frontend/build/web;', 1)
-        atomic(path, source.encode(), 0o644)
-        return True
-    return False
+    if 'location = /api/backups/google-drive/callback' not in source and 'location /api/ {' in source:
+        callback = '''location = /api/backups/google-drive/callback {
+        access_log off;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    '''
+        source = source.replace('location /api/ {', callback + 'location /api/ {', 1)
+    if source == original:
+        return False
+    atomic(path, source.encode(), 0o644)
+    return True
 
 
 if __name__ == '__main__':

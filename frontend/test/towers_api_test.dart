@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:airlink_isp_os/api.dart';
 import 'package:airlink_isp_os/main.dart';
-import 'package:airlink_isp_os/online_device_dialog.dart';
 
 void main() {
   testWidgets(
@@ -18,6 +17,8 @@ void main() {
       final profiles = <Map<String, dynamic>>[];
       final saves = <Map<String, dynamic>>[];
       final logins = <Map<String, dynamic>>[];
+      final deviceChanges = <Map<String, dynamic>>[];
+      var deviceName = 'Roof radio';
       final api = Api(
         client: MockClient((request) async {
           dynamic result = [];
@@ -53,6 +54,7 @@ void main() {
                   'name': body['name'],
                   'username': body['username'],
                   'protocol': body['protocol'],
+                  'transport': body['transport'],
                   'enabled': true,
                   'has_password': true,
                 });
@@ -60,12 +62,38 @@ void main() {
               } else {
                 result = profiles;
               }
+            case '/api/devices/d/login-profiles':
+              result = profiles;
+            case '/api/devices/d/settings':
+              expect(request.method, 'PUT');
+              final body = Map<String, dynamic>.from(jsonDecode(request.body));
+              deviceChanges.add(body);
+              deviceName = body['changes']['name'];
+              result = {'status': 'accepted'};
             case '/api/devices/d/login':
               expect(request.method, 'POST');
               logins.add(Map<String, dynamic>.from(jsonDecode(request.body)));
               result = {
                 'vendor': 'MikroTik',
                 'credential_source': 'Roof API',
+                'username': 'Roof radio',
+                'ip_address': '192.0.2.1',
+                'tower_settings': [
+                  {
+                    'resource': 'identity',
+                    'title': 'Device identity',
+                    'fields': [
+                      {'key': 'name', 'label': 'Device name', 'kind': 'text'},
+                    ],
+                    'rows': [
+                      {
+                        'id': '',
+                        'values': {'name': deviceName},
+                        'editable': true,
+                      },
+                    ],
+                  },
+                ],
                 'wireless': [],
                 'ethernet': [
                   {'name': 'ether1', 'speed_mbps': 1000},
@@ -112,9 +140,25 @@ void main() {
         find.widgetWithText(TextFormField, 'Device password'),
         'device-test-secret',
       );
+      final type = find.byWidgetPredicate(
+        (widget) =>
+            widget is DropdownButtonFormField<String> &&
+            widget.decoration.labelText == 'Login type',
+      );
+      await tester.ensureVisible(type);
+      await tester.tap(type);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('MikroTik API').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Default: 8728'), findsOneWidget);
+      await tester.ensureVisible(
+        find.widgetWithText(CheckboxListTile, 'north-manager'),
+      );
       await tester.tap(find.widgetWithText(CheckboxListTile, 'north-manager'));
       await tester.tap(find.text('Save profile'));
       await tester.pumpAndSettle();
+      expect(saves.single['transport'], 'routeros');
+      expect(saves.single['port'], isNull);
       expect(saves.single['password'], 'device-test-secret');
       expect(saves.single['manager_ids'], ['m']);
       expect(find.text('device-test-secret'), findsNothing);
@@ -135,32 +179,19 @@ void main() {
         ),
       );
       expect(actionButtons.map((button) => button.tooltip).toList(), [
+        'Login via API',
         'Edit',
         'Delete',
       ]);
-      // The saved-login dialog remains covered independently of inventory actions.
-      await tester.pumpWidget(
-        MaterialApp(
-          home: OnlineDeviceDialog(
-            api: api,
-            towerDeviceId: 'd',
-            row: {
-              'id': 'd',
-              'name': 'Roof radio',
-              'username': 'Roof radio',
-              'ip_address': '192.0.2.1',
-            },
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(logins, isEmpty);
-      await tester.tap(find.text('Connect'));
+      await tester.ensureVisible(find.byTooltip('Login via API'));
+      await tester.tap(find.byTooltip('Login via API'));
       await tester.pumpAndSettle();
       expect(logins, isEmpty);
       expect(
-        find.text('Choose a saved login from Towers API.'),
-        findsOneWidget,
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Connect'))
+            .onPressed,
+        isNull,
       );
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
@@ -171,9 +202,40 @@ void main() {
       await tester.tap(find.text('Connect'));
       await tester.pumpAndSettle();
       expect(logins.single, {'profile_id': 'p'});
-      expect(find.text('Device overview'), findsOneWidget);
-      expect(find.text('Roof radio'), findsOneWidget);
+      expect(find.text('AIRLINK  /  DEVICE MANAGER'), findsOneWidget);
+      expect(find.text('MikroTik · 192.0.2.1'), findsOneWidget);
       expect(find.text('PPPoE Subscription'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('device-tab-3')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Device identity settings (1)'));
+      await tester.tap(find.text('Device identity settings (1)'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byTooltip('Edit Device identity'));
+      await tester.tap(find.byTooltip('Edit Device identity'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Device name'),
+        'Roof switch',
+      );
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(deviceChanges, isEmpty);
+      await tester.tap(find.text('Save to device'));
+      await tester.pumpAndSettle();
+      expect(deviceChanges.single, {
+        'profile_id': 'p',
+        'resource': 'identity',
+        'action': 'set',
+        'record_id': '',
+        'previous': {'name': 'Roof radio'},
+        'changes': {'name': 'Roof switch'},
+      });
+      expect(logins.length, 2);
+      expect(find.text('Roof switch'), findsOneWidget);
+      expect(
+        find.text('Device accepted the change. Settings refreshed.'),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

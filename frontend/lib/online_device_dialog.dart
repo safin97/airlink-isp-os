@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'online_device_dashboard.dart';
+import 'tower_device_panel.dart';
+import 'tower_api_login.dart';
 import 'app_language.dart';
 import 'device_login_profiles.dart';
 import 'section_access.dart';
@@ -25,6 +27,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   Map<String, dynamic>? data;
   String? error;
   bool busy = true;
+  bool loadingProfiles = true, profilesLoaded = false;
+  int? loginErrorStatus;
   bool showDetails = false;
   List<dynamic> profiles = [];
   late String profileId = widget.towerDeviceId == null ? 'auto' : '';
@@ -55,6 +59,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       resolvedProfileId = null;
       attemptLabel = null;
       error = null;
+      loginErrorStatus = null;
       message = null;
       fingerprint = null;
       mustReload = false;
@@ -133,6 +138,33 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
     }
   }
 
+  Future<void> saveTowerSettings(Map<String, dynamic> change) async {
+    setState(() {
+      busy = true;
+      error = null;
+      message = null;
+      mustReload = true;
+    });
+    try {
+      await widget.api.request(
+        '/devices/${Uri.encodeComponent(widget.towerDeviceId!)}/settings',
+        method: 'PUT',
+        body: {...payload(), ...change},
+      );
+      if (!mounted) return;
+      await load();
+      if (mounted && error == null) {
+        setState(
+          () => message = 'Device accepted the change. Settings refreshed.',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -142,11 +174,16 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   Future<void> loadProfiles() async {
     setState(() {
       busy = true;
+      loadingProfiles = true;
+      profilesLoaded = false;
       error = null;
+      loginErrorStatus = null;
     });
     try {
       final result = await widget.api.request(
-        towerLogin ? towersApiProfilesPath : deviceLoginProfilesPath,
+        towerLogin
+            ? '/devices/${Uri.encodeComponent(widget.towerDeviceId!)}/login-profiles'
+            : deviceLoginProfilesPath,
       );
       final defaults = towerLogin
           ? <String, dynamic>{}
@@ -156,6 +193,10 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
           profiles = (result as List)
               .where((p) => p['enabled'] == true)
               .toList();
+          profilesLoaded = true;
+          if (towerLogin && !profiles.any((p) => p['id'] == profileId)) {
+            profileId = '';
+          }
           hasDefaultLogin =
               defaults['enabled'] != false &&
               defaults['has_api_password'] == true &&
@@ -164,13 +205,31 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => error = e.toString());
+        setState(() {
+          error = e.toString();
+          loginErrorStatus = e is ApiException ? e.status : null;
+        });
       }
     } finally {
       if (mounted) {
-        setState(() => busy = false);
+        setState(() {
+          busy = false;
+          loadingProfiles = false;
+        });
       }
     }
+  }
+
+  Future<void> addTowerProfile() async {
+    if (widget.api.user?['role'] != 'owner' || busy) return;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => DeviceLoginProfileEditor(
+        api: widget.api,
+        path: towersApiProfilesPath,
+      ),
+    );
+    if (saved == true && mounted) await loadProfiles();
   }
 
   Future<dynamic> connectCandidate(String candidate) async {
@@ -224,6 +283,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
     setState(() {
       busy = true;
       error = null;
+      loginErrorStatus = null;
     });
     try {
       final candidates = profileId == 'manual'
@@ -282,7 +342,10 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       });
     } catch (e) {
       if (mounted) {
-        setState(() => error = e.toString());
+        setState(() {
+          error = e.toString();
+          loginErrorStatus = e is ApiException ? e.status : null;
+        });
       }
     } finally {
       if (mounted) {
@@ -517,7 +580,20 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
-    child: data != null
+    child: data != null && towerLogin && data!['tower_settings'] != null
+        ? TowerDevicePanel(
+            data: data!,
+            busy: busy,
+            stale: error != null || mustReload,
+            canEdit: canEditSection(widget.api.user ?? {}, 'towers'),
+            error: error,
+            message: message,
+            onRefresh: load,
+            onSave: saveTowerSettings,
+            onClose: () => Navigator.pop(context),
+            onChangeLogin: resetConnection,
+          )
+        : data != null
         ? OnlineDeviceDashboard(
             data: data!,
             row: widget.row,
@@ -532,6 +608,27 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
             onSettings: () => setState(() => showDetails = !showDetails),
             details: connectedDetails(),
           )
+        : towerLogin
+        ? TowerApiLogin(
+            device: widget.row,
+            profiles: profiles,
+            profileId: profileId,
+            busy: busy,
+            loadingProfiles: loadingProfiles,
+            profilesLoaded: profilesLoaded,
+            owner: widget.api.user?['role'] == 'owner',
+            canEdit: canEditSection(widget.api.user ?? {}, 'towers'),
+            error: error,
+            errorStatus: loginErrorStatus,
+            onSelect: (id) {
+              setState(() => profileId = id);
+              resetConnection();
+            },
+            onConnect: load,
+            onReload: loadProfiles,
+            onClose: () => Navigator.pop(context),
+            onAddProfile: addTowerProfile,
+          )
         : AlertDialog(
             title: AppText('Device • ${widget.row['username']}'),
             content: SizedBox(
@@ -542,10 +639,6 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SelectableText('${widget.row['ip_address']}'),
-                    if (towerLogin)
-                      const Text(
-                        'Choose a saved API username and password from Towers API in the sidebar. Uses RouterOS REST or airOS web access.',
-                      ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<String>(
                       key: ValueKey('login-profile-$profileId'),
@@ -555,16 +648,10 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
                         labelText: 'Device login profile',
                       ),
                       items: [
-                        if (towerLogin)
-                          const DropdownMenuItem(
-                            value: '',
-                            child: Text('Choose a Towers API login'),
-                          ),
-                        if (!towerLogin)
-                          const DropdownMenuItem(
-                            value: 'auto',
-                            child: Text('Automatic — try saved logins'),
-                          ),
+                        const DropdownMenuItem(
+                          value: 'auto',
+                          child: Text('Automatic — try saved logins'),
+                        ),
                         if (hasDefaultLogin)
                           const DropdownMenuItem(
                             value: 'online',
@@ -577,11 +664,10 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
                               '${profile['name']} — ${profile['username']}',
                             ),
                           ),
-                        if (!towerLogin)
-                          const DropdownMenuItem(
-                            value: 'manual',
-                            child: Text('Temporary username and password'),
-                          ),
+                        const DropdownMenuItem(
+                          value: 'manual',
+                          child: Text('Temporary username and password'),
+                        ),
                       ],
                       onChanged: busy
                           ? null
@@ -623,9 +709,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
                       const LinearProgressIndicator(),
                       AppText(
                         attemptLabel ??
-                            (towerLogin
-                                ? 'Connecting with the selected API login…'
-                                : 'Detecting device and trying connections one by one…'),
+                            'Detecting device and trying connections one by one…',
                       ),
                     ],
                     if (error != null)

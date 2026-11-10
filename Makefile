@@ -1,4 +1,4 @@
-.PHONY: test frontend iso linux-test preview
+.PHONY: test frontend iso linux-test preview live
 
 test:
 	.venv/bin/pytest -q
@@ -14,3 +14,6 @@ linux-test:
 
 preview:
 	./scripts/preview.sh
+
+live:
+	./scripts/live.sh

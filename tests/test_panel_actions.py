@@ -93,3 +93,32 @@ def test_setting_hostname_during_pending_network_change_is_rejected(tmp_path, mo
     monkeypatch.setattr(panel, 'run', lambda *args, **kwargs: pytest.fail('Changed pending network hostname'))
     with pytest.raises(ValueError, match='pending network'):
         panel.local_action('save_settings', {'confirm': True}, 'token')
+
+
+def test_panel_restore_inherits_maintenance_lock(tmp_path, monkeypatch):
+    import fcntl
+    import subprocess
+    import sys
+    monkeypatch.setattr(panel, 'api', lambda *args: {'role': 'owner', 'id': 'owner'})
+    monkeypatch.setattr(panel.update, 'ROOT', tmp_path/'updates')
+    monkeypatch.setattr(panel.update, 'restart_status', lambda: {'pending': False})
+    monkeypatch.setattr(panel, 'BACKUPS', tmp_path/'backups')
+    backup = panel.BACKUPS/'saved'; backup.mkdir(parents=True)
+    (backup/'SHA256SUMS').write_text('test')
+    executed = []
+    def run(args, **kwargs):
+        if args[0] == 'bash':
+            executed.append(args)
+            fd = int(kwargs['env']['AIRLINK_MAINTENANCE_FD'])
+            assert kwargs['pass_fds'] == (fd,)
+            # A child can use the inherited lock; a separate open cannot acquire it.
+            child = subprocess.run([sys.executable, '-c',
+                'import fcntl,os; fcntl.flock(int(os.environ["AIRLINK_MAINTENANCE_FD"]), fcntl.LOCK_EX|fcntl.LOCK_NB)'],
+                env=kwargs['env'], pass_fds=kwargs['pass_fds'])
+            assert child.returncode == 0
+            with (panel.update.ROOT/'lock').open('w') as other:
+                with pytest.raises(BlockingIOError): fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return 'Restored'
+    monkeypatch.setattr(panel, 'run', run)
+    assert 'Database restored' in panel.local_action('restore', {'confirm': True, 'backup': 'saved'}, 'owner-token')
+    assert len(executed) == 1
