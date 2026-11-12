@@ -36,7 +36,10 @@ def test_device_access_secrets_scoped_and_encrypted(client, owner):
         saved = db.scalar(select(CustomerProbeSettings))
         assert 'private-' not in saved.encrypted_settings
         assert json.loads(cipher().decrypt(saved.encrypted_settings.encode()))['api_password'] == 'private-api'
-        assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == []
+        assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == [
+            {'version': '2c', 'community': 'private-snmp'},
+            {'version': '1', 'community': 'private-snmp'},
+        ]
         owner_user = db.scalar(select(User).where(User.role == 'owner'))
         assert probes.configuration(db, owner_user)['snmp_candidates'] == [
             {'version': '2c', 'community': 'private-snmp'},
@@ -45,7 +48,10 @@ def test_device_access_secrets_scoped_and_encrypted(client, owner):
     disabled = client.put(path, headers=manager, json={'try_public_snmp':False})
     assert disabled.status_code == 403
     with SessionLocal() as db:
-        assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == []
+        assert probes.configuration(db, db.get(User, manager_id))['snmp_candidates'] == [
+            {'version': '2c', 'community': 'private-snmp'},
+            {'version': '1', 'community': 'private-snmp'},
+        ]
     assert client.put(path, headers=owner, json={'api_username':'changed'}).status_code == 422
     saved = client.put(path, headers=owner, json={'api_username':'monitor', 'community':None})
     assert saved.json()['has_community'] and saved.json()['has_api_password']

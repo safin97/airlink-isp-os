@@ -7,7 +7,7 @@ import ipaddress
 import json
 import threading
 import time
-from .models import CustomerProbeSettings, SAS4UserConnection, now
+from .models import CustomerProbeSettings, SAS4UserConnection, User, now
 from .security import cipher
 from .vendor_identity import VENDOR_LABELS
 
@@ -17,6 +17,12 @@ DEFAULTS = {'enabled': True, 'community': '', 'api_username': '', 'api_password'
 
 def configuration(db, user):
     obj = db.get(CustomerProbeSettings, user.id)
+    # Managers use the owner's monitoring settings only on the server; their
+    # SAS4 customer scope and telemetry cache remain isolated.
+    if obj is None and user.role == 'manager':
+        obj = (db.query(CustomerProbeSettings).join(User, User.id == CustomerProbeSettings.user_id)
+               .filter(User.role == 'owner', User.active.is_(True))
+               .order_by(User.created_at, User.id).first())
     config = {**DEFAULTS, **(json.loads(cipher().decrypt(obj.encrypted_settings.encode())) if obj else {})}
     communities = []
     if isinstance(config.get('community'), str) and config['community'].strip():
