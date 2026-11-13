@@ -6,6 +6,7 @@ from airlink.db import SessionLocal
 from airlink.models import Device, Metric, Alert, now
 from airlink.security import aware
 from .worker import cache
+from airlink import telegram
 
 
 def evaluate(db, device, metric):
@@ -19,9 +20,13 @@ def evaluate(db, device, metric):
     for kind, (active, severity, message) in conditions.items():
         alert = db.scalar(select(Alert).where(Alert.device_id == device.id, Alert.kind == kind, Alert.resolved_at.is_(None)))
         if active and not alert:
-            db.add(Alert(device_id=device.id, kind=kind, severity=severity, message=message))
+            alert = Alert(device_id=device.id, kind=kind, severity=severity, message=message)
+            db.add(alert)
+            telegram.enqueue(db, alert, device)
         elif not active and alert:
             alert.resolved_at = now()
+            if fresh and device.status == 'online':
+                telegram.enqueue(db, alert, device, recovered=True)
 
 
 def main():
@@ -39,6 +44,7 @@ def main():
                         db.execute(delete(Metric).where(Metric.collected_at < now() - timedelta(days=30)))
                         retention_at = time.time()
                     db.commit()
+                    telegram.dispatch(db)
                 cache.set("health:alerts", str(time.time()), ex=90)
         except Exception:
             logging.exception("Alert iteration failed")

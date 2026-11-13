@@ -1,3 +1,4 @@
+import 'telegram_settings.dart';
 import 'app_language.dart';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import 'customer_device_access.dart';
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
   'Change password': Icons.lock_outline,
+  if (user['role'] == 'owner' || user['role'] == 'manager')
+    'Telegram notifications': Icons.send_outlined,
   if (user['role'] == 'owner') ...{
     'Customer device access': Icons.router_outlined,
     'Payment setup': Icons.payments_outlined,
@@ -96,6 +99,7 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
             ),
             const SizedBox(height: 20),
             switch (selectedPage) {
+              'Telegram notifications' => TelegramSettings(api: widget.api),
               'Change password' => passwordSettings(),
               'Customer device access' => CustomerDeviceAccess(
                 api: widget.api,

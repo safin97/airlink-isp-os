@@ -1134,3 +1134,6 @@ async def live_changes(websocket: WebSocket):
         await websocket.close(code=4401)
     except WebSocketDisconnect:
         pass
+
+from . import telegram
+app.include_router(telegram.router)

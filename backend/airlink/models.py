@@ -352,3 +352,26 @@ class RechargePayment(Base):
     detail = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class TelegramSettings(Base):
+    __tablename__ = 'telegram_settings'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True)
+    id = Column(Integer, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    encrypted_token = Column(Text, nullable=False)
+    chat_id = Column(String(128), nullable=False)
+    last_error = Column(String(300))
+    last_sent_at = Column(DateTime(timezone=True))
+
+
+class TelegramNotification(Base):
+    __tablename__ = 'telegram_notifications'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    device_id = Column(String(36), ForeignKey('devices.id', ondelete='CASCADE'))
+    id = Column(String(36), primary_key=True, default=uid)
+    event_key = Column(String(80), nullable=False, unique=True)
+    message = Column(Text, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
+    sent_at = Column(DateTime(timezone=True))

@@ -120,6 +120,39 @@ class SystemPerformance extends StatelessWidget {
         ['Read speed', 'Write: ${throughput(data['disk_write_bytes_sec'])}'],
       ),
     );
+    final gpus = data['gpus'] as List?;
+    if (gpus == null || gpus.isEmpty) {
+      cards.add(
+        tile('GPU', Icons.developer_board, 'Unavailable', [
+          gpus == null
+              ? 'GPU readings unavailable'
+              : 'No GPU detected on this host',
+        ]),
+      );
+    } else {
+      for (final gpu in gpus.whereType<Map>()) {
+        final ready = gpu['status'] == 'ready';
+        cards.add(
+          tile(
+            gpu['name'] as String? ?? 'GPU',
+            Icons.developer_board,
+            ready
+                ? number(gpu['utilization_percent'], suffix: '%')
+                : 'Unavailable',
+            [
+              'VRAM: ${number(gpu['memory_used_mib'], suffix: ' MiB')} used / ${number(gpu['memory_total_mib'], suffix: ' MiB')}',
+              'Temperature: ${number(gpu['temperature_c'], suffix: ' °C')}',
+              'Driver: ${gpu['driver'] ?? 'Not loaded'}${gpu['driver_version'] == null ? '' : ' · ${gpu['driver_version']}'}',
+              if (!ready)
+                gpu['status'] == 'not_loaded'
+                    ? 'GPU detected; driver not loaded'
+                    : 'GPU detected; telemetry unavailable',
+            ],
+            percent: ready ? gpu['utilization_percent'] : null,
+          ),
+        );
+      }
+    }
     cards.add(
       tile('Google DNS', Icons.dns_outlined, latencyReading(google), [
         '8.8.8.8 · ICMP round-trip',

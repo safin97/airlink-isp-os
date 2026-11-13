@@ -68,6 +68,7 @@ from contextlib import asynccontextmanager, suppress
 async def preview_lifespan(app):
     api.settings.validate()
     monitor_task = None
+    alert_task = None
     api.system_stats_service.start()
     if args.live:
         from monitoring import worker
@@ -75,10 +76,33 @@ async def preview_lifespan(app):
         api.customer_probe_service.start()
         api.customer_collector_service.start()
         monitor_task = asyncio.create_task(worker.main())
+        from monitoring import alerts
+        from sqlalchemy import select
+        from airlink.models import Device, Metric
+        def alert_tick():
+            with SessionLocal() as db:
+                for device in db.scalars(select(Device).where(Device.enabled.is_(True))):
+                    metric = db.scalar(select(Metric).where(Metric.device_id == device.id).order_by(Metric.collected_at.desc()).limit(1))
+                    alerts.evaluate(db, device, metric)
+                db.commit()
+                alerts.telegram.dispatch(db)
+        async def local_alerts():
+            import logging
+            while True:
+                try:
+                    await asyncio.to_thread(alert_tick)
+                except Exception:
+                    logging.error('Local alert iteration failed')
+                await asyncio.sleep(15)
+        alert_task = asyncio.create_task(local_alerts())
     print('AirLink local mode: ' + ('LIVE — real SAS4 and device monitoring' if args.live else 'DEMO — sample SAS4 data'), flush=True)
     try:
         yield
     finally:
+        if alert_task:
+            alert_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await alert_task
         if monitor_task:
             monitor_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -89,6 +113,24 @@ async def preview_lifespan(app):
         api.system_stats_service.stop()
 
 api.app.router.lifespan_context = preview_lifespan
+# Upgrade legacy local Telegram settings before ORM access, preserving a backup.
+from sqlalchemy import inspect
+if 'telegram_settings' in inspect(engine).get_table_names() and 'user_id' not in {
+        col['name'] for col in inspect(engine).get_columns('telegram_settings')}:
+    import sqlite3
+    import importlib.util
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    backup_path = '/tmp/airlink-before-account-telegram-' + now().strftime('%Y%m%dT%H%M%S') + '.sqlite'
+    with sqlite3.connect('/tmp/airlink-browser-qa.sqlite') as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+    os.chmod(backup_path, 0o600)
+    spec = importlib.util.spec_from_file_location('account_telegram_migration', ROOT / 'database/versions/b72ca14f5390_account_telegram.py')
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
 Base.metadata.create_all(engine)
 # The local preview retains an existing SQLite database between starts.
 from sqlalchemy import inspect, text

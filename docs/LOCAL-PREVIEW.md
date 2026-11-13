@@ -14,7 +14,7 @@ Equivalent: `make live`. This uses the existing web build, enables real SAS4 cal
 
 Use **SAS4 connection** to save your real SAS4 login for your local account. Existing real connections are preserved. Live mode removes only the exact synthetic SAS4 connection fixtures originally created by the demo launcher; it preserves their accounts. It never replaces live readings with sample online-user data. Saved private device IPs still need a working LAN or VPN route from the Mac; internet access alone cannot reach an isolated tower subnet.
 
-The server binds only to `127.0.0.1`. It is a local development runtime using SQLite and an in-process Redis substitute, not the installed Linux appliance. Automatic payment processing and outbound alert dispatch are not started by this local launcher. Appliance networking, OS updates/restarts and scheduled Google Drive archive creation require the installed Linux system.
+The server binds only to `127.0.0.1`. It is a local development runtime using SQLite and an in-process Redis substitute, not the installed Linux appliance. Automatic payment processing is not started by this local launcher. Live mode evaluates device alerts and dispatches Telegram notifications when the owner has enabled them. Appliance networking, OS updates/restarts and scheduled Google Drive archive creation require the installed Linux system.
 
 ## Build changes or use demo mode
 

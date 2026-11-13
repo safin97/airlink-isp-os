@@ -126,6 +126,13 @@ void main() {
 
     Finder navigationItem(String label) => find.widgetWithText(ListTile, label);
     Future<void> openPage(String label) async {
+      if (navigationItem(label).evaluate().isEmpty) {
+        await tester.scrollUntilVisible(
+          navigationItem(label),
+          -300,
+          scrollable: find.byType(Scrollable).first,
+        );
+      }
       await tester.ensureVisible(navigationItem(label));
       await tester.tap(navigationItem(label));
       await tester.pumpAndSettle();

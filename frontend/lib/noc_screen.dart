@@ -2,6 +2,7 @@ import 'app_theme.dart';
 import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'tower_marker.dart';
+import 'noc_sound.dart';
 
 Color get _muted => themeColor(0xff99acc6, 0xff52627a);
 Color get _green => themeColor(0xff34d399, 0xff087f5b);
@@ -129,6 +130,7 @@ class NocScreen extends StatelessWidget {
                 ),
               ],
             ),
+            NocSound(devices: devices, hasData: hasData),
             OutlinedButton.icon(
               onPressed: toggleExpanded,
               icon: Icon(

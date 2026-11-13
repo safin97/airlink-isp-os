@@ -32,6 +32,9 @@ void main() {
                 'gpus': [
                   {
                     'name': 'NVIDIA RTX',
+                    'status': 'ready',
+                    'driver': 'nvidia',
+                    'driver_version': '610',
                     'utilization_percent': 0,
                     'memory_used_mib': 256,
                     'memory_total_mib': 8192,
@@ -60,7 +63,7 @@ void main() {
     expect(find.text('System TX & RX'), findsNothing);
     expect(find.text('Ethernet · eth0'), findsNothing);
     expect(find.text('24.5%'), findsOneWidget);
-    expect(find.byType(Card), findsNWidgets(6));
+    expect(find.byType(Card), findsNWidgets(7));
     for (final title in ['CPU', 'Memory', 'Storage', 'Disk activity']) {
       expect(find.text(title), findsOneWidget);
     }
@@ -69,7 +72,10 @@ void main() {
     expect(find.text('No reply'), findsOneWidget);
     expect(find.text('Not actual PUBG / Call of Duty ping'), findsOneWidget);
     expect(find.text('1.00 MiB/s'), findsOneWidget);
-    expect(find.text('NVIDIA RTX'), findsNothing);
+    expect(find.text('NVIDIA RTX'), findsOneWidget);
+    expect(find.text('0.0%'), findsOneWidget);
+    expect(find.text('Temperature: 42.0 °C'), findsOneWidget);
+    expect(find.text('Driver: nvidia · 610'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(
       const MaterialApp(
