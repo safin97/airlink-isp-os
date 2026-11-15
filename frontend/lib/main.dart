@@ -36,6 +36,7 @@ import 'ip_address_sort.dart';
 import 'device_api_access_panel.dart';
 import 'online_device_dialog.dart';
 import 'diagnostics_screen.dart';
+import 'deye_solar.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -356,6 +357,7 @@ const pages = [
   'My account',
   'Device login',
   'Towers API',
+  'Deye Solar',
 ];
 const icons = [
   Icons.space_dashboard_outlined,
@@ -374,6 +376,7 @@ const icons = [
   Icons.account_circle_outlined,
   Icons.password_outlined,
   Icons.key_outlined,
+  Icons.solar_power_outlined,
 ];
 
 class Operations extends StatefulWidget {
@@ -434,6 +437,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           hasSection(api.user!, 'software_updates'));
   bool canPage(int index) => pages[index] == 'My account'
       ? true
+      : pages[index] == 'Deye Solar'
+      ? owner ||
+            (usesSectionPermissions(api.user!) && hasSection(api.user!, 'deye'))
       : pages[index] == 'Diagnostics'
       ? owner ||
             (usesSectionPermissions(api.user!) &&
@@ -1154,6 +1160,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               );
       case 'Diagnostics':
         return DiagnosticsScreen(api: api);
+      case 'Deye Solar':
+        return DeyeSolar(api: api);
       default:
         return settings();
     }
@@ -1300,6 +1308,15 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (canPage(pages.indexOf('Deye Solar'))) ...[
+          DeyeSolar(
+            key: ValueKey('dashboard-deye-${api.user?['id']}'),
+            api: api,
+            dashboard: true,
+            onOpen: () => navigate(pages.indexOf('Deye Solar')),
+          ),
+          const SizedBox(height: 24),
+        ],
         SystemPerformance(
           data: Map<String, dynamic>.from(summary['system'] ?? {}),
         ),

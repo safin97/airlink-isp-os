@@ -1,5 +1,6 @@
 // UI copy: English key → Kurdish Badini (Arabic script), Arabic.
 const translations = <String, List<String>>{
+  "Deye Solar": ["وزەیا ڕۆژێ Deye", "طاقة Deye الشمسية"],
   "SAS4 Reports": ["ڕاپۆرتێن SAS4", "تقارير SAS4"],
   "Activations": ["چالاککرن", "التفعيلات"],
   "Activation statistics": ["ئامارێن چالاککرنێ", "إحصائيات التفعيل"],

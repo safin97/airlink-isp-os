@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'app_language.dart';
+import 'pc_updates.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key, required this.api});
@@ -110,6 +111,10 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           ],
         ),
         const SizedBox(height: 16),
+        if (widget.api.user?['role'] == 'owner') ...[
+          PcUpdates(api: widget.api),
+          const SizedBox(height: 16),
+        ],
         _section(
           'Services',
           services.entries

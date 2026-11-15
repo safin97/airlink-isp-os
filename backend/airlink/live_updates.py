@@ -9,7 +9,7 @@ INTERVAL = 2
 
 
 def snapshot(token):
-    from . import api, access_roles
+    from . import api, access_roles, deye
     with SessionLocal() as db:
         user = resolve_user(token, db)
         def allowed(path):
@@ -31,7 +31,7 @@ def snapshot(token):
         if user.role == 'owner' or (section_access.role_policy(user, db) is not None or user.role == 'manager'):
             if allowed('access-roles'):
                 rows['access-roles'] = access_roles.groups(user=user, db=db)
-        return jsonable_encoder({'user': api.public(user), 'rows': rows,
+        return jsonable_encoder({'user': api.public(user), 'rows': rows, 'deye': deye.live_snapshot(db, user),
             'summary': api.summary(db, user) if allowed('dashboard') else {}})
 
 
@@ -43,6 +43,8 @@ def changes(previous, current):
     if previous is None:
         return {'type': 'snapshot', **current}
     result = {'type': 'patch'}
+    if previous.get('deye') != current.get('deye'):
+        result['deye'] = current.get('deye')
     if previous['user'] != current['user']:
         result['user'] = current['user']
     if comparable_summary(previous['summary']) != comparable_summary(current['summary']):

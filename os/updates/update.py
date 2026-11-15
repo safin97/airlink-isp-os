@@ -139,6 +139,7 @@ def restart_system(payload, *, poweroff=False):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError('An update operation is active. Wait before restarting.') from None
+        guard_pc_updates()
         if read(ROOT / 'state.json', {}).get('status') in {'queued', 'installing', 'failed'}:
             raise ValueError('An active or failed installation requires review before restarting')
         status = restart_status()
@@ -204,6 +205,7 @@ def action(name, payload):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if name == "check":
             return check_release()
+        guard_pc_updates()
         if restart_status()['pending']:
             raise ValueError('A system restart is pending. Wait for the server to return.')
         meta = manifest()
@@ -278,6 +280,7 @@ def install():
     with open(ROOT / "lock", "w") as lock:
         # The queued service may start before its controller request releases this lock.
         fcntl.flock(lock, fcntl.LOCK_EX)
+        guard_pc_updates()
         if restart_status()['pending']:
             raise RuntimeError('A system restart is pending; installation has not started')
         previous = read(ROOT / "state.json", {})
@@ -310,6 +313,12 @@ def install():
         except Exception as exc:
             atomic(ROOT / "state.json", {"status": "failed", "version": meta["version"], "error": str(exc), "recovery_required": True})
             raise
+
+
+def guard_pc_updates():
+    state = read(ROOT.parent / 'pc-updates/state.json', {})
+    if state.get('status') in {'queued_check', 'checking', 'queued_install', 'installing'} or state.get('recovery_required'):
+        raise ValueError('A PC update is active or requires local recovery review.')
 
 
 if __name__ == "__main__":

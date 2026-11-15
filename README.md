@@ -40,6 +40,8 @@ The Python suite uses disposable SQLite by default; `tests/linux-integration.sh`
 
 See [installation](docs/INSTALLATION.md), [local PC settings](docs/LOCAL-PANEL.md), [architecture and security](docs/ARCHITECTURE.md), [updates](docs/UPDATES.md), [recovery](docs/RECOVERY.md), and [monitoring support](docs/MONITORING.md).
 
+[Deye Solar](docs/DEYE-CLOUD.md) connects to Deye Cloud to display solar, battery, load and grid readings. It requires internet access, a Deye Cloud account and Deye developer application credentials.
+
 The GPU-capable ISO includes automatic NVIDIA RTX detection and a prebuilt driver. See [GPU support](docs/GPU.md) for hardware scope, status reporting and the distinction between graphics acceleration and monitoring capacity.
 
 To host signed application updates on your own public GitHub repository, see [GitHub Releases setup](docs/GITHUB-UPDATES.md).

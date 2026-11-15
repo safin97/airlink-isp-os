@@ -13,6 +13,7 @@ import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from network.configure import action as network_action
 from updates.update import action as update_action, restart_system
+from updates.pc import action as pc_update_action
 from console.gpu import detect as detect_gpus
 from cloud_backups.service import service as drive_backup_service
 
@@ -86,6 +87,8 @@ class Handler(socketserver.StreamRequestHandler):
                 result = diagnostics()
             elif name == "system.restart":
                 result = restart_system(payload)
+            elif name.startswith("pc-updates."):
+                result = pc_update_action(name.split('.', 1)[1], payload)
             elif name.startswith("backups.google-drive."):
                 result = drive_backup_service.action(name.removeprefix("backups.google-drive."), payload)
             elif name.startswith("network."):

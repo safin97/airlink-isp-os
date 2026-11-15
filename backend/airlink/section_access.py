@@ -4,7 +4,7 @@ from sqlalchemy.orm import object_session
 from .models import UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, ManagerRole, AccessRole, UserAccessRole, BuiltinAccessRole
 
 OPERATIONAL = ('dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports')
-ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles')
+ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles', 'deye')
 ALL = (*ASSIGNABLE, 'managers')
 READ_RESOURCES = {
     'dashboard': ('dashboard', 'noc'),
@@ -115,6 +115,8 @@ def enforce_request(user, method, path):
         return
     def require(sections):
         return require_any(user, sections, write=method not in ('GET', 'HEAD', 'OPTIONS'), delete=method == 'DELETE')
+    if path == '/api/integrations/deye' or path.startswith('/api/integrations/deye/'):
+        return require(('deye',))
     if path == '/api/updates' or path.startswith('/api/updates/') or path == '/api/system/restart':
         return require(('software_updates',))
     if path in ('/api/system', '/api/diagnostics', '/api/network', '/api/audit', '/api/snmp-profiles') or path.startswith('/api/network/'):

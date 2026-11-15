@@ -38,6 +38,7 @@ chmod 0755 "$stage/DEBIAN/postinst"
 # System integration files are installed by the signed package, under fixed paths.
 mkdir -p "$stage/etc/systemd/system"
 cp /opt/airlink/deployment/systemd/airlink-{api,monitor,alerts,controller,console,health,update-job,https}.service "$stage/etc/systemd/system/"
+cp /opt/airlink/deployment/systemd/airlink-pc-update-{check,install}.service "$stage/etc/systemd/system/"
 cp /opt/airlink/deployment/systemd/airlink-health.timer "$stage/etc/systemd/system/"
 mkdir -p "$output"
 dpkg-deb --root-owner-group --build "$stage" "$output/airlink-isp-os_${version}_amd64.deb"

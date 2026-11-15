@@ -383,3 +383,21 @@ class TelegramMessageTemplates(Base):
     language = Column(String(8), nullable=False, default='en', server_default='en')
     down_message = Column(Text, nullable=False)
     recovery_message = Column(Text, nullable=False)
+
+
+class DeyeConnection(Base):
+    __tablename__ = 'deye_connections'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    region = Column(String(8), nullable=False)
+    encrypted_credentials = Column(Text, nullable=False)
+    encrypted_token = Column(Text, nullable=False)
+    token_expires = Column(DateTime(timezone=True), nullable=False)
+    cache = Column(JSON, nullable=False, default=dict)
+    dashboard_station = Column(JSON, nullable=True)
+
+
+class DeyeGridHistory(Base):
+    __tablename__ = 'deye_grid_history'
+    user_id = Column(String(36), ForeignKey('deye_connections.user_id', ondelete='CASCADE'), primary_key=True)
+    station_id = Column(String(20), primary_key=True)
+    history = Column(JSON, nullable=False, default=dict)

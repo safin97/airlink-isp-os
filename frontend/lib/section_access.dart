@@ -17,6 +17,7 @@ const assignableSections = <String, String>{
   'software_updates': 'Software Updates',
   'settings': 'Settings',
   'access_roles': 'Access Roles',
+  'deye': 'Deye Solar',
 };
 const pageSections = <String, String>{
   ...assignableSections,

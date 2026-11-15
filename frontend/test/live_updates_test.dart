@@ -18,9 +18,14 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final sockets = <FakeSocket>[];
       var requests = 0;
+      var solarRequests = 0;
       final api =
           Api(
               client: MockClient((r) async {
+                if (r.url.path == '/api/integrations/deye') {
+                  solarRequests++;
+                  return http.Response('{"configured":false}', 200);
+                }
                 requests++;
                 return http.Response(
                   jsonEncode(
@@ -92,6 +97,9 @@ void main() {
       expect(find.text('51.0%'), findsOneWidget);
       await tester.pump(const Duration(seconds: 31));
       expect(requests, initial);
+      // Solar connection status is read once each time Dashboard is opened;
+      // network performance still updates exclusively through the live stream.
+      expect(solarRequests, 2);
       sockets.single.close();
       await tester.pump();
       await tester.pump(const Duration(seconds: 3));

@@ -10,6 +10,67 @@ import 'package:airlink_isp_os/role_management.dart';
 import 'package:airlink_isp_os/section_access.dart';
 
 void main() {
+  for (final mode in ['hidden', 'read-only', 'editable']) {
+    testWidgets('Deye Solar access role saves $mode manager permissions', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      Map<String, dynamic>? saved;
+      final api = Api(
+        client: MockClient((request) async {
+          expect(request.method, 'PUT');
+          expect(request.url.path, '/api/access-roles/builtin:manager');
+          saved = jsonDecode(request.body);
+          return http.Response('{}', 200);
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RoleEditor(
+              api: api,
+              accessGroup: true,
+              groups: const [],
+              initial: const {
+                'id': 'builtin:manager',
+                'name': 'Manager',
+                'sections': ['deye'],
+                'editable_sections': ['deye'],
+                'deletable_sections': [],
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Deye Solar'), findsOneWidget);
+      if (mode != 'editable') {
+        final checkbox = find.byKey(
+          ValueKey('${mode == 'hidden' ? 'read' : 'edit'}-deye'),
+        );
+        await tester.ensureVisible(checkbox);
+        await tester.pumpAndSettle();
+        await tester.tap(checkbox);
+        await tester.pump();
+      }
+      final edit = tester.widget<Checkbox>(
+        find.byKey(const ValueKey('edit-deye')),
+      );
+      expect(edit.value, mode == 'editable');
+      if (mode == 'hidden') expect(edit.onChanged, isNull);
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(saved, {
+        'name': 'Manager',
+        'sections': mode == 'hidden' ? [] : ['deye'],
+        'editable_sections': mode == 'editable' ? ['deye'] : [],
+        'deletable_sections': [],
+      });
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('access group saves independent read edit and delete grants', (
     tester,
   ) async {

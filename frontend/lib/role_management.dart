@@ -380,6 +380,10 @@ class _RoleEditorState extends State<RoleEditor> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
+                  'Deye Solar: Read shows the account’s saved solar connection and readings. Edit allows connecting or changing that connection. Delete allows disconnecting it. Turn off Read to hide Deye Solar.',
+                ),
+                const SizedBox(height: 8),
+                const Text(
                   'Saving changes updates every account using this access role.',
                 ),
               ],

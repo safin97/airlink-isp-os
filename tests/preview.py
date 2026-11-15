@@ -38,6 +38,12 @@ update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
 appliance_broker = api.broker
 
 def preview_broker(action, payload=None):
+    if action.startswith('pc-updates.'):
+        if action != 'pc-updates.status':
+            raise HTTPException(409, 'PC updates run on the installed AirLink Linux PC, not this local preview.')
+        return {'supported': False, 'state': {'status': 'unavailable'}, 'plan': None,
+                'reboot_required': False,
+                'reason': 'PC updates run on the installed AirLink Linux PC. They are unavailable in the local preview.'}
     if action.startswith('backups.google-drive.'):
         from cloud_backups import service as cloud_backups
         cloud_backups.ROOT = Path('/tmp/airlink-google-drive-preview')
@@ -71,6 +77,7 @@ async def preview_lifespan(app):
     alert_task = None
     api.system_stats_service.start()
     if args.live:
+        api.deye_monitor_service.start()
         from monitoring import worker
         worker.cache = api.cache
         api.customer_probe_service.start()
@@ -107,6 +114,7 @@ async def preview_lifespan(app):
             monitor_task.cancel()
             with suppress(asyncio.CancelledError):
                 await monitor_task
+        api.deye_monitor_service.stop()
         api.customer_collector_service.stop()
         api.registration_username_service.stop()
         api.customer_probe_service.stop()
@@ -134,6 +142,9 @@ if 'telegram_settings' in inspect(engine).get_table_names() and 'user_id' not in
 Base.metadata.create_all(engine)
 # The local preview retains an existing SQLite database between starts.
 from sqlalchemy import inspect, text
+if 'dashboard_station' not in {column['name'] for column in inspect(engine).get_columns('deye_connections')}:
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE deye_connections ADD COLUMN dashboard_station JSON'))
 if 'language' not in {column['name'] for column in inspect(engine).get_columns('telegram_message_templates')}:
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE telegram_message_templates ADD COLUMN language VARCHAR(8) NOT NULL DEFAULT 'en'"))

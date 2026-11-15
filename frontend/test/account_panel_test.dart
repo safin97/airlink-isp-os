@@ -134,6 +134,7 @@ void main() {
         );
       }
       await tester.ensureVisible(navigationItem(label));
+      await tester.pumpAndSettle();
       await tester.tap(navigationItem(label));
       await tester.pumpAndSettle();
     }

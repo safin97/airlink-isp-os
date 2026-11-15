@@ -171,10 +171,10 @@ class SNMPDiscoveryProfileInput(SNMPPublicProfileInput):
 
 
 class SectionAccessInput(Strict):
-    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
-    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)
+    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
+    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']]] = Field(default=None, max_length=13)
 
-    deletable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']]] = Field(default=None, max_length=12)
+    deletable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']]] = Field(default=None, max_length=13)
 
     @model_validator(mode='after')
     def edits_require_visibility(self):
@@ -216,8 +216,8 @@ class PasswordChange(Strict):
 
 class AccessRoleInput(SectionAccessInput):
     name: str = Field(min_length=1, max_length=64)
-    editable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
-    deletable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles']] = Field(max_length=12)
+    editable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
+    deletable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
 
     @field_validator('name')
     @classmethod

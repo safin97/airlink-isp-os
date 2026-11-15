@@ -19,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import towers_device_access, drive_backups
+from . import towers_device_access, drive_backups, deye
+from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
@@ -48,9 +49,11 @@ async def lifespan(app):
         customer_probe_service.start()
         customer_collector_service.start()
         system_stats_service.start()
+        deye_monitor_service.start()
     try:
         yield
     finally:
+        deye_monitor_service.stop()
         customer_collector_service.stop()
         registration_username_service.stop()
         customer_probe_service.stop()
@@ -68,6 +71,7 @@ app.include_router(snmp_visibility.router)
 app.include_router(device_login_profiles.router)
 app.include_router(towers_device_access.router)
 app.include_router(drive_backups.router)
+app.include_router(deye.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -84,6 +88,9 @@ async def headers(request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def safe_device_login_validation(request, exc):
+    if request.url.path.startswith('/api/integrations/deye'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the Deye Cloud account, region and application credentials.'},
+                            headers={'Cache-Control': 'no-store'})
     if request.url.path.startswith('/api/backups/google-drive'):
         return JSONResponse(status_code=422, content={'detail': 'Invalid Google Drive backup settings. Check the required fields.'},
                             headers={'Cache-Control': 'no-store'})
@@ -1053,6 +1060,24 @@ def system(user=Depends(settings_access)):
 @app.get("/api/diagnostics")
 def diagnostics(user=Depends(settings_access)):
     return broker("diagnostics.status")
+
+
+@app.get('/api/system/pc-updates')
+def pc_updates(user=Depends(owner)):
+    return broker('pc-updates.status')
+
+
+@app.post('/api/system/pc-updates/{action}', status_code=202)
+def pc_update_action(action: str, payload: dict, user=Depends(owner), db=Depends(get_db)):
+    if action not in {'check', 'install'}:
+        raise HTTPException(404, 'Unknown PC update action')
+    if action == 'install' and (payload.get('confirm') is not True or
+                               not isinstance(payload.get('plan_id'), str)):
+        raise HTTPException(422, 'Review and confirm the PC update plan first')
+    data = {} if action == 'check' else {'confirm': True, 'plan_id': payload['plan_id']}
+    result = broker('pc-updates.' + action, data)
+    commit(db, user, 'pc-updates.' + action)
+    return result
 
 
 @app.post("/api/system/restart", status_code=202)
