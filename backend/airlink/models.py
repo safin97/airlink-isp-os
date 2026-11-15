@@ -375,3 +375,11 @@ class TelegramNotification(Base):
     attempts = Column(Integer, nullable=False, default=0)
     next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
     sent_at = Column(DateTime(timezone=True))
+
+
+class TelegramMessageTemplates(Base):
+    __tablename__ = 'telegram_message_templates'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    language = Column(String(8), nullable=False, default='en', server_default='en')
+    down_message = Column(Text, nullable=False)
+    recovery_message = Column(Text, nullable=False)

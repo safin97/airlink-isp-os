@@ -37,6 +37,7 @@ void main() {
         },
       ];
       final writes = <http.Request>[];
+      final reads = <String>[];
       final api = Api(
         client: MockClient((request) async {
           if (request.method != 'GET') {
@@ -44,6 +45,29 @@ void main() {
             return http.Response(
               request.method == 'DELETE' ? '' : '{}',
               request.method == 'DELETE' ? 204 : 200,
+            );
+          }
+          reads.add(request.url.path);
+          if (request.url.path.endsWith('/messages')) {
+            return http.Response(
+              jsonEncode({
+                'language': 'en',
+                'languages': {
+                  'en': {'label': 'English', 'default_message': '{status}'},
+                },
+                'default_message': '{status}',
+                'down_message': '{status}',
+                'recovery_message': '{status}',
+              }),
+              200,
+            );
+          }
+          if (request.url.path.startsWith(
+            '/api/integrations/telegram/accounts/',
+          )) {
+            return http.Response(
+              jsonEncode({'enabled': false, 'chat_id': '', 'has_token': false}),
+              200,
             );
           }
           return http.Response(
@@ -89,6 +113,16 @@ void main() {
         'password': null,
         'role': 'manager',
       });
+      await tester.tap(find.byTooltip('Edit username, password or role').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Telegram notifications'));
+      await tester.pumpAndSettle();
+      expect(find.text('Telegram notifications · manager'), findsOneWidget);
+      expect(reads, contains('/api/integrations/telegram/accounts/manager'));
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Delete account').first);
       await tester.pumpAndSettle();
       expect(find.text('Delete account team?'), findsOneWidget);

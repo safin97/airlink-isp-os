@@ -1,3 +1,4 @@
+import 'telegram_settings.dart';
 import 'app_theme.dart';
 import 'device_login_profiles.dart';
 import 'snmp_visibility_control.dart';
@@ -2040,6 +2041,30 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
+  Future<void> configureAccountTelegram(Map account) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Telegram notifications · ${account['username']}'),
+        content: SizedBox(
+          width: 680,
+          child: SingleChildScrollView(
+            child: TelegramSettings(
+              api: api,
+              basePath: '/integrations/telegram/accounts/${account['id']}',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> editAccount(Map row) async {
     if (!await refreshAccountRoles()) return;
     if (!mounted) return;
@@ -2047,6 +2072,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       context: context,
       builder: (_) => ResourceDialog(
         title: 'Edit account',
+        extraAction: row['role'] == 'manager' || row['role'] == 'owner'
+            ? () => configureAccountTelegram(row)
+            : null,
         fields: [
           FieldSpec('username', 'Username', required: true),
           accountTypeField(),
@@ -2268,6 +2296,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     ];
     Map<String, dynamic>? savedTower;
     String? savedPlace;
+    Map<String, dynamic>? savedAccount;
     bool discover = false;
     final initial = <String, dynamic>{
       for (final f in specs) f.key: existing?[f.key] ?? f.initial,
@@ -2336,6 +2365,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             method: existing == null ? 'POST' : 'PUT',
             body: payload,
           );
+          if (resource == 'users') {
+            savedAccount = Map<String, dynamic>.from(saved);
+          }
           if (resource == 'places') savedPlace = saved['id'];
           if (resource == 'towers') {
             savedTower = Map<String, dynamic>.from(saved);
@@ -2353,6 +2385,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           placeFilter = savedPlace;
           search = '';
         });
+      }
+      if (mounted &&
+          savedAccount != null &&
+          (savedAccount!['role'] == 'manager' ||
+              savedAccount!['role'] == 'owner')) {
+        await configureAccountTelegram(savedAccount!);
       }
       if (mounted && discover && savedTower != null) {
         await discoverTower(savedTower!);
@@ -3253,12 +3291,14 @@ class FieldSpec {
 
 class ResourceDialog extends StatefulWidget {
   final String title;
+  final VoidCallback? extraAction;
   final List<FieldSpec> fields;
   final Map<String, dynamic> initial;
   final Future<void> Function(Map<String, dynamic>) save;
   const ResourceDialog({
     super.key,
     required this.title,
+    this.extraAction,
     required this.fields,
     required this.initial,
     required this.save,
@@ -3620,6 +3660,12 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
       ),
     ),
     actions: [
+      if (widget.extraAction != null)
+        TextButton.icon(
+          onPressed: busy ? null : widget.extraAction,
+          icon: const Icon(Icons.send_outlined),
+          label: const Text('Telegram notifications'),
+        ),
       TextButton(
         onPressed: busy ? null : () => Navigator.pop(context),
         child: const AppText('Cancel'),

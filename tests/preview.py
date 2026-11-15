@@ -134,6 +134,9 @@ if 'telegram_settings' in inspect(engine).get_table_names() and 'user_id' not in
 Base.metadata.create_all(engine)
 # The local preview retains an existing SQLite database between starts.
 from sqlalchemy import inspect, text
+if 'language' not in {column['name'] for column in inspect(engine).get_columns('telegram_message_templates')}:
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE telegram_message_templates ADD COLUMN language VARCHAR(8) NOT NULL DEFAULT 'en'"))
 if 'connection_timeout' not in {column['name'] for column in inspect(engine).get_columns('devices')}:
     with engine.begin() as connection:
         connection.execute(text('ALTER TABLE devices ADD COLUMN connection_timeout INTEGER NOT NULL DEFAULT 2'))

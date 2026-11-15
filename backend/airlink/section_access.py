@@ -109,7 +109,7 @@ def enforce_request(user, method, path):
     if user.role != 'manager' and role_policy(user) is None:
         return
     path = path.rstrip('/')
-    if path in ('/api/integrations/telegram', '/api/integrations/telegram/test'):
+    if path in ('/api/integrations/telegram', '/api/integrations/telegram/test', '/api/integrations/telegram/messages'):
         return  # Personal settings; endpoint enforces account type and ownership.
     if path.startswith('/api/auth/'):
         return
