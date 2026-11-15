@@ -254,7 +254,8 @@ class Panel(QMainWindow):
                 if address.get('scope') == 'global':
                     ip = address['local']
                     lines.append(f"  {interface['ifname']} — https://{'[' + ip + ']' if ':' in ip else ip}")
-        lines += ['', 'Graphics processors:']
+        lines += ['', 'Local display: ' + os.environ.get('AIRLINK_PANEL_RENDERER', 'Standard rendering (CPU)'),
+                  'Monitoring: CPU', '', 'Graphics processors:']
         if not data.get('gpus'):
             lines.append('No PCI graphics processor detected.')
         for gpu in data.get('gpus', []):

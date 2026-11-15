@@ -15,6 +15,7 @@ from network.configure import action as network_action
 from updates.update import action as update_action, restart_system
 from updates.pc import action as pc_update_action
 from console.gpu import detect as detect_gpus
+from console.driver_health import collect as collect_driver_health
 from cloud_backups.service import service as drive_backup_service
 
 SOCKET = Path("/run/airlink/control.sock")
@@ -32,8 +33,19 @@ def status():
 
 def diagnostics():
     system = status()
+    drivers = collect_driver_health(system.get('gpus', []))
     update_state = update_action("status", {}).get("state", {})
     problems = []
+    for device in drivers['devices']:
+        if device['status'] == 'warning':
+            problems.append({'severity': 'warning', 'source': 'driver',
+                             'title': device['name'] + ' needs attention',
+                             'detail': device['detail']})
+    warned_modules = {d.get('module') for d in drivers['devices'] if d['status'] == 'warning'}
+    for module in drivers.get('modules', []):
+        if module['status'] == 'warning' and module['name'] not in warned_modules:
+            problems.append({'severity': 'warning', 'source': 'driver',
+                             'title': module['name'] + ' needs attention', 'detail': module['detail']})
     for name, value in system["services"].items():
         if value != "active":
             problems.append({"severity": "critical", "source": "service",
@@ -66,7 +78,7 @@ def diagnostics():
     return {"status": "problems" if problems else "healthy", "checked_at": __import__("time").time(),
             "problems": problems, "services": system["services"],
             "resources": {key: system[key] for key in ("cpu_percent", "memory_percent", "storage_percent")},
-            "update": update_state, "recent_errors": errors}
+            "update": update_state, "recent_errors": errors, "drivers": drivers}
 
 
 class Handler(socketserver.StreamRequestHandler):

@@ -39,7 +39,85 @@ Object cloudResponse(String path) {
   };
 }
 
+// Continuous energy flow intentionally never settles while the readings are active.
+Future<void> settleSolar(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 350));
+  await tester.pump();
+}
+
 void main() {
+  for (final compact in [true, false]) {
+    for (final width in [360.0, 1440.0]) {
+      testWidgets(
+        'grid mode updates at width $width compact=$compact without guessing from zero watts',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 1600));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          var reading = <String, dynamic>{
+            'grid_w': 0,
+            'import_w': 0,
+            'export_w': 0,
+            'battery_soc': 76,
+            'solar_w': 4200,
+            'load_w': 1800,
+            'freshness': 'recent',
+            'grid_availability': {'state': 'up', 'method': 'voltage_estimate'},
+          };
+          Widget view() => MaterialApp(
+            theme: width == 360 ? ThemeData.dark() : ThemeData.light(),
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: DeyeEnergyOverview(reading: reading, compact: compact),
+              ),
+            ),
+          );
+          await tester.pumpWidget(view());
+          await settleSolar(tester);
+          expect(find.text('On-grid'), findsOneWidget);
+          expect(find.text('Voltage estimate'), findsOneWidget);
+          expect(find.text('Off-grid'), findsNothing);
+          // A fresh off-grid estimate updates the existing card while retaining other devices.
+          reading = {
+            ...reading,
+            'grid_availability': {
+              'state': 'down',
+              'method': 'voltage_estimate',
+            },
+          };
+          await tester.pumpWidget(view());
+          await settleSolar(tester);
+          expect(find.text('Off-grid'), findsOneWidget);
+          expect(find.text('On-grid'), findsNothing);
+          expect(find.text('Voltage estimate'), findsOneWidget);
+          expect(find.text('76%'), findsOneWidget);
+          expect(find.text('4.20 kW'), findsOneWidget);
+          expect(find.text('Load'), findsOneWidget);
+          // Missing/stale/offline device measurements are Unknown, even when grid power is zero.
+          reading = {
+            ...reading,
+            'grid_availability': {
+              'state': 'unknown',
+              'reason': 'Grid readings are stale.',
+            },
+          };
+          await tester.pumpWidget(view());
+          await settleSolar(tester);
+          expect(find.text('Unknown'), findsOneWidget);
+          expect(find.text('On-grid'), findsNothing);
+          expect(find.text('Off-grid'), findsNothing);
+          expect(find.text('Voltage estimate'), findsNothing);
+          reading = {...reading, 'grid_availability': null};
+          await tester.pumpWidget(view());
+          await settleSolar(tester);
+          expect(find.text('Unknown'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
+
   testWidgets(
     'live solar frames update readings and recover without extra HTTP calls',
     (tester) async {
@@ -82,7 +160,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       api.startLive();
       final initial = requests;
       void push(
@@ -108,18 +186,18 @@ void main() {
         'fetched_at': '2026-11-15T10:01:01Z',
       };
       push({'123': power(5500)});
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('5.50 kW'), findsOneWidget);
       expect(requests, initial);
       push({
         '123': {'error': 'Cloud unavailable'},
       }, failure: 'Cloud unavailable');
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('5.50 kW'), findsNothing);
       expect(find.byTooltip('Cloud unavailable'), findsOneWidget);
       pinnedStation = '456';
       push({'456': power(6800)}, station: '456');
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('6.80 kW'), findsOneWidget);
       expect(find.byTooltip('Cloud unavailable'), findsNothing);
       expect(requests, initial);
@@ -143,13 +221,13 @@ void main() {
         http.Response(jsonEncode(cloudResponse('/latest')), 200),
       );
       pendingReading = null;
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('4.20 kW'), findsOneWidget);
       socket.controller.add({
         'type': 'patch',
         'deye': {'configured': false},
       });
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('Your solar energy, at a glance'), findsOneWidget);
       expect(find.text('4.20 kW'), findsNothing);
       await tester.pumpWidget(const SizedBox());
@@ -191,7 +269,7 @@ void main() {
         ),
       );
       await tester.pumpWidget(view());
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('Power: 2.20 kW'), findsOneWidget);
       expect(find.text('Charging · 2.20 kW'), findsOneWidget);
       expect(find.text('Grid available · voltage estimate'), findsNothing);
@@ -204,7 +282,7 @@ void main() {
         'observed_at': '2026-11-15T10:01:00Z',
       };
       await tester.pumpWidget(view());
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('Discharging · 2.20 kW'), findsOneWidget);
       expect(find.text('Charging · 2.20 kW'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -279,25 +357,25 @@ void main() {
         ),
       );
       await tester.pumpWidget(view(false));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       await tester.ensureVisible(find.byTooltip('Next stations'));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       await tester.tap(find.byTooltip('Next stations'));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       await tester.ensureVisible(find.text('Show this station on dashboard'));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       await tester.tap(find.text('Show this station on dashboard'));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(writes.single, {'station_id': '456', 'page': 2});
       expect(find.text('Shown on dashboard'), findsOneWidget);
       await tester.pumpWidget(view(true));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('South solar'), findsNothing);
       expect(find.byType(DropdownButtonFormField<String>), findsNothing);
       expect(readings.last, '/api/integrations/deye/stations/456/latest');
       selected = {'id': '123', 'name': 'North solar', 'page': 1};
       await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('North solar'), findsNothing);
       expect(readings.last, '/api/integrations/deye/stations/123/latest');
       expect(tester.takeException(), isNull);
@@ -344,7 +422,7 @@ void main() {
           home: Operations(api: api, logout: () async {}),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(
         tester.widget<DeyeSolar>(find.byType(DeyeSolar)).dashboard,
         isTrue,
@@ -355,9 +433,9 @@ void main() {
       expect(find.text('Full solar view'), findsNothing);
       final solarMenu = find.widgetWithText(ListTile, 'Deye Solar');
       await tester.ensureVisible(solarMenu);
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       await tester.tap(solarMenu);
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(
         tester.widget<DeyeSolar>(find.byType(DeyeSolar)).dashboard,
         isFalse,
@@ -370,7 +448,7 @@ void main() {
           'sections': ['dashboard'],
         },
       });
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.byType(DeyeSolar), findsNothing);
       final previous = cloudCalls;
       await tester.pump(const Duration(seconds: 31));
@@ -406,7 +484,7 @@ void main() {
           home: Operations(api: api, logout: () async {}),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.byType(DeyeSolar), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
@@ -431,7 +509,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.text('76%'), findsOneWidget);
       for (final label in [
         'Solar panels',
@@ -477,7 +555,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleSolar(tester);
       expect(find.byType(TextField), findsNothing);
       expect(find.text('0 W'), findsNothing);
       await tester.tap(find.text('Connect Deye Cloud'));

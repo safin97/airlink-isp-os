@@ -38,6 +38,15 @@ update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
 appliance_broker = api.broker
 
 def preview_broker(action, payload=None):
+    if action == 'diagnostics.status':
+        from console.driver_health import collect
+        sample = api.system_stats_service.read()
+        return {'status': 'unavailable', 'problems': [], 'services': {},
+                'resources': {'cpu_percent': sample.get('cpu_percent'),
+                              'memory_percent': (sample.get('memory') or {}).get('percent'),
+                              'storage_percent': (sample.get('storage') or {}).get('percent')},
+                'update': {'status': 'Local preview'}, 'recent_errors': [],
+                'drivers': collect(sample.get('gpus') or [])}
     if action.startswith('pc-updates.'):
         if action != 'pc-updates.status':
             raise HTTPException(409, 'PC updates run on the installed AirLink Linux PC, not this local preview.')

@@ -174,10 +174,14 @@ def normalized(result):
         'solar_w': 'generationPower', 'load_w': 'consumptionPower', 'battery_w': 'batteryPower',
         'grid_w': 'gridPower', 'charge_w': 'chargePower', 'discharge_w': 'dischargePower',
         'import_w': 'purchasePower', 'export_w': 'wirePower'}.items()}
+    # Some stations use wirePower for signed grid exchange. Without the paired
+    # purchase field, labeling it as export would be misleading.
+    if values['import_w'] is None:
+        values['export_w'] = None
     return {**values, 'battery_soc': number(result.get('batterySOC'), percentage=True),
             'observed_at': stamp.isoformat() if stamp else None,
             'freshness': 'unknown' if age is None or age < -60 else 'stale' if age > 900 else 'recent',
-            'fetched_at': now().isoformat()}
+            'fetched_at': now().isoformat(), 'power_sources': result.get('power_sources', {})}
 
 
 def station_list(result):
@@ -347,8 +351,23 @@ def read_station(db, row, station_id):
     values = {key: number(raw.get(key)) for key in allowed if key != 'lastUpdateTime'}
     stamp = observation(raw.get('lastUpdateTime'))
     values['lastUpdateTime'] = stamp.isoformat() if stamp else None
+    sample = deye_grid.fetch(row, station_id)
+    energy = sample.get('energy', {})
+    sources = {}
+    # Deye inverter BatteryPower is positive when discharging, negative when charging;
+    # TotalGridPower is positive for import, negative for export. Unlike some station
+    # fields, these device measure points carry units and an observation timestamp.
+    if 'battery' in energy:
+        battery = energy['battery']
+        values.update(batteryPower=battery['power'], chargePower=battery['negative'], dischargePower=battery['positive'])
+        sources['battery'] = {'source': 'inverter', 'observed_at': battery['observed_at']}
+    if 'grid' in energy:
+        grid = energy['grid']
+        values.update(gridPower=grid['power'], purchasePower=grid['positive'], wirePower=grid['negative'])
+        sources['grid'] = {'source': 'inverter', 'observed_at': grid['observed_at']}
+    values['power_sources'] = sources
     result = normalized(values)
-    result['grid_availability'] = deye_grid.record(db, row.user_id, station_id, deye_grid.fetch(row, station_id))
+    result['grid_availability'] = deye_grid.record(db, row.user_id, station_id, sample)
     store_reading(row, station_id, {'at': time.time(), 'raw': values, 'fetched_at': result['fetched_at']})
     monitor = (row.cache or {}).get('monitor', {})
     if (monitor.get('station') or {}).get('id') == station_id:

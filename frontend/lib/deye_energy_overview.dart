@@ -24,6 +24,12 @@ class DeyeEnergyOverview extends StatelessWidget {
       ? reading![key] as num
       : null;
 
+  String get gridState {
+    final availability = reading?['grid_availability'];
+    final state = availability is Map ? availability['state'] : null;
+    return state == 'up' || state == 'down' ? state as String : 'unknown';
+  }
+
   int direction(String inbound, String outbound) {
     final a = measure(inbound), b = measure(outbound);
     if (a != null && a > 0 && b == 0) return 1;
@@ -53,17 +59,19 @@ class DeyeEnergyOverview extends StatelessWidget {
         : null;
     final solar = dark ? const Color(0xffffc568) : const Color(0xffa55d00);
     final battery = dark ? const Color(0xff6ce0b5) : const Color(0xff087955);
-    final grid = dark ? const Color(0xff83bcff) : const Color(0xff2165af);
+    final grid = gridState == 'up'
+        ? (dark ? const Color(0xff83bcff) : const Color(0xff2165af))
+        : Theme.of(context).colorScheme.onSurfaceVariant;
     final load = dark ? const Color(0xffc7afff) : const Color(0xff7943b4);
     if (compact) {
       final recent = reading?['freshness'] == 'recent';
       return _CompactEnergyBridge(
-        sampleKey: reading?['observed_at']?.toString(),
+        gridState: gridState,
         directions: recent
             ? [
                 (measure('solar_w') ?? 0) > 0 ? 1 : 0,
                 direction('discharge_w', 'charge_w'),
-                direction('import_w', 'export_w'),
+                gridState == 'up' ? direction('import_w', 'export_w') : 0,
                 (measure('load_w') ?? 0) > 0 ? -1 : 0,
               ]
             : [0, 0, 0, 0],
@@ -88,7 +96,10 @@ class DeyeEnergyOverview extends StatelessWidget {
           ),
           _BridgeNode(
             title: 'Grid',
-            icon: Icons.electrical_services_outlined,
+            status: _GridMode(reading?['grid_availability']),
+            icon: gridState == 'down'
+                ? Icons.power_off_outlined
+                : Icons.electrical_services_outlined,
             color: grid,
             value: power('grid_w'),
             details: [
@@ -131,7 +142,10 @@ class DeyeEnergyOverview extends StatelessWidget {
       _EnergyCard(
         title: 'Grid',
         subtitle: 'GRID EXCHANGE',
-        icon: Icons.electrical_services_outlined,
+        status: _GridMode(reading?['grid_availability']),
+        icon: gridState == 'down'
+            ? Icons.power_off_outlined
+            : Icons.electrical_services_outlined,
         color: grid,
         value: power('grid_w'),
         details: [
@@ -215,6 +229,7 @@ class DeyeEnergyOverview extends StatelessWidget {
               child: CustomPaint(
                 painter: _EnergyLinks(
                   Theme.of(context).colorScheme.outlineVariant,
+                  gridState,
                 ),
               ),
             ),
@@ -254,12 +269,12 @@ class _CompactEnergyBridge extends StatefulWidget {
     required this.nodes,
     required this.directions,
     required this.colors,
-    this.sampleKey,
+    required this.gridState,
   });
   final List<Widget> nodes;
   final List<int> directions;
   final List<Color> colors;
-  final String? sampleKey;
+  final String gridState;
 
   @override
   State<_CompactEnergyBridge> createState() => _CompactEnergyBridgeState();
@@ -273,13 +288,27 @@ class _CompactEnergyBridgeState extends State<_CompactEnergyBridge>
     value: 1,
   );
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    syncMotion();
+  }
+
+  @override
   void didUpdateWidget(_CompactEnergyBridge oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.sampleKey != null &&
-        widget.sampleKey != oldWidget.sampleKey &&
+    syncMotion();
+  }
+
+  void syncMotion() {
+    final moving =
         widget.directions.any((d) => d != 0) &&
-        !MediaQuery.disableAnimationsOf(context)) {
-      animation.forward(from: 0);
+        !MediaQuery.disableAnimationsOf(context) &&
+        TickerMode.valuesOf(context).enabled;
+    if (moving) {
+      if (!animation.isAnimating) animation.repeat();
+    } else {
+      animation.stop();
+      animation.value = 1;
     }
   }
 
@@ -290,127 +319,133 @@ class _CompactEnergyBridgeState extends State<_CompactEnergyBridge>
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, bounds) {
-      final nodes = widget.nodes;
-      final vertical =
-          bounds.maxWidth < 600 ||
-          MediaQuery.textScalerOf(context).scale(14) > 20;
-      final scheme = Theme.of(context).colorScheme;
-      final hub = Container(
-        key: const ValueKey('dashboard-deye-inverter'),
-        width: 112,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: scheme.primary.withValues(alpha: .4),
-            width: 1.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: scheme.primary.withValues(alpha: .1),
-              blurRadius: 16,
+  Widget build(BuildContext context) => Semantics(
+    label: widget.directions.every((direction) => direction == 0)
+        ? 'No confirmed energy flow'
+        : 'Energy flow: ${[if (widget.directions[0] == 1) 'Solar to inverter', if (widget.directions[1] == 1) 'Battery to inverter', if (widget.directions[1] == -1) 'Inverter to battery', if (widget.directions[2] == 1) 'Grid to inverter', if (widget.directions[2] == -1) 'Inverter to grid', if (widget.directions[3] == -1) 'Inverter to load'].join('; ')}',
+    child: LayoutBuilder(
+      builder: (context, bounds) {
+        final nodes = widget.nodes;
+        final vertical =
+            bounds.maxWidth < 600 ||
+            MediaQuery.textScalerOf(context).scale(14) > 20;
+        final scheme = Theme.of(context).colorScheme;
+        final hub = Container(
+          key: const ValueKey('dashboard-deye-inverter'),
+          width: 112,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: scheme.primary.withValues(alpha: .4),
+              width: 1.5,
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.developer_board_outlined,
-              color: scheme.primary,
-              size: 30,
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Inverter',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-            ),
-            Text(
-              'DEYE',
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontSize: 9,
-                letterSpacing: 1.6,
+            boxShadow: [
+              BoxShadow(
+                color: scheme.primary.withValues(alpha: .1),
+                blurRadius: 16,
               ),
-            ),
-          ],
-        ),
-      );
-      Widget pair(Widget a, Widget b) => IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: a),
-            const SizedBox(width: 16),
-            Expanded(child: b),
-          ],
-        ),
-      );
-      return Align(
-        alignment: Alignment.center,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 860),
-          child: Stack(
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Positioned.fill(
-                child: AnimatedBuilder(
-                  animation: animation,
-                  builder: (_, _) => CustomPaint(
-                    painter: _BridgeLinks(
-                      scheme.outlineVariant,
-                      vertical,
-                      widget.directions,
-                      widget.colors,
-                      animation.value,
+              Icon(
+                Icons.developer_board_outlined,
+                color: scheme.primary,
+                size: 30,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Inverter',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                'DEYE',
+                style: TextStyle(
+                  color: scheme.onSurfaceVariant,
+                  fontSize: 9,
+                  letterSpacing: 1.6,
+                ),
+              ),
+            ],
+          ),
+        );
+        Widget pair(Widget a, Widget b) => IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: a),
+              const SizedBox(width: 16),
+              Expanded(child: b),
+            ],
+          ),
+        );
+        return Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 860),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: AnimatedBuilder(
+                    animation: animation,
+                    builder: (_, _) => CustomPaint(
+                      painter: _BridgeLinks(
+                        scheme.outlineVariant,
+                        vertical,
+                        widget.directions,
+                        widget.colors,
+                        animation.value,
+                        widget.gridState,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              if (vertical)
-                Column(
-                  children: [
-                    pair(nodes[0], nodes[2]),
-                    const SizedBox(height: 18),
-                    hub,
-                    const SizedBox(height: 18),
-                    pair(nodes[1], nodes[3]),
-                  ],
-                )
-              else
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        children: [
-                          nodes[0],
-                          const SizedBox(height: 16),
-                          nodes[1],
-                        ],
+                if (vertical)
+                  Column(
+                    children: [
+                      pair(nodes[0], nodes[2]),
+                      const SizedBox(height: 18),
+                      hub,
+                      const SizedBox(height: 18),
+                      pair(nodes[1], nodes[3]),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            nodes[0],
+                            const SizedBox(height: 16),
+                            nodes[1],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 32),
-                    hub,
-                    const SizedBox(width: 32),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          nodes[2],
-                          const SizedBox(height: 16),
-                          nodes[3],
-                        ],
+                      const SizedBox(width: 32),
+                      hub,
+                      const SizedBox(width: 32),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            nodes[2],
+                            const SizedBox(height: 16),
+                            nodes[3],
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-            ],
+                    ],
+                  ),
+              ],
+            ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }
 
@@ -421,12 +456,14 @@ class _BridgeNode extends StatelessWidget {
     required this.color,
     required this.value,
     this.charge,
+    this.status,
     this.details = const [],
   });
   final String title, value;
   final IconData icon;
   final Color color;
   final double? charge;
+  final Widget? status;
   final List<String> details;
   @override
   Widget build(BuildContext context) => Container(
@@ -468,6 +505,7 @@ class _BridgeNode extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
+        if (status != null) ...[const SizedBox(height: 8), status!],
         if (charge != null) ...[
           const SizedBox(height: 6),
           Semantics(
@@ -505,12 +543,14 @@ class _BridgeLinks extends CustomPainter {
     this.directions,
     this.colors,
     this.progress,
+    this.gridState,
   );
   final Color color;
   final bool vertical;
   final List<int> directions;
   final List<Color> colors;
   final double progress;
+  final String gridState;
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -556,6 +596,10 @@ class _BridgeLinks extends CustomPainter {
       }
     }
     for (var i = 0; i < paths.length; i++) {
+      if (i == 2 && gridState != 'up') {
+        _drawDashed(canvas, paths[i], paint);
+        continue;
+      }
       canvas.drawPath(paths[i], paint);
       if (directions[i] == 0) continue;
       final active = Paint()
@@ -583,11 +627,14 @@ class _BridgeLinks extends CustomPainter {
         active,
       );
       if (progress < 1) {
-        final position = directions[i] > 0 ? progress : 1 - progress;
-        final dot = metric
-            .getTangentForOffset(metric.length * position)!
-            .position;
-        canvas.drawCircle(dot, 3, Paint()..color = colors[i]);
+        for (var marker = 0; marker < 3; marker++) {
+          final phase = (progress + marker / 3) % 1;
+          final position = directions[i] > 0 ? phase : 1 - phase;
+          final dot = metric
+              .getTangentForOffset(metric.length * position)!
+              .position;
+          canvas.drawCircle(dot, 3, Paint()..color = colors[i]);
+        }
       }
     }
   }
@@ -597,8 +644,82 @@ class _BridgeLinks extends CustomPainter {
       oldDelegate.color != color ||
       oldDelegate.vertical != vertical ||
       oldDelegate.progress != progress ||
+      oldDelegate.gridState != gridState ||
       oldDelegate.directions != directions ||
       oldDelegate.colors != colors;
+}
+
+class _GridMode extends StatelessWidget {
+  const _GridMode(this.data);
+  final dynamic data;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = data is Map ? data as Map : const {};
+    final up = values['state'] == 'up', down = values['state'] == 'down';
+    final label = up
+        ? 'On-grid'
+        : down
+        ? 'Off-grid'
+        : 'Unknown';
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final color = up
+        ? (dark ? Colors.tealAccent.shade100 : Colors.teal.shade800)
+        : down
+        ? (dark ? Colors.amber.shade200 : Colors.brown.shade800)
+        : Theme.of(context).colorScheme.onSurfaceVariant;
+    final explanation = up
+        ? 'Grid voltage is present. This estimate does not confirm the inverter’s operating mode or grid relay position.'
+        : down
+        ? 'Grid voltage is absent. This estimate does not confirm the inverter’s operating mode or grid relay position.'
+        : 'The grid connection cannot be determined from the available cloud measurements.';
+    return Tooltip(
+      message:
+          '$explanation\n${values['reason'] ?? 'Grid measurements are unavailable.'}',
+      child: Container(
+        key: const ValueKey('deye-grid-mode'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Icon(
+                  up
+                      ? Icons.power_outlined
+                      : down
+                      ? Icons.power_off_outlined
+                      : Icons.help_outline,
+                  size: 15,
+                  color: color,
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+            if (up || down)
+              Text(
+                'Voltage estimate',
+                style: TextStyle(fontSize: 10, color: color),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _GridAvailability extends StatelessWidget {
@@ -687,12 +808,14 @@ class _EnergyCard extends StatelessWidget {
     required this.value,
     required this.details,
     this.charge,
+    this.status,
   });
   final String title, subtitle, value;
   final IconData icon;
   final Color color;
   final List<String> details;
   final double? charge;
+  final Widget? status;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -759,6 +882,7 @@ class _EnergyCard extends StatelessWidget {
             color: color,
           ),
         ),
+        if (status != null) ...[const SizedBox(height: 8), status!],
         if (charge != null) ...[
           const SizedBox(height: 10),
           Semantics(
@@ -791,8 +915,9 @@ class _EnergyCard extends StatelessWidget {
 }
 
 class _EnergyLinks extends CustomPainter {
-  const _EnergyLinks(this.color);
+  const _EnergyLinks(this.color, this.gridState);
   final Color color;
+  final String gridState;
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -803,7 +928,16 @@ class _EnergyLinks extends CustomPainter {
     // Neutral connections: direction is reported in the measurement labels.
     final y = size.height / 2;
     canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    canvas.drawLine(Offset(250, y), Offset(size.width - 250, y), paint);
+    canvas.drawLine(Offset(250, y), Offset(x, y), paint);
+    final gridLink = Path()
+      ..moveTo(x, y)
+      ..lineTo(size.width - 250, y);
+    if (gridState == 'up') {
+      canvas.drawPath(gridLink, paint..style = PaintingStyle.stroke);
+    } else {
+      _drawDashed(canvas, gridLink, paint..style = PaintingStyle.stroke);
+    }
+    paint.style = PaintingStyle.fill;
     for (final point in [
       Offset(x, y - 115),
       Offset(x, y + 115),
@@ -815,5 +949,17 @@ class _EnergyLinks extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_EnergyLinks oldDelegate) => oldDelegate.color != color;
+  bool shouldRepaint(_EnergyLinks oldDelegate) =>
+      oldDelegate.color != color || oldDelegate.gridState != gridState;
+}
+
+void _drawDashed(Canvas canvas, Path path, Paint paint) {
+  for (final metric in path.computeMetrics()) {
+    for (double offset = 0; offset < metric.length; offset += 12) {
+      canvas.drawPath(
+        metric.extractPath(offset, math.min(offset + 6, metric.length)),
+        paint,
+      );
+    }
+  }
 }

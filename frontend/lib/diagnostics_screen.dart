@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
 import 'pc_updates.dart';
+import 'driver_health.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key, required this.api});
@@ -58,7 +59,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           children: [
             Expanded(
               child: Text(
-                problems.isEmpty
+                data?['status'] == 'unavailable'
+                    ? 'Appliance diagnostics unavailable in preview'
+                    : data == null
+                    ? (loading
+                          ? 'Checking diagnostics…'
+                          : 'Diagnostics unavailable')
+                    : problems.isEmpty
                     ? 'No active problems detected'
                     : '${problems.length} active problem${problems.length == 1 ? '' : 's'}',
                 style: const TextStyle(
@@ -111,20 +118,33 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           ],
         ),
         const SizedBox(height: 16),
+        DriverHealth(
+          data: data?['drivers'] == null
+              ? null
+              : Map<String, dynamic>.from(data!['drivers']),
+          loading: loading,
+        ),
+        const SizedBox(height: 16),
         if (widget.api.user?['role'] == 'owner') ...[
           PcUpdates(api: widget.api),
           const SizedBox(height: 16),
         ],
         _section(
           'Services',
-          services.entries
-              .map((entry) => '${entry.key}: ${entry.value}')
-              .toList(),
+          services.isEmpty
+              ? ['Service status unavailable.']
+              : services.entries
+                    .map((entry) => '${entry.key}: ${entry.value}')
+                    .toList(),
         ),
         const SizedBox(height: 16),
         _section(
           'Recent error-level system logs',
-          recent.isEmpty ? ['No recent error-level AirLink logs.'] : recent,
+          data == null || data?['status'] == 'unavailable'
+              ? ['System logs unavailable.']
+              : recent.isEmpty
+              ? ['No recent error-level AirLink logs.']
+              : recent,
           monospace: true,
         ),
         if (update['recovery_required'] == true) ...[
@@ -153,7 +173,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             Text(label),
             const SizedBox(height: 6),
             Text(
-              '$value$suffix',
+              value == null ? 'Unavailable' : '$value$suffix',
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
           ],

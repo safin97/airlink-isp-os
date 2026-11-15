@@ -76,7 +76,8 @@ def fetch(row, station_id):
         if not serials or len(serials) > 10:
             return unknown('Grid monitoring requires a station with 1–10 supported inverters.')
         result = cloud(row, '/device/latest', {'deviceList': serials, 'deviceType': 'INVERTER'})
-        return from_devices(result, serials)
+        from . import deye_energy
+        return {**from_devices(result, serials), 'energy': deye_energy.from_devices(result, serials)}
     except HTTPException:
         row.cache = {**(row.cache or {}), 'grid_error': {'station_id': station_id, 'at': time.time()}}
         return unknown('Grid measurements unavailable. Check Deye device-monitoring access or cloud connectivity.')

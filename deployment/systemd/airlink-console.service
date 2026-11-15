@@ -4,7 +4,7 @@ After=airlink-api.service airlink-controller.service systemd-user-sessions.servi
 Conflicts=getty@tty1.service
 ConditionPathExists=/etc/airlink/installed
 [Service]
-ExecStart=/usr/bin/xinit /usr/bin/python3 /opt/airlink/os/console/panel.py -- :0 vt1 -nolisten tcp
+ExecStart=/usr/bin/xinit /usr/bin/python3 /opt/airlink/os/console/graphics.py -- :0 vt1 -nolisten tcp
 EnvironmentFile=/etc/airlink/airlink.env
 StandardInput=tty
 StandardOutput=journal
