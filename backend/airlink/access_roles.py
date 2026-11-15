@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import object_session
 from .db import get_db
 from .models import AccessRole, ManagerRole, UserManagerRole, UserAccessRole, BuiltinAccessRole, User, audit
-from .schemas import AccessRoleInput, ManagerRoleInput
-from .security import delegated_section
+from .schemas import AccessRoleInput, ManagerRoleInput, OwnerVisibilityInput
+from .security import delegated_section, owner
 from . import section_access
 
 router = APIRouter(prefix='/api')
@@ -121,6 +121,22 @@ def add_group(data: AccessRoleInput, user=Depends(groups_access), db=Depends(get
     return public(db, row, user)
 
 
+@router.put('/access-roles/builtin:owner/visibility')
+def edit_owner_visibility(data: OwnerVisibilityInput, user=Depends(owner), db=Depends(get_db)):
+    row = db.get(BuiltinAccessRole, 'owner')
+    if row is None:
+        row = BuiltinAccessRole(id='owner', name='Owner')
+        db.add(row)
+    row.sections = [key for key in section_access.OWNER_PAGES
+                    if key in data.visible_sections or key in section_access.OWNER_PINNED]
+    row.editable_sections = list(section_access.ALL)
+    row.deletable_sections = list(section_access.ALL)
+    row.deleted = False
+    audit(db, user, 'owner.visibility', ','.join(row.sections))
+    db.commit()
+    return next(r for r in builtin_types(user, db) if r['account_type'] == 'owner')
+
+
 @router.put('/access-roles/{group_id}')
 def edit_group(group_id: str, data: AccessRoleInput, user=Depends(groups_access), db=Depends(get_db)):
     if group_id.startswith('builtin:'):
@@ -210,7 +226,10 @@ def builtin_types(user, db):
                      'sections': saved.sections if saved else read,
                      'editable_sections': saved.editable_sections if saved else edit,
                      'deletable_sections': saved.deletable_sections if saved else delete,
-                     'can_manage': key != 'owner' and user.role == 'owner'})
+                     'can_manage': user.role == 'owner',
+                     'can_delete': key != 'owner' and user.role == 'owner',
+                     **({'visible_sections': section_access.owner_visibility(user, db),
+                         'visibility_only': True} if key == 'owner' else {})})
     return rows
 
 

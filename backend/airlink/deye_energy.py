@@ -1,5 +1,37 @@
-"""Power flows from explicit Deye inverter measurements (W/kW), not station-name guesses."""
+"""Deye inverter power flows and load current, with explicit W/V estimate metadata."""
 from .models import now
+
+
+def load_from_points(points, stamp):
+    """One inverter / one output only. Never sum phase or inverter amperages."""
+    from .deye import number
+
+    def value(point, units, maximum):
+        amount = number(point.get('value'), nonnegative=True)
+        scale = units.get(str(point.get('unit', '')).strip().lower())
+        return amount * scale if amount is not None and scale is not None and amount * scale <= maximum else None
+
+    points = [p for p in points if isinstance(p, dict)]
+    # Known additional output phases make a single W/V value ambiguous.
+    if any(p.get('key') in ('ACVoltageSUB', 'ACVoltageTWC', 'LoadVoltageL2', 'LoadVoltageL3',
+                            'LoadCurrentL2', 'LoadCurrentL3', 'LoadVoltageL2L3', 'LoadVoltageL3L1') for p in points):
+        return None
+    powers = [p for p in points if p.get('key') == 'TotalConsumptionPower']
+    power = value(powers[0], {'w': 1, 'kw': 1000}, 1e9) if len(powers) == 1 else None
+    currents = [p for p in points if str(p.get('key', '')).startswith('LoadCurrent')]
+    if currents:
+        if len(currents) != 1 or currents[0].get('key') not in ('LoadCurrent', 'LoadCurrentL1', 'LoadCurrentL1L2'):
+            return None
+        amps = value(currents[0], {'a': 1, 'ma': .001}, 10000)
+        return {'current_a': amps, 'source': 'measured', 'power': power, 'observed_at': stamp} if amps is not None else None
+    voltages = [p for p in points if str(p.get('key', '')).startswith('LoadVoltage')]
+    if len(voltages) != 1 or voltages[0].get('key') not in ('LoadVoltage', 'LoadVoltageL1', 'LoadVoltageL1L2'):
+        return None
+    voltage = value(voltages[0], {'v': 1, 'mv': .001, 'kv': 1000}, 500)
+    if power is None or voltage is None or voltage < 50 or power / voltage > 10000:
+        return None
+    return {'current_a': power / voltage, 'source': 'estimated', 'power': power,
+            'voltage_v': voltage, 'observed_at': stamp}
 
 
 def from_devices(result, expected, current=None):
@@ -41,4 +73,8 @@ def from_devices(result, expected, current=None):
             result[name] = {'power': sum(powers), 'positive': sum(max(0, p) for p in powers),
                             'negative': sum(max(0, -p) for p in powers),
                             'observed_at': min(stamps).isoformat()}
+    if len(expected) == 1:
+        load = load_from_points(points, stamps[0].isoformat())
+        if load is not None:
+            result['load'] = load
     return result

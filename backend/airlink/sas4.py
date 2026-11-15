@@ -803,7 +803,40 @@ def redeem_card(connection, password, user_id, data, transport=None):
             raise SAS4Error('Recharge was not confirmed. Check this user in SAS4 before trying again; the service may already have been recharged.') from exc
         if result.get('status') not in (200, '200'):
             raise HTTPException(400, 'SAS4 rejected the recharge. Check the card, balance, service eligibility, and permissions.')
-        return {'recharged': True}
+        # Receipt collection is best-effort AFTER confirmation. It must never
+        # make a completed financial action look failed or trigger another charge.
+        receipt = {}
+        try:
+            from .customer_telegram import phone_hash
+            receipt = {'username': record.get('username'), 'phone_hash': phone_hash(record),
+                       'reference': data.transaction_id}
+            try:
+                receipt['recharge_cost'] = str(money(cost if data.method != 'card' else activation.get('n_required_amount')))
+            except ValueError:
+                pass  # Never guess a manager cost that SAS4 did not provide.
+            if data.method == 'card':
+                receipt['card'] = '••••' + data.pin[-4:] if len(data.pin) > 4 else '••••'
+            if data.method == 'extend':
+                receipt['extension'] = quote.get('name')
+            elif data.method == 'credit':
+                try:
+                    receipt['service_price'] = str(money(activation.get('user_price')))
+                except ValueError:
+                    pass
+            try:
+                updated = raw_user(client, headers, user_id)
+                if updated.get('username') == record.get('username'):
+                    receipt.update(profile=updated.get('profile_name'), expiration=updated.get('expiration'))
+            except Exception:
+                pass
+            if receipt.get('service_price') is not None or receipt.get('recharge_cost') is not None:
+                try:
+                    receipt['currency'] = response_json(client.get(DEFAULT_SERVER + API_PATH + 'resources/login', headers=headers)).get('data', {}).get('site_currency')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return {'recharged': True, '_notification_receipt': receipt}
 
 
 @router.get('/users/{user_id}/recharge')
@@ -841,5 +874,8 @@ def recharge_user_card(user_id: int, data: CardRecharge, user=Depends(sas4_acces
     except RedisError:
         pass  # Keep the original pending marker; never repeat an unconfirmed submission.
     audit(db, user, 'sas4.user.recharge', str(user_id))
+    from . import customer_telegram
+    customer_telegram.activation(db, user, user_id, data.method, data.transaction_id,
+                                result.pop('_notification_receipt', None))
     db.commit()
     return result

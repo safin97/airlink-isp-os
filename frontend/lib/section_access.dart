@@ -23,6 +23,14 @@ const pageSections = <String, String>{
   ...assignableSections,
   'managers': 'Managers',
 };
+const ownerSections = <String, String>{
+  ...pageSections,
+  'diagnostics': 'Diagnostics',
+  'my_account': 'My account',
+  'device_login': 'Device login',
+  'towers_api': 'Towers API',
+};
+const pinnedOwnerSections = {'access_roles', 'my_account'};
 
 bool usesSectionPermissions(Map<String, dynamic> user) =>
     user['role'] == 'manager' || user['access_policy_configured'] == true;
@@ -33,6 +41,13 @@ bool canViewSnmpProfiles(Map<String, dynamic> user) =>
         (usesSectionPermissions(user) && hasSection(user, 'settings')));
 
 bool hasSection(Map<String, dynamic> user, String key) {
+  if (user['role'] == 'owner') {
+    final visible = user['visible_sections'] as List?;
+    return pinnedOwnerSections.contains(key) ||
+        !ownerSections.containsKey(key) ||
+        visible == null ||
+        visible.contains(key);
+  }
   if ((key == 'access_roles') && !usesSectionPermissions(user)) {
     return user['role'] == 'owner';
   }

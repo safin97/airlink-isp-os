@@ -7,7 +7,9 @@ const builtInAccountTypes = <Map<String, dynamic>>[
     'sections': <String>[],
     'editable_sections': <String>[],
     'deletable_sections': <String>[],
-    'can_manage': false,
+    'can_manage': true,
+    'can_delete': false,
+    'visibility_only': true,
   },
   {
     'id': 'builtin:manager',

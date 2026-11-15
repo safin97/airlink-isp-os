@@ -52,6 +52,8 @@ void main() {
         'Account profile',
         'Customer device access',
         'Payment setup',
+        'Telegram bot token',
+        'Telegram account lookup',
       ]) {
         expect(find.widgetWithText(ListTile, label), findsNothing);
       }
@@ -68,6 +70,8 @@ void main() {
         'Account profile',
         'Customer device access',
         'Payment setup',
+        'Telegram bot token',
+        'Telegram account lookup',
       ]) {
         await tester.pumpWidget(
           MaterialApp(

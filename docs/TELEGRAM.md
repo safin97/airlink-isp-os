@@ -1,5 +1,7 @@
 # Telegram notifications
 
+For ISP card activation and three-day expiry messages sent privately to customers, see [Customer Telegram notifications](CUSTOMER-TELEGRAM.md). Customer linking uses a dedicated bot under **ISP card → customer details → Customer Telegram** and is separate from the device-alert settings below.
+
 The owner configures Telegram under **Managers → Edit account → Telegram notifications**, or immediately after saving a new account. Each account has its own encrypted bot token, destination, enable switch and delivery status. Notifications are restricted to devices visible to that account, and permissions are checked again before delivery. Create a bot through Telegram's verified @BotFather, start a conversation with the bot (or add it to a group), and enter the bot token and destination chat ID. A public channel can use @channelname; the bot needs permission to post there. For a numeric chat ID, Telegram's getUpdates method returns message.chat.id after a message is sent to the bot; keep requests containing the bot token private. Do not share the token in screenshots or support messages.
 
 Save the settings and use **Save and send test** to verify delivery. Enable **Send device down and recovery notifications** for automatic alerts. Tokens are encrypted at rest and are never returned by the settings API. Only the owner can manage the selected account’s connection, templates and test messages. Managers retain separate notification destinations and authorized device scopes.

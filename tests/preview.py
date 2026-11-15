@@ -84,8 +84,10 @@ async def preview_lifespan(app):
     api.settings.validate()
     monitor_task = None
     alert_task = None
+    customer_messages = None
     api.system_stats_service.start()
     if args.live:
+        customer_messages = asyncio.create_task(api.customer_telegram.worker())
         api.deye_monitor_service.start()
         from monitoring import worker
         worker.cache = api.cache
@@ -115,6 +117,10 @@ async def preview_lifespan(app):
     try:
         yield
     finally:
+        if customer_messages:
+            customer_messages.cancel()
+            with suppress(asyncio.CancelledError):
+                await customer_messages
         if alert_task:
             alert_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -151,6 +157,21 @@ if 'telegram_settings' in inspect(engine).get_table_names() and 'user_id' not in
 Base.metadata.create_all(engine)
 # The local preview retains an existing SQLite database between starts.
 from sqlalchemy import inspect, text
+if 'phone_verified_at' not in {column['name'] for column in inspect(engine).get_columns('customer_telegram_links')}:
+    import sqlite3
+    import importlib.util
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    backup_path = '/tmp/airlink-before-customer-phone-' + now().strftime('%Y%m%dT%H%M%S') + '.sqlite'
+    with sqlite3.connect('/tmp/airlink-browser-qa.sqlite') as source, sqlite3.connect(backup_path) as backup:
+        source.backup(backup)
+    os.chmod(backup_path, 0o600)
+    spec = importlib.util.spec_from_file_location('customer_phone_migration', ROOT / 'database/versions/d50eb927318c_customer_telegram_phone.py')
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
 if 'dashboard_station' not in {column['name'] for column in inspect(engine).get_columns('deye_connections')}:
     with engine.begin() as connection:
         connection.execute(text('ALTER TABLE deye_connections ADD COLUMN dashboard_station JSON'))

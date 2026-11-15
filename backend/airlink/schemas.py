@@ -185,6 +185,18 @@ class SectionAccessInput(Strict):
         return self
 
 
+class OwnerVisibilityInput(Strict):
+    visible_sections: list[str] = Field(max_length=17)
+
+    @field_validator('visible_sections')
+    @classmethod
+    def known_pages(cls, value):
+        from .section_access import OWNER_PAGES
+        if not set(value).issubset(OWNER_PAGES):
+            raise ValueError('Unknown owner section')
+        return value
+
+
 class ManagerUpdate(Strict):
     show_snmp_profiles: Optional[bool] = None
     role: Optional[Literal["manager", "technician", "viewer"]] = None

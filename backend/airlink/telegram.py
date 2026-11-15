@@ -57,6 +57,10 @@ def status(user=Depends(account), db=Depends(get_db)):
 @router.put('/accounts/{user_id}')
 @router.put('')
 def save(data: SettingsInput, user=Depends(account), db=Depends(get_db), actor=Depends(current_user)):
+    if data.bot_token:
+        from .models import CustomerTelegramBot
+        if db.scalar(select(CustomerTelegramBot).where(CustomerTelegramBot.bot_id == data.bot_token.split(':', 1)[0])):
+            raise HTTPException(409, 'Use a separate bot from customer notifications')
     row = settings_for(db, user.id)
     if row is None:
         if not data.bot_token:

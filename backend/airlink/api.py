@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import towers_device_access, drive_backups, deye
+from . import towers_device_access, drive_backups, deye, customer_telegram, telegram_account, recharge_telegram
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
@@ -45,6 +45,7 @@ cache = Redis.from_url(settings.redis_url, decode_responses=True, socket_connect
 async def lifespan(app):
     settings.validate()
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
+    customer_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(customer_telegram.worker())
     if os.environ.get('AIRLINK_TESTING') != 'true':
         customer_probe_service.start()
         customer_collector_service.start()
@@ -53,6 +54,10 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if customer_messages:
+            customer_messages.cancel()
+            with suppress(asyncio.CancelledError):
+                await customer_messages
         deye_monitor_service.stop()
         customer_collector_service.stop()
         registration_username_service.stop()
@@ -72,6 +77,9 @@ app.include_router(device_login_profiles.router)
 app.include_router(towers_device_access.router)
 app.include_router(drive_backups.router)
 app.include_router(deye.router)
+app.include_router(customer_telegram.router)
+app.include_router(telegram_account.router)
+app.include_router(recharge_telegram.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -88,6 +96,10 @@ async def headers(request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def safe_device_login_validation(request, exc):
+    if request.url.path.startswith('/api/integrations/telegram-account'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the Telegram API ID, API hash, phone, code or password.'})
+    if request.url.path.startswith('/api/integrations/customer-telegram'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the bot token, timezone and notification language.'})
     if request.url.path.startswith('/api/integrations/deye'):
         return JSONResponse(status_code=422, content={'detail': 'Check the Deye Cloud account, region and application credentials.'},
                             headers={'Cache-Control': 'no-store'})
@@ -125,6 +137,7 @@ def public(obj):
         result['show_snmp_profiles'] = snmp_visibility.visible(obj)
         if obj.role == 'owner':
             result['default_snmp_profile_visibility'] = snmp_visibility.new_account_default(obj)
+            result['visible_sections'] = section_access.owner_visibility(obj)
         result['sections'] = section_access.effective(obj)
         result['editable_sections'] = section_access.editable(obj)
         result['deletable_sections'] = section_access.deletable(obj)

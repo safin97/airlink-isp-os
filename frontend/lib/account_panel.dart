@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'payment_settings.dart';
 import 'customer_device_access.dart';
+import 'customer_telegram.dart';
+import 'telegram_account.dart';
 
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
@@ -12,6 +14,8 @@ Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') ...{
     'Customer device access': Icons.router_outlined,
     'Payment setup': Icons.payments_outlined,
+    'Telegram bot token': Icons.send_outlined,
+    'Telegram account lookup': Icons.person_search_outlined,
   },
 };
 
@@ -104,6 +108,13 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
               'Payment setup' => PaymentSettings(
                 api: widget.api,
                 embedded: true,
+              ),
+              'Telegram bot token' => CustomerTelegram(
+                api: widget.api,
+                embedded: true,
+              ),
+              'Telegram account lookup' => TelegramAccountSettings(
+                api: widget.api,
               ),
               _ => profile(),
             },

@@ -390,7 +390,7 @@ def test_card_recharge_uses_card_method_and_scoped_permissions(monkeypatch):
     assert not writes
     data = sas4.CardRecharge(pin='TEST-PIN', transaction_id=info['transaction_id'])
     result = sas4.redeem_card(SimpleNamespace(**SETTINGS), SETTINGS['password'], 7, data, transport=transport)
-    assert result == {'recharged': True}
+    assert result['recharged'] is True
     assert len(writes) == 1 and writes[0]['method'] == 'card' and writes[0]['user_id'] == 7
     assert writes[0]['pin'] == 'TEST-PIN' and writes[0]['transaction_id'] == info['transaction_id']
     assert writes[0]['money_collected'] == 0 and writes[0]['issue_invoice'] == 0
@@ -474,7 +474,10 @@ def test_test_extension_auto_selection_and_balance_activation(monkeypatch):
     for method, cost in [('credit', '2000'), ('extend', '0')]:
         data = sas4.CardRecharge(method=method, transaction_id='d' * 32, expected_cost=cost,
             expected_profile_id=3, expected_expiration='2026-12-01 00:00:00', extension_id=11 if method == 'extend' else None)
-        assert sas4.redeem_card(SimpleNamespace(**SETTINGS), SETTINGS['password'], 7, data, transport=transport)['recharged']
+        result = sas4.redeem_card(SimpleNamespace(**SETTINGS), SETTINGS['password'], 7, data, transport=transport)
+        assert result['recharged']
+        assert result['_notification_receipt']['recharge_cost'] == cost
+        assert result['_notification_receipt']['currency'] == 'IQD'
     assert writes[0][0].endswith('/user/activate') and writes[0][1]['method'] == 'credit'
     assert writes[1][0].endswith('/user/extend') and writes[1][1]['profile_id'] == 11
     assert writes[1][1]['method'] == 'credit'

@@ -6,6 +6,8 @@ from .models import UserSectionAccess, UserSectionEdits, UserSectionDeletes, Use
 OPERATIONAL = ('dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports')
 ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles', 'deye')
 ALL = (*ASSIGNABLE, 'managers')
+OWNER_PAGES = (*[key for key in ALL if key != 'roles'], 'diagnostics', 'my_account', 'device_login', 'towers_api')
+OWNER_PINNED = ('access_roles', 'my_account')
 READ_RESOURCES = {
     'dashboard': ('dashboard', 'noc'),
     'towers': ('towers', 'noc', 'network_map', 'monitoring'),
@@ -15,6 +17,14 @@ READ_RESOURCES = {
     'alerts': ('dashboard', 'noc', 'alerts'),
     'links': ('network_map',),
 }
+
+
+def owner_visibility(user, db=None):
+    """Navigation preferences only; owner authorization always remains full."""
+    db = db if db is not None else object_session(user)
+    saved = db.get(BuiltinAccessRole, 'owner') if db is not None else None
+    visible = saved.sections if saved and not saved.deleted else OWNER_PAGES
+    return [key for key in OWNER_PAGES if key in visible or key in OWNER_PINNED]
 
 
 def role_policy(user, db=None):
@@ -115,6 +125,8 @@ def enforce_request(user, method, path):
         return
     def require(sections):
         return require_any(user, sections, write=method not in ('GET', 'HEAD', 'OPTIONS'), delete=method == 'DELETE')
+    if path == '/api/integrations/customer-telegram' or path.startswith('/api/integrations/customer-telegram/'):
+        return require_any(user, ('isp_card',), write=method not in ('GET', 'HEAD'))
     if path == '/api/integrations/deye' or path.startswith('/api/integrations/deye/'):
         return require(('deye',))
     if path == '/api/updates' or path.startswith('/api/updates/') or path == '/api/system/restart':

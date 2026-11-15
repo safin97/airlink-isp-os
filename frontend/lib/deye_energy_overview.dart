@@ -24,6 +24,40 @@ class DeyeEnergyOverview extends StatelessWidget {
       ? reading![key] as num
       : null;
 
+  String get loadWatts {
+    final watts = measure('load_w');
+    return watts == null ? 'Unavailable' : '${watts.toStringAsFixed(0)} W';
+  }
+
+  Widget get loadCurrent {
+    final sample = reading?['load_current'];
+    final value = sample is Map ? sample['current_a'] : null;
+    final source = sample is Map ? sample['source'] : null;
+    final valid =
+        value is num &&
+        value.isFinite &&
+        value >= 0 &&
+        (source == 'measured' || source == 'estimated');
+    final estimated = source == 'estimated';
+    final voltage = sample is Map ? sample['voltage_v'] : null;
+    final volts = voltage is num && voltage.isFinite
+        ? '${voltage.toStringAsFixed(1)} V'
+        : 'the reported load voltage';
+    return Tooltip(
+      message: !valid
+          ? 'Load current is unavailable. Supported current readings or a single-output load power/voltage pair are required.'
+          : estimated
+          ? 'Estimated load current: watts ÷ $volts. Assumes one output and power factor 1; actual RMS amperes may differ. Not a per-phase reading.'
+          : 'Load current reported by the inverter.',
+      child: Text(
+        valid
+            ? '${estimated ? 'Est. ' : ''}${value.toStringAsFixed(1)} A'
+            : 'Amps unavailable',
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   String get gridState {
     final availability = reading?['grid_availability'];
     final state = availability is Map ? availability['state'] : null;
@@ -111,7 +145,8 @@ class DeyeEnergyOverview extends StatelessWidget {
             title: 'Load',
             icon: Icons.home_outlined,
             color: load,
-            value: power('load_w'),
+            value: loadWatts,
+            status: loadCurrent,
           ),
         ],
       );
@@ -158,7 +193,8 @@ class DeyeEnergyOverview extends StatelessWidget {
         subtitle: 'SITE CONSUMPTION',
         icon: Icons.home_outlined,
         color: load,
-        value: power('load_w'),
+        value: loadWatts,
+        status: loadCurrent,
         details: const ['Current consumption'],
       ),
     ];

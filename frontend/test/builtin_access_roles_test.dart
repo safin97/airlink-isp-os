@@ -10,7 +10,7 @@ import 'account_type_fixtures.dart';
 
 void main() {
   testWidgets(
-    'owner edits and deletes system access roles; Owner stays protected',
+    'owner edits system types and owner visibility; Owner deletion stays protected',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 1200);
       tester.view.devicePixelRatio = 1;
@@ -62,6 +62,19 @@ void main() {
               ),
             )
             .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find.descendant(
+                of: ownerTile,
+                matching: find.byWidgetPredicate(
+                  (w) => w is IconButton && w.tooltip == 'Delete access role',
+                ),
+              ),
+            )
+            .onPressed,
         isNull,
       );
       for (final kind in ['Manager', 'Technician', 'Viewer']) {
@@ -83,7 +96,9 @@ void main() {
         await tester.tap(
           find.descendant(
             of: find.widgetWithText(ListTile, '$kind team'),
-            matching: find.byTooltip('Delete access role'),
+            matching: find.byWidgetPredicate(
+              (w) => w is IconButton && w.tooltip == 'Delete access role',
+            ),
           ),
         );
         await tester.pumpAndSettle();

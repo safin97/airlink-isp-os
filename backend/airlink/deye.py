@@ -181,7 +181,8 @@ def normalized(result):
     return {**values, 'battery_soc': number(result.get('batterySOC'), percentage=True),
             'observed_at': stamp.isoformat() if stamp else None,
             'freshness': 'unknown' if age is None or age < -60 else 'stale' if age > 900 else 'recent',
-            'fetched_at': now().isoformat(), 'power_sources': result.get('power_sources', {})}
+            'fetched_at': now().isoformat(), 'power_sources': result.get('power_sources', {}),
+            'load_current': result.get('load_current')}
 
 
 def station_list(result):
@@ -365,6 +366,12 @@ def read_station(db, row, station_id):
         grid = energy['grid']
         values.update(gridPower=grid['power'], purchasePower=grid['positive'], wirePower=grid['negative'])
         sources['grid'] = {'source': 'inverter', 'observed_at': grid['observed_at']}
+    if 'load' in energy:
+        load = energy['load']
+        values['load_current'] = load
+        if load['power'] is not None:
+            values['consumptionPower'] = load['power']
+            sources['load'] = {'source': 'inverter', 'observed_at': load['observed_at']}
     values['power_sources'] = sources
     result = normalized(values)
     result['grid_availability'] = deye_grid.record(db, row.user_id, station_id, sample)

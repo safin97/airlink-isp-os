@@ -12,7 +12,10 @@ def test_all_account_types_and_direct_assignment(client, owner):
     gid = group(client, owner, 'Support', read=('towers',), edit=('towers',))
     types = client.get('/api/access-roles', headers=owner).json()
     assert {r['account_type'] for r in types if r.get('built_in')} == {'owner','manager','technician','viewer'}
-    assert all(r['can_manage'] == (r['account_type'] != 'owner') for r in types if r.get('built_in'))
+    assert all(r['can_manage'] for r in types if r.get('built_in'))
+    assert all(r['can_delete'] == (r['account_type'] != 'owner') for r in types if r.get('built_in'))
+    owner_type = next(r for r in types if r.get('account_type') == 'owner')
+    assert owner_type['visibility_only'] is True
     created = client.post('/api/users', headers=owner, json={'username':'direct','password':PASSWORD,
         'role':'manager','access_role_id':gid})
     assert created.status_code == 201, created.text

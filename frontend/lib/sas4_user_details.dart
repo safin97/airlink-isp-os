@@ -2,6 +2,7 @@ import 'app_language.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_recharge.dart';
+import 'customer_telegram.dart';
 import 'section_access.dart';
 
 class Sas4UserDetails extends StatefulWidget {
@@ -386,6 +387,21 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
                     ),
                   if (details != null) ...[
                     rechargeSquare(),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: !canEdit || saving
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => CustomerTelegram(
+                                  api: widget.api,
+                                  customerId: widget.userId,
+                                ),
+                              ),
+                            ),
+                      icon: const Icon(Icons.send_outlined),
+                      label: const Text('Customer Telegram'),
+                    ),
                     const SizedBox(height: 20),
                     AppText(
                       editing

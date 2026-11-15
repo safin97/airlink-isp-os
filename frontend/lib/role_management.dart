@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'section_access.dart';
+import 'owner_visibility.dart';
 
 class RoleManagement extends StatefulWidget {
   final Api api;
@@ -82,12 +83,14 @@ class _RoleManagementState extends State<RoleManagement> {
     final saved = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => RoleEditor(
-        api: widget.api,
-        accessGroup: widget.accessGroups,
-        groups: groups,
-        initial: row,
-      ),
+      builder: (_) => row?['account_type'] == 'owner'
+          ? OwnerVisibilityDialog(api: widget.api, initial: row!)
+          : RoleEditor(
+              api: widget.api,
+              accessGroup: widget.accessGroups,
+              groups: groups,
+              initial: row,
+            ),
     );
     if (saved == true) {
       await load();
@@ -98,22 +101,32 @@ class _RoleManagementState extends State<RoleManagement> {
   Future<void> view(Map<String, dynamic> row) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => RoleEditor(
-        api: widget.api,
-        accessGroup: widget.accessGroups,
-        initial: row,
-        readOnly: true,
-        groups: widget.accessGroups
-            ? groups
-            : [
-                {'id': row['access_role_id'], 'name': row['access_role_name']},
-              ],
-      ),
+      builder: (_) => row['account_type'] == 'owner'
+          ? OwnerVisibilityDialog(api: widget.api, initial: row, readOnly: true)
+          : RoleEditor(
+              api: widget.api,
+              accessGroup: widget.accessGroups,
+              initial: row,
+              readOnly: true,
+              groups: widget.accessGroups
+                  ? groups
+                  : [
+                      {
+                        'id': row['access_role_id'],
+                        'name': row['access_role_name'],
+                      },
+                    ],
+            ),
     );
   }
 
   Future<void> remove(Map<String, dynamic> row) async {
-    if (!canDelete || row['can_manage'] == false) return;
+    if (!canDelete ||
+        row['can_manage'] == false ||
+        row['account_type'] == 'owner' ||
+        row['can_delete'] == false) {
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -149,7 +162,7 @@ class _RoleManagementState extends State<RoleManagement> {
     children: [
       Text(
         widget.accessGroups
-            ? 'Manage account types and their read, edit and delete permissions. Owner always keeps full access.'
+            ? 'Manage account types and their read, edit and delete permissions. Edit Owner to choose shown sections; owner permissions stay unchanged.'
             : 'Create a role, choose its access group, then assign the role in Managers.',
       ),
       const SizedBox(height: 16),
@@ -176,7 +189,7 @@ class _RoleManagementState extends State<RoleManagement> {
             title: Text(row['name']),
             subtitle: Text(
               row['account_type'] == 'owner'
-                  ? 'Owner · full access'
+                  ? 'Owner · ${(row['visible_sections'] as List? ?? ownerSections.keys.toList()).length} sections shown · full access'
                   : widget.accessGroups
                   ? '${(row['sections'] as List).length} read · ${(row['editable_sections'] as List).length} edit · ${(row['deletable_sections'] as List).length} delete'
                   : 'Access group: ${row['access_role_name']}',
@@ -198,7 +211,11 @@ class _RoleManagementState extends State<RoleManagement> {
                 ),
                 IconButton(
                   tooltip: 'Delete $label',
-                  onPressed: !canDelete || row['can_manage'] == false
+                  onPressed:
+                      !canDelete ||
+                          row['can_manage'] == false ||
+                          row['can_delete'] == false ||
+                          row['account_type'] == 'owner'
                       ? null
                       : () => remove(row),
                   icon: const Icon(Icons.delete_outline),

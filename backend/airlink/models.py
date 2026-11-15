@@ -27,6 +27,61 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class TelegramAccount(Base):
+    __tablename__ = 'telegram_accounts'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    encrypted_state = Column(Text, nullable=False)
+    retry_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class RechargeTelegramSettings(Base):
+    __tablename__ = 'recharge_telegram_settings'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    version = Column(String(36), nullable=False, default=uid)
+    sender_id = Column(String(30), nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    language = Column(String(8), nullable=False, default='en')
+    timezone = Column(String(64), nullable=False, default='Asia/Baghdad')
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class TelegramExpirySchedule(Base):
+    __tablename__ = 'telegram_expiry_schedule'
+    id = Column(Integer, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    page = Column(Integer, nullable=False, default=1)
+    next_check = Column(DateTime(timezone=True), nullable=False, default=now)
+    last_checked = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class RechargeTelegramTemplate(Base):
+    __tablename__ = 'recharge_telegram_templates'
+    language = Column(String(8), primary_key=True)
+    kind = Column(String(20), primary_key=True)
+    text = Column(Text, nullable=False)
+
+
+class RechargeTelegramEvent(Base):
+    __tablename__ = 'recharge_telegram_events'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    actor_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'))
+    customer_id = Column(Integer, nullable=False, index=True)
+    version = Column(String(36), nullable=False)
+    kind = Column(String(20), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default='pending')
+    detail = Column(String(300))
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    sent_at = Column(DateTime(timezone=True))
+
+
 class ManagerParent(Base):
     __tablename__ = "manager_parents"
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
@@ -383,6 +438,60 @@ class TelegramMessageTemplates(Base):
     language = Column(String(8), nullable=False, default='en', server_default='en')
     down_message = Column(Text, nullable=False)
     recovery_message = Column(Text, nullable=False)
+
+
+class CustomerTelegramBot(Base):
+    __tablename__ = 'customer_telegram_bots'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    bot_id = Column(String(30), nullable=False, unique=True)
+    username = Column(String(128), nullable=False)
+    encrypted_token = Column(Text, nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    timezone = Column(String(64), nullable=False, default='Asia/Baghdad')
+    offset = Column(Integer, nullable=False, default=0)
+    poll_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    last_error = Column(String(300))
+
+
+class CustomerTelegramSender(Base):
+    __tablename__ = 'customer_telegram_sender'
+    __table_args__ = (CheckConstraint('id = 1', name='customer_telegram_single_sender'),)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(36), ForeignKey('customer_telegram_bots.user_id', ondelete='CASCADE'), nullable=False)
+
+
+class CustomerTelegramLink(Base):
+    __tablename__ = 'customer_telegram_links'
+    user_id = Column(String(36), ForeignKey('customer_telegram_bots.user_id', ondelete='CASCADE'), primary_key=True)
+    customer_id = Column(Integer, primary_key=True)
+    customer_username = Column(String(128), nullable=False)
+    version = Column(String(36), nullable=False, default=uid)
+    language = Column(String(8), nullable=False, default='en')
+    chat_id = Column(String(30))
+    pending_chat_id = Column(String(30))
+    phone_hash = Column(String(64))
+    phone_verified_at = Column(DateTime(timezone=True))
+    token_hash = Column(String(64), unique=True)
+    token_expires = Column(DateTime(timezone=True))
+    next_check = Column(DateTime(timezone=True), nullable=False, default=now)
+    last_sent_at = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+
+
+class CustomerTelegramEvent(Base):
+    __tablename__ = 'customer_telegram_events'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey('customer_telegram_bots.user_id', ondelete='CASCADE'), nullable=False, index=True)
+    customer_id = Column(Integer, nullable=False)
+    version = Column(String(36), nullable=False)
+    kind = Column(String(20), nullable=False)
+    expiration = Column(String(80))
+    status = Column(String(16), nullable=False, default='pending')
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    sent_at = Column(DateTime(timezone=True))
 
 
 class DeyeConnection(Base):

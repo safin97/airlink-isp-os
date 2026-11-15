@@ -318,12 +318,19 @@ def reconcile_order(db, order):
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
         request = sas4.CardRecharge(method='credit', transaction_id=order.id, expected_cost=order.quote['manager_cost'],
             expected_profile_id=order.quote['profile_id'], expected_expiration=order.quote['expiration'])
-        sas4.redeem_card(connection, password, order.sas4_user_id, request)
+        activation_result = sas4.redeem_card(connection, password, order.sas4_user_id, request)
         order.status, order.detail = 'completed', 'Payment verified and service recharged.'
         audit(db, actor, 'payment.recharge', order.id)
     except Exception:
         # Never repeat an activation after a timeout or uncertain result.
         order.status, order.detail = 'paid_review', 'Payment received, but recharge was not confirmed. Check SAS4 before applying service again.'
+    if order.status == 'completed':
+        from . import customer_telegram
+        receipt = dict(activation_result.get('_notification_receipt') or {})
+        receipt.update(amount=str(order.amount), currency=order.currency, reference=order.id)
+        receipt['recharge_cost'] = str(sas4.money(order.quote['manager_cost']))
+        receipt.pop('service_price', None)
+        customer_telegram.activation(db, actor, order.sas4_user_id, order.provider, order.id, receipt)
     order.updated_at = now()
     db.commit()
 

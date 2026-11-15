@@ -435,7 +435,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       owner ||
       (usesSectionPermissions(api.user!) &&
           hasSection(api.user!, 'software_updates'));
-  bool canPage(int index) => pages[index] == 'My account'
+  bool canPage(int index) => owner
+      ? hasSection(
+          api.user!,
+          ownerSections.entries
+              .firstWhere((entry) => entry.value == pages[index])
+              .key,
+        )
+      : pages[index] == 'My account'
       ? true
       : pages[index] == 'Deye Solar'
       ? owner ||
