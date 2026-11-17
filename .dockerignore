@@ -10,4 +10,6 @@ test-results
 .pytest_cache
 *.qcow2
 .release-secrets
+.local
+.tools
 qemu-preview

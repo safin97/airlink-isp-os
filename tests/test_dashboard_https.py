@@ -41,12 +41,20 @@ def test_cache_policy_preserves_existing_https_configuration(tmp_path):
     assert not https.refresh_web_config(path)
 
 
-def test_oauth_callback_logging_rule_is_installed_on_existing_appliance(tmp_path):
+def test_removed_oauth_callback_is_not_installed(tmp_path):
     path = tmp_path/'airlink'
     path.write_text('server {\n    ssl_certificate /custom/domain.crt;\n    root /opt/airlink/frontend/build/web;\n    location /api/ {\n        proxy_pass http://127.0.0.1:8000;\n    }\n}\n')
     assert https.refresh_web_config(path)
     content = path.read_text()
-    assert 'location = /api/backups/google-drive/callback' in content
-    assert 'access_log off;' in content
+    assert 'google-drive' not in content
     assert 'ssl_certificate /custom/domain.crt;' in content
+    assert not https.refresh_web_config(path)
+
+
+def test_old_google_callback_removed_without_changing_main_proxy(tmp_path):
+    path = tmp_path/'airlink'
+    path.write_text('server {\n    location = /api/backups/google-drive/callback {\n        access_log off;\n        proxy_pass http://127.0.0.1:8000;\n    }\n    location /api/ { proxy_pass http://127.0.0.1:8000; }\n}\n')
+    assert https.refresh_web_config(path)
+    assert 'google-drive' not in path.read_text()
+    assert 'location /api/ { proxy_pass http://127.0.0.1:8000; }' in path.read_text()
     assert not https.refresh_web_config(path)

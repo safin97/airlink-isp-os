@@ -102,6 +102,7 @@ class Api {
     String method = 'GET',
     Object? body,
     bool retry = true,
+    bool binary = false,
   }) async {
     final request = http.Request(method, Uri.parse('$base/api$path'));
     request.headers.addAll({
@@ -116,7 +117,13 @@ class Api {
         token != null &&
         !path.startsWith('/auth/')) {
       await refresh();
-      return this.request(path, method: method, body: body, retry: false);
+      return this.request(
+        path,
+        method: method,
+        body: body,
+        retry: false,
+        binary: binary,
+      );
     }
     if (response.statusCode >= 400) {
       String message = 'Request failed (${response.statusCode})';
@@ -127,6 +134,7 @@ class Api {
       throw ApiException(message, response.statusCode);
     }
     if (response.statusCode == 204) return null;
+    if (binary) return response.bodyBytes;
     if (response.headers['content-type']?.contains('text/csv') == true) {
       return response.body;
     }

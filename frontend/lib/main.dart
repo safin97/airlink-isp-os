@@ -31,7 +31,7 @@ import 'wireless_clients_dialog.dart';
 import 'device_management_dialog.dart';
 import 'ethernet_ports_dialog.dart';
 import 'device_downtime_history.dart';
-import 'google_drive_backup.dart';
+import 'backups.dart';
 import 'ip_address_sort.dart';
 import 'device_api_access_panel.dart';
 import 'online_device_dialog.dart';
@@ -445,8 +445,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       : pages[index] == 'My account'
       ? true
       : pages[index] == 'Deye Solar'
-      ? owner ||
-            (usesSectionPermissions(api.user!) && hasSection(api.user!, 'deye'))
+      ? hasSection(api.user!, 'deye')
       : pages[index] == 'Diagnostics'
       ? owner ||
             (usesSectionPermissions(api.user!) &&
@@ -3127,7 +3126,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Map<String, IconData> get settingsPages => {
     if (canViewSnmpProfiles(api.user!)) 'SNMP profiles': Icons.key_outlined,
     if (canManageSettings) ...{
-      if (owner) 'Google Drive backup': Icons.cloud_upload_outlined,
+      if (owner) 'Backups': Icons.cloud_upload_outlined,
       if (owner) 'Payment gateways': Icons.payments_outlined,
       if (owner) 'Device API logins': Icons.router_outlined,
       'Network': Icons.settings_ethernet,
@@ -3196,8 +3195,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   Widget settingsContent(String selected) {
     switch (selected) {
-      case 'Google Drive backup':
-        return GoogleDriveBackup(api: api);
+      case 'Backups':
+        return Backups(api: api);
       case 'Payment gateways':
         return card(PaymentSettings(api: api, initiallyExpanded: true));
       case 'Device API logins':
@@ -3890,11 +3889,7 @@ class _NetworkSettingsState extends State<NetworkSettings>
 
 class HealthBar extends StatelessWidget {
   final int online, offline;
-  const HealthBar({
-    super.key,
-    required this.online,
-    required this.offline,
-  });
+  const HealthBar({super.key, required this.online, required this.offline});
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(6),

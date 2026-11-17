@@ -9,11 +9,12 @@ from typing import Literal, Optional
 import httpx
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, model_validator
+from sqlalchemy import select
 from .db import get_db
-from .models import DeyeConnection, DeyeGridHistory, now, audit
-from .security import current_user, cipher, aware
-from . import section_access
+from .models import DeyeConnection, DeyeGridHistory, DeyeShare, User, now, audit
+from .security import current_user, owner, cipher, aware
+from . import deye_access
 
 router = APIRouter(prefix='/api/integrations/deye', tags=['Deye Cloud'])
 REGIONS = {'eu': 'https://eu1-developer.deyecloud.com',
@@ -54,9 +55,57 @@ class DashboardStationInput(BaseModel):
 
 
 def access(user=Depends(current_user), db=Depends(get_db)):
-    if user.role != 'owner' and 'deye' not in section_access.effective(user, db):
+    if not deye_access.visible(user, db):
         raise HTTPException(403, 'Deye Cloud access must be enabled by the owner')
     return user
+
+
+def reading_owner(user=Depends(access), db=Depends(get_db)):
+    source = deye_access.source(user, db)
+    if source is None:
+        raise HTTPException(403, 'Deye Cloud access must be enabled by the owner')
+    return source
+
+
+class ShareInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: StrictBool
+
+
+@router.get('/sharing')
+def sharing(user=Depends(owner), db=Depends(get_db)):
+    from .access_roles import user_role
+    rows = []
+    for account in db.scalars(select(User).where(User.role != 'owner', User.active.is_(True)).order_by(User.username)):
+        share = db.get(DeyeShare, account.id)
+        source = deye_access.source(account, db)
+        rows.append({'id': account.id, 'username': account.username,
+                     'role_name': user_role(account).get('access_role_name') or account.role,
+                     'enabled': share is not None and share.owner_id == user.id,
+                     'shared_by_other_owner': source is not None and source.id != user.id})
+    return rows
+
+
+@router.put('/sharing/{user_id}')
+def set_sharing(user_id: str, data: ShareInput, user=Depends(owner), db=Depends(get_db)):
+    target = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if target is None:
+        raise HTTPException(404, 'Account not found')
+    if target.role == 'owner' or not target.active:
+        raise HTTPException(422, 'Choose an active Wakil or other non-owner account')
+    share = db.get(DeyeShare, user_id)
+    source = deye_access.source(target, db)
+    if source is not None and source.id != user.id:
+        raise HTTPException(409, 'Solar readings are shared by another owner. That owner must remove sharing first.')
+    if data.enabled and share is None:
+        db.add(DeyeShare(user_id=user_id, owner_id=user.id))
+    elif data.enabled:
+        share.owner_id = user.id
+    elif not data.enabled and share is not None:
+        db.delete(share)
+    audit(db, user, 'deye.share' if data.enabled else 'deye.unshare', user_id)
+    db.commit()
+    return {'id': user_id, 'enabled': data.enabled}
 
 
 def lock_for(user):
@@ -201,13 +250,17 @@ def station_list(result):
 
 @router.get('')
 def settings(user=Depends(access), db=Depends(get_db)):
-    with lock_for(user):
-        return public(db.get(DeyeConnection, user.id))
+    source = reading_owner(user, db)
+    with lock_for(source):
+        row = db.get(DeyeConnection, source.id)
+        if user.role == 'owner':
+            return public(row)
+        return {'configured': row is not None, 'shared': True,
+                'dashboard_station': row.dashboard_station if row is not None else None}
 
 
 @router.put('')
-def save(data: ConnectionInput, user=Depends(access), db=Depends(get_db)):
-    section_access.require_any(user, ('deye',), db, write=True)
+def save(data: ConnectionInput, user=Depends(owner), db=Depends(get_db)):
     with lock_for(user):
         row = db.get(DeyeConnection, user.id)
         old = decrypt(row.encrypted_credentials) if row else {}
@@ -237,8 +290,7 @@ def save(data: ConnectionInput, user=Depends(access), db=Depends(get_db)):
 
 
 @router.delete('')
-def disconnect(user=Depends(access), db=Depends(get_db)):
-    section_access.require_any(user, ('deye',), db, delete=True)
+def disconnect(user=Depends(owner), db=Depends(get_db)):
     with lock_for(user):
         row = db.get(DeyeConnection, user.id)
         if row:
@@ -249,7 +301,7 @@ def disconnect(user=Depends(access), db=Depends(get_db)):
 
 
 @router.get('/stations')
-def stations(page: int = Query(default=1, ge=1, le=1000), user=Depends(access), db=Depends(get_db)):
+def stations(page: int = Query(default=1, ge=1, le=1000), user=Depends(reading_owner), db=Depends(get_db)):
     with lock_for(user):
         row = connection(db, user)
         result = station_page(row, page)
@@ -267,8 +319,7 @@ def station_page(row, page):
 
 
 @router.put('/dashboard-station')
-def set_dashboard_station(data: DashboardStationInput, user=Depends(access), db=Depends(get_db)):
-    section_access.require_any(user, ('deye',), db, write=True)
+def set_dashboard_station(data: DashboardStationInput, user=Depends(owner), db=Depends(get_db)):
     with lock_for(user):
         row = connection(db, user)
         selected = None
@@ -289,7 +340,7 @@ def set_dashboard_station(data: DashboardStationInput, user=Depends(access), db=
 
 
 @router.get('/stations/{station_id}/latest')
-def latest(station_id: str, user=Depends(access), db=Depends(get_db)):
+def latest(station_id: str, user=Depends(reading_owner), db=Depends(get_db)):
     if not station_id.isascii() or not station_id.isdigit() or not 0 < int(station_id) < 2**63:
         raise HTTPException(422, 'Invalid station ID')
     with lock_for(user):
@@ -384,10 +435,11 @@ def read_station(db, row, station_id):
 
 
 def live_snapshot(db, user):
-    """Database-only, account-scoped telemetry for the authenticated live stream."""
-    if user.role != 'owner' and 'deye' not in section_access.effective(user, db):
+    """Database-only owner telemetry, including explicitly authorized viewers."""
+    source = deye_access.source(user, db)
+    if source is None:
         return None
-    row = db.get(DeyeConnection, user.id)
+    row = db.get(DeyeConnection, source.id)
     if row is None:
         return {'configured': False}
     monitor = (row.cache or {}).get('monitor', {})
@@ -398,6 +450,6 @@ def live_snapshot(db, user):
             readings[station_id] = {'error': 'Waiting for a new cloud reading.',
                                     'fetched_at': cached.get('fetched_at')}
         else:
-            readings[station_id] = cached_reading(db, user.id, station_id, cached)
+            readings[station_id] = cached_reading(db, source.id, station_id, cached)
     return {'configured': True, 'dashboard_station': selected, 'readings': readings,
             'monitor_error': 'Deye Cloud is unavailable. Retrying automatically.' if monitor.get('error') else None}

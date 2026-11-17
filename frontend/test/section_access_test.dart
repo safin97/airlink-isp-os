@@ -216,7 +216,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Choose a settings page'), findsOneWidget);
     expect(find.text('Device API logins'), findsNothing);
-    expect(find.text('Google Drive backup'), findsNothing);
+    expect(find.text('Backups'), findsNothing);
     expect(requests, isNot(contains('/api/network')));
     await tester.tap(find.widgetWithText(ListTile, 'SNMP profiles').last);
     await tester.pumpAndSettle();
@@ -294,7 +294,7 @@ void main() {
       }
       await tester.tap(find.widgetWithText(ListTile, 'Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Google Drive backup'), findsWidgets);
+      expect(find.text('Backups'), findsWidgets);
       await tester.tap(find.widgetWithText(ListTile, 'Managers'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Section access'));

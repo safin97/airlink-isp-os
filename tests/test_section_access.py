@@ -10,7 +10,7 @@ from test_api import user, tower, device
 def grant(client, owner, manager_id, sections):
     result = client.put('/api/users/'+manager_id+'/sections', headers=owner, json={'sections':sections})
     assert result.status_code == 200, result.text
-    assert result.json()['sections'] == [key for key in ASSIGNABLE if key in sections]
+    assert result.json()['sections'] == [key for key in ASSIGNABLE if key in sections and key != 'deye']
 
 
 def test_owner_full_access_and_owner_only_permission_control(client, owner):
@@ -130,7 +130,7 @@ def readonly_grant(client, owner, mid, sections, editable=()):
     response = client.put('/api/users/'+mid+'/sections', headers=owner,
                           json={'sections': sections, 'editable_sections': list(editable)})
     assert response.status_code == 200, response.text
-    assert response.json()['editable_sections'] == [key for key in ASSIGNABLE if key in editable]
+    assert response.json()['editable_sections'] == [key for key in ASSIGNABLE if key in editable and key != 'deye']
 
 
 @pytest.mark.parametrize('method,path', [
@@ -236,7 +236,7 @@ def test_full_manager_permissions_preserve_the_complete_audit_record(client, own
     result = client.put('/api/users/'+mid+'/sections', headers=owner, json={
         'sections': grants, 'editable_sections': grants, 'deletable_sections': grants})
     assert result.status_code == 200, result.text
-    assert client.get('/api/auth/me', headers=manager).json()['sections'] == grants
+    assert client.get('/api/auth/me', headers=manager).json()['sections'] == [key for key in grants if key != 'deye']
     expected = mid + ':view=' + ','.join(grants) + ';edit=' + ','.join(grants) + ';delete=' + ','.join(grants)
     assert len(expected) > 120
     with SessionLocal() as db:

@@ -28,6 +28,8 @@ The image output is `dist/AirLink-ISP-OS-amd64.iso` with `dist/SHA256SUMS` and a
 
 For real SAS4 data and background monitoring from your VS Code terminal, run `./scripts/live.sh` and open `http://127.0.0.1:18080`. To review the dashboard with sample SAS4 data, use `./scripts/preview.sh`. See [local run instructions](docs/LOCAL-PREVIEW.md) for saved data, startup and limitations.
 
+Owners can use **Settings → Backups** to [download encrypted backups or restore a file from their PC](docs/DOWNLOAD-BACKUPS.md), and set up [weekly MEGA cloud backups and restore them](docs/MEGA-BACKUPS.md), without a domain. Google Drive backup integration has been removed.
+
 ## Test
 
 ```sh

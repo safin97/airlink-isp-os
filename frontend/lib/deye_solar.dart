@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
-import 'section_access.dart';
+import 'deye_sharing.dart';
 import 'deye_energy_overview.dart';
 
 class DeyeSolar extends StatefulWidget {
@@ -40,8 +40,8 @@ class _DeyeSolarState extends State<DeyeSolar> {
   StreamSubscription<Map<String, dynamic>>? liveSubscription;
   Map<String, dynamic>? pendingLive;
   static const base = '/integrations/deye';
-  bool get canEdit => canEditSection(widget.api.user ?? {}, 'deye');
-  bool get canDelete => canDeleteSection(widget.api.user ?? {}, 'deye');
+  bool get canEdit => widget.api.user?['role'] == 'owner';
+  bool get canDelete => canEdit;
 
   @override
   void initState() {
@@ -83,7 +83,16 @@ class _DeyeSolarState extends State<DeyeSolar> {
     }
     if (!event.containsKey('deye')) return;
     final data = event['deye'];
-    if (data is! Map) return; // Parent removes the view when access is revoked.
+    if (data is! Map) {
+      timer?.cancel();
+      setState(() {
+        configured = false;
+        reading = null;
+        stationId = null;
+        editing = false;
+      });
+      return; // Parent removes the view when access is revoked.
+    }
     final frame = Map<String, dynamic>.from(data);
     liveStationId = (frame['dashboard_station'] as Map?)?['id']?.toString();
     if (busy) {
@@ -103,7 +112,7 @@ class _DeyeSolarState extends State<DeyeSolar> {
         stationId = null;
         stations = [];
         error = null;
-        if (!widget.dashboard) editing = true;
+        if (!widget.dashboard) editing = canEdit;
         return;
       }
       if (widget.dashboard && frame['dashboard_station'] is Map) {
@@ -177,14 +186,16 @@ class _DeyeSolarState extends State<DeyeSolar> {
         );
       }
       configured = result['configured'] == true;
-      editing = !configured && !widget.dashboard;
+      editing = !configured && !widget.dashboard && canEdit;
       if (configured) {
-        region = result['region'];
-        loginType = result['login_type'];
-        account.text = result['account'];
-        appId.text = result['app_id'];
-        country.text = result['country_code'] ?? '';
-        company.text = result['company_id']?.toString() ?? '';
+        if (canEdit) {
+          region = result['region'];
+          loginType = result['login_type'];
+          account.text = result['account'];
+          appId.text = result['app_id'];
+          country.text = result['country_code'] ?? '';
+          company.text = result['company_id']?.toString() ?? '';
+        }
         dashboardStation = result['dashboard_station'] == null
             ? null
             : Map<String, dynamic>.from(result['dashboard_station']);
@@ -669,6 +680,15 @@ class _DeyeSolarState extends State<DeyeSolar> {
                   Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
+                      if (!widget.dashboard && canEdit)
+                        TextButton.icon(
+                          onPressed: () => showDialog(
+                            context: context,
+                            builder: (_) => DeyeSharing(api: widget.api),
+                          ),
+                          icon: const Icon(Icons.visibility_outlined),
+                          label: const Text('Show solar readings'),
+                        ),
                       if (configured && !editing)
                         IconButton(
                           onPressed: busy ? null : refresh,
@@ -740,7 +760,7 @@ class _DeyeSolarState extends State<DeyeSolar> {
                       Text(
                         canEdit
                             ? 'Connect Deye Cloud to see solar production, battery charge, load and grid power here.'
-                            : 'No Deye connection is saved for this account. Connection edit permission is required to set one up.',
+                            : 'The owner has not connected Deye Solar yet. Shared readings will appear after the owner configures it.',
                       ),
                       if (widget.dashboard &&
                           canEdit &&

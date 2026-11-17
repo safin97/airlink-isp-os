@@ -15,9 +15,22 @@ if not 1024 <= args.port <= 65535:
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 sys.path.insert(0,str(ROOT/'backend'))
+sys.path.insert(0,str(ROOT/'os'))
+# Hold this lock for the whole process so recovery never runs beside another local server.
+import fcntl
+local_root = ROOT/'.local/mega-backups'
+local_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+local_process_lock = (local_root/'server.lock').open('a')
+try:
+    fcntl.flock(local_process_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit('The local AirLink server is already running. Stop it before starting again.')
 os.environ['DATABASE_URL']='sqlite:////tmp/airlink-browser-qa.sqlite'
 os.environ['AIRLINK_JWT_SECRET']=secrets.token_urlsafe(64)
-os.environ['AIRLINK_ENCRYPTION_KEY']='gJFepfkBWCaGM4AfJ4vM9MJfW4dT-vWAcFKOg-CyXx8='
+os.environ.setdefault('AIRLINK_ENCRYPTION_KEY', 'gJFepfkBWCaGM4AfJ4vM9MJfW4dT-vWAcFKOg-CyXx8=')
+from airlink.local_restore import LocalRestore
+local_restore = LocalRestore(local_root, Path('/tmp/airlink-browser-qa.sqlite'))
+os.environ['AIRLINK_ENCRYPTION_KEY'] = local_restore.apply_pending(os.environ['AIRLINK_ENCRYPTION_KEY'])
 os.environ['AIRLINK_SECURE_COOKIES']='false'
 from airlink import api
 from airlink.db import Base,engine,SessionLocal
@@ -36,8 +49,26 @@ update.ROOT = ROOT / 'test-results' / 'local-update-preview'
 update.CONFIG = ROOT / 'deployment' / 'update-source' / 'update-source.json'
 update.KEY = ROOT / 'deployment' / 'update-source' / 'update-public-key.bin'
 appliance_broker = api.broker
+from cloud_backups.download import DownloadService
+from airlink.local_backup import archive as local_archive
+download_backups = DownloadService(Path('/tmp/airlink-backup-downloads'), archive=local_archive)
+from cloud_backups.mega_service import MegaBackupService
+if (ROOT/'.tools/rclone').is_file():
+    os.environ.setdefault('AIRLINK_RCLONE_BIN', str(ROOT/'.tools/rclone'))
+mega_backups = MegaBackupService(local_root, archive=local_archive, enabled=args.live,
+                                restore_validate=local_restore.validate, restore_apply=local_restore.stage)
 
 def preview_broker(action, payload=None):
+    if action.startswith('backups.mega.'):
+        try:
+            return mega_backups.action(action.removeprefix('backups.mega.'), payload or {})
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+    if action.startswith('backups.downloads.'):
+        try:
+            return download_backups.action(action.removeprefix('backups.downloads.'), payload or {})
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
     if action == 'diagnostics.status':
         from console.driver_health import collect
         sample = api.system_stats_service.read()
@@ -53,13 +84,6 @@ def preview_broker(action, payload=None):
         return {'supported': False, 'state': {'status': 'unavailable'}, 'plan': None,
                 'reboot_required': False,
                 'reason': 'PC updates run on the installed AirLink Linux PC. They are unavailable in the local preview.'}
-    if action.startswith('backups.google-drive.'):
-        from cloud_backups import service as cloud_backups
-        cloud_backups.ROOT = Path('/tmp/airlink-google-drive-preview')
-        try:
-            return cloud_backups.service.action(action.removeprefix('backups.google-drive.'), payload or {})
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from None
     if action == 'system.restart':
         raise HTTPException(409, 'Restart from the dashboard hosted on your AirLink PC. This is a local preview.')
     if action.startswith('updates.'):
@@ -87,6 +111,7 @@ async def preview_lifespan(app):
     customer_messages = None
     api.system_stats_service.start()
     if args.live:
+        mega_backups.start()
         customer_messages = asyncio.create_task(api.customer_telegram.worker())
         api.deye_monitor_service.start()
         from monitoring import worker
@@ -117,6 +142,7 @@ async def preview_lifespan(app):
     try:
         yield
     finally:
+        mega_backups.stop()
         if customer_messages:
             customer_messages.cancel()
             with suppress(asyncio.CancelledError):

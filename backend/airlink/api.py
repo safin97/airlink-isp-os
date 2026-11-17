@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import towers_device_access, drive_backups, deye, customer_telegram, telegram_account, recharge_telegram
+from . import towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
@@ -75,7 +75,9 @@ app.include_router(online_device.router)
 app.include_router(snmp_visibility.router)
 app.include_router(device_login_profiles.router)
 app.include_router(towers_device_access.router)
-app.include_router(drive_backups.router)
+app.include_router(file_restore.router)
+app.include_router(download_backups.router)
+app.include_router(mega_backups.router)
 app.include_router(deye.router)
 app.include_router(customer_telegram.router)
 app.include_router(telegram_account.router)
@@ -103,8 +105,8 @@ async def safe_device_login_validation(request, exc):
     if request.url.path.startswith('/api/integrations/deye'):
         return JSONResponse(status_code=422, content={'detail': 'Check the Deye Cloud account, region and application credentials.'},
                             headers={'Cache-Control': 'no-store'})
-    if request.url.path.startswith('/api/backups/google-drive'):
-        return JSONResponse(status_code=422, content={'detail': 'Invalid Google Drive backup settings. Check the required fields.'},
+    if request.url.path.startswith('/api/backups/'):
+        return JSONResponse(status_code=422, content={'detail': 'Invalid backup settings. Use a password with 12–1024 characters and check the required fields.'},
                             headers={'Cache-Control': 'no-store'})
     if request.url.path.rstrip('/') == '/api/integrations/sas4/device-access':
         return JSONResponse(status_code=422, content={
@@ -134,6 +136,8 @@ def public(obj):
     hidden = {"password_hash", "encrypted_credentials"}
     result = {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in hidden}
     if isinstance(obj, User):
+        from . import deye_access
+        result['show_deye_solar'] = deye_access.visible(obj)
         result['show_snmp_profiles'] = snmp_visibility.visible(obj)
         if obj.role == 'owner':
             result['default_snmp_profile_visibility'] = snmp_visibility.new_account_default(obj)

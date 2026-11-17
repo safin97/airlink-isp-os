@@ -14,4 +14,6 @@ dist/
 *.fd
 test-results/
 .release-secrets/
+.local/
+.tools/
 qemu-preview/

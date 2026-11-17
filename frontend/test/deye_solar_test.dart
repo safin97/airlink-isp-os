@@ -148,18 +148,24 @@ void main() {
                     'total': 1,
                   });
                 }
-                return response(config);
+                return response({
+                  'configured': true,
+                  'shared': true,
+                  'dashboard_station': null,
+                });
               }),
             )
             ..user = {
               'role': 'manager',
               'sections': ['deye'],
-              'editable_sections': [],
-              'deletable_sections': [],
+              'editable_sections': ['deye'],
+              'deletable_sections': ['deye'],
             };
       await tester.pumpWidget(screen(api));
       await tester.pumpAndSettle();
       expect(find.text('Connection'), findsNothing);
+      expect(find.text('Show solar readings'), findsNothing);
+      expect(find.text('Show this station on dashboard'), findsNothing);
       expect(find.byTooltip('Disconnect Deye Cloud'), findsNothing);
       expect(find.text('1.23 kW'), findsOneWidget);
       fail = true;

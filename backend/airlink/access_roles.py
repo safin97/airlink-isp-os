@@ -33,9 +33,10 @@ def public(db, row, user=None):
 def grantable(db, user, policy):
     if user.role == 'owner':
         return True
-    return (set(policy.sections).issubset(section_access.effective(user, db))
-            and set(policy.editable_sections).issubset(section_access.editable(user, db))
-            and set(policy.deletable_sections).issubset(section_access.deletable(user, db)))
+    # Legacy Deye role bits are inert; sharing/configuration is owner-controlled.
+    return ((set(policy.sections) - {'deye'}).issubset(section_access.effective(user, db))
+            and (set(policy.editable_sections) - {'deye'}).issubset(section_access.editable(user, db))
+            and (set(policy.deletable_sections) - {'deye'}).issubset(section_access.deletable(user, db)))
 
 
 def require_grantable(db, user, policy):

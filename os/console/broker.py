@@ -16,7 +16,8 @@ from updates.update import action as update_action, restart_system
 from updates.pc import action as pc_update_action
 from console.gpu import detect as detect_gpus
 from console.driver_health import collect as collect_driver_health
-from cloud_backups.service import service as drive_backup_service
+from cloud_backups.download import service as download_backup_service
+from cloud_backups.mega_service import service as mega_backup_service
 
 SOCKET = Path("/run/airlink/control.sock")
 
@@ -101,8 +102,10 @@ class Handler(socketserver.StreamRequestHandler):
                 result = restart_system(payload)
             elif name.startswith("pc-updates."):
                 result = pc_update_action(name.split('.', 1)[1], payload)
-            elif name.startswith("backups.google-drive."):
-                result = drive_backup_service.action(name.removeprefix("backups.google-drive."), payload)
+            elif name.startswith("backups.downloads."):
+                result = download_backup_service.action(name.removeprefix("backups.downloads."), payload)
+            elif name.startswith("backups.mega."):
+                result = mega_backup_service.action(name.removeprefix("backups.mega."), payload)
             elif name.startswith("network."):
                 result = network_action(name.split(".", 1)[1], payload)
             elif name.startswith("updates."):
@@ -117,7 +120,7 @@ class Handler(socketserver.StreamRequestHandler):
 
 if __name__ == "__main__":
     Path("/var/lib/airlink-system").mkdir(mode=0o700, exist_ok=True)
-    drive_backup_service.start()
+    mega_backup_service.start()
     SOCKET.parent.mkdir(exist_ok=True)
     SOCKET.unlink(missing_ok=True)
     with socketserver.ThreadingUnixStreamServer(str(SOCKET), Handler) as server:

@@ -14,7 +14,7 @@ Equivalent: `make live`. This uses the existing web build, enables real SAS4 cal
 
 Use **SAS4 connection** to save your real SAS4 login for your local account. Existing real connections are preserved. Live mode removes only the exact synthetic SAS4 connection fixtures originally created by the demo launcher; it preserves their accounts. It never replaces live readings with sample online-user data. Saved private device IPs still need a working LAN or VPN route from the Mac; internet access alone cannot reach an isolated tower subnet.
 
-The server binds only to `127.0.0.1`. It is a local development runtime using SQLite and an in-process Redis substitute, not the installed Linux appliance. Automatic payment processing is not started by this local launcher. Live mode evaluates device alerts and dispatches Telegram notifications when the owner has enabled them. Appliance networking, OS updates/restarts and scheduled Google Drive archive creation require the installed Linux system.
+The server binds only to `127.0.0.1`. It is a local development runtime using SQLite and an in-process Redis substitute, not the installed Linux appliance. Automatic payment processing is not started by this local launcher. Live mode evaluates device alerts and dispatches Telegram notifications when the owner has enabled them. Appliance networking and OS updates/restarts require the installed Linux system.
 
 ## Build changes or use demo mode
 
@@ -33,6 +33,12 @@ For demo SAS4 data without background device polling:
 Omit `--skip-build` to rebuild the dashboard first. Stop the existing local process before starting another on the same port. Use `./scripts/live.sh --port 18081` for another port, but do not run multiple live monitors against the same local database.
 
 ## Local data and login
+
+Owners can use **Settings → Backups → Download a backup** to save an encrypted copy of the local SQLite database and its credential recovery key, or **Restore from PC file** to browse, upload and verify a previously saved backup. See [download and recovery instructions](DOWNLOAD-BACKUPS.md). Google Drive settings and scheduling have been removed.
+
+[MEGA cloud backups](MEGA-BACKUPS.md) can upload this local archive on demand or weekly while the Mac is awake and the live launcher is running. Set up your own MEGA account in **Settings → Backups**. MEGA settings are kept in the private, ignored `.local/mega-backups/` directory.
+
+Owners can use **Restore from MEGA** to select, download and verify a backup. Type `RESTORE` to confirm, then stop the server and run `./scripts/live.sh` again. Recovery saves a safety copy before replacing the database and its encryption key. Sign in with an account from the restored backup. An exclusive launcher lock prevents running two local servers against the same database during recovery.
 
 The current launcher stores data in `/tmp/airlink-browser-qa.sqlite`. It reuses existing accounts, passwords, inventory and credential profiles on restart. If there is no existing database, it initializes the development owner defined in `tests/preview.py`. A restart refreshes local session signing keys; the browser can refresh a saved session or you can sign in again with your existing local account.
 

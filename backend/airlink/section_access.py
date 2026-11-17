@@ -53,6 +53,14 @@ def role_policy(user, db=None):
 
 
 def effective(user, db=None):
+    sections = _effective(user, db)
+    if user.role == 'owner':
+        return sections
+    from . import deye_access
+    return [key for key in sections if key != 'deye'] + (['deye'] if deye_access.visible(user, db) else [])
+
+
+def _effective(user, db=None):
     if user.role == 'owner':
         return list(ALL)
     policy = role_policy(user, db)
@@ -67,7 +75,7 @@ def effective(user, db=None):
 
 
 def editable(user, db=None):
-    visible = effective(user, db)
+    visible = [key for key in effective(user, db) if user.role == 'owner' or key != 'deye']
     policy = role_policy(user, db)
     if policy is not None:
         return [key for key in visible if key in policy['edit']]
@@ -86,11 +94,11 @@ def deletable(user, db=None):
             db = db if db is not None else object_session(user)
             saved = db.get(UserSectionDeletes, user.id) if db is not None else None
             if saved is not None:
-                return [key for key in effective(user, db) if key in saved.sections]
+                return [key for key in effective(user, db) if key != 'deye' and key in saved.sections]
             # These newly delegated administrative sections require explicit delete grants.
             return [key for key in editable(user, db) if key not in ('roles', 'access_roles')]
         return editable(user, db)
-    return [key for key in effective(user, db) if key in policy['delete']]
+    return [key for key in effective(user, db) if key != 'deye' and key in policy['delete']]
 
 
 def require_any(user, sections, db=None, *, write=False, delete=False):
@@ -107,7 +115,12 @@ def require_any(user, sections, db=None, *, write=False, delete=False):
 
 def enforce_request(user, method, path):
     path = path.rstrip('/')
-    owner_sections = ('/api/backups/google-drive', '/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
+    if path == '/api/integrations/deye' or path.startswith('/api/integrations/deye/'):
+        from . import deye_access
+        if user.role != 'owner' and (method not in ('GET', 'HEAD', 'OPTIONS') or not deye_access.visible(user)):
+            raise HTTPException(403, 'Deye Solar configuration and sharing are owner-only; viewing requires owner permission')
+        return
+    owner_sections = ('/api/backups', '/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
                       '/api/integrations/sas4/device-access', '/api/payments/gateways')
     if user.role != 'owner' and any(path == root or path.startswith(root + '/') for root in owner_sections):
         raise HTTPException(403, 'Owner access required')

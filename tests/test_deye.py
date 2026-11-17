@@ -68,27 +68,36 @@ def test_connection_encrypts_secrets_and_cloud_contract(client, owner, cloud):
     assert client.put(PATH, headers=owner, json={**kept, 'region': 'am'}).status_code == 422
 
 
-def test_accounts_and_delegated_permissions_are_isolated(client, owner, cloud):
-    manager_id, manager = user(client, owner, 'manager', 'solar-manager')
+def test_owner_shares_readings_without_credentials_or_delegated_configuration(client, owner, cloud):
+    manager_id, manager = user(client, owner, 'manager', 'wakil')
     assert client.get(PATH, headers=manager).status_code == 403
     with SessionLocal() as db:
         db.add(UserSectionAccess(user_id=manager_id, sections=['deye']))
-        db.add(UserSectionEdits(user_id=manager_id, sections=[]))
+        db.add(UserSectionEdits(user_id=manager_id, sections=['deye']))
         db.commit()
-    assert client.get(PATH, headers=manager).status_code == 200
+    assert client.get(PATH, headers=manager).status_code == 403
     assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
-    with SessionLocal() as db:
-        db.get(UserSectionEdits, manager_id).sections = ['deye']; db.commit()
     assert client.put(PATH, headers=owner, json=CONFIG).status_code == 200
-    assert client.get(PATH, headers=manager).json()['configured'] is False
-    assert client.get(PATH + '/stations/123/latest', headers=manager).status_code == 409
-    assert client.put(PATH, headers=manager, json={**CONFIG, 'account': 'manager@example.invalid'}).status_code == 200
-    client.get(PATH + '/stations/123/latest', headers=owner)
-    client.get(PATH + '/stations/123/latest', headers=manager)
+    assert client.put(PATH + '/sharing/' + manager_id, headers=owner, json={'enabled': True}).status_code == 200
+    result = client.get(PATH, headers=manager).json()
+    assert result == {'configured': True, 'shared': True, 'dashboard_station': None}
+    assert client.get(PATH + '/stations/123/latest', headers=manager).json()['battery_soc'] == 76
+    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
+    assert client.delete(PATH, headers=manager).status_code == 403
+    assert client.put(PATH + '/dashboard-station', headers=manager, json={'station_id': None}).status_code == 403
+    identity = client.get('/api/auth/me', headers=manager).json()
+    assert identity['show_deye_solar'] and 'deye' in identity['sections']
+    assert 'deye' not in identity['editable_sections'] and 'deye' not in identity['deletable_sections']
     tokens = [call[3] for call in cloud if call[1] == '/station/latest']
-    assert tokens == ['owner@example.invalid-token', 'manager@example.invalid-token']
-    assert client.delete(PATH, headers=manager).status_code == 200
-    assert client.get(PATH, headers=owner).json()['configured'] is True
+    assert tokens == ['owner@example.invalid-token']
+    with SessionLocal() as db:
+        assert db.query(DeyeConnection).count() == 1
+    assert client.put(PATH + '/sharing/' + manager_id, headers=owner, json={'enabled': False}).status_code == 200
+    calls = len(cloud)
+    for endpoint in (PATH, PATH + '/stations', PATH + '/stations/123/latest'):
+        assert client.get(endpoint, headers=manager).status_code == 403
+    assert len(cloud) == calls
+    assert not client.get('/api/auth/me', headers=manager).json()['show_deye_solar']
 
 
 def test_expired_token_renews_and_failed_login_preserves_saved_connection(client, owner, cloud, monkeypatch):
@@ -186,7 +195,8 @@ def test_dashboard_station_persists_validates_inventory_and_is_account_scoped(cl
         db.add(UserSectionEdits(user_id=mid, sections=[]))
         db.commit()
     assert client.put(url, headers=manager, json={'station_id': None}).status_code == 403
-    assert client.get(PATH, headers=manager).json() == {'configured': False}
+    assert client.put(PATH + '/sharing/' + mid, headers=owner, json={'enabled': True}).status_code == 200
+    assert client.get(PATH, headers=manager).json()['dashboard_station'] == expected
     assert client.get(PATH, headers=owner).json()['dashboard_station'] == expected
     # Updating the same credentials preserves the station; a different cloud account does not.
     assert client.put(PATH, headers=owner, json=CONFIG).json()['dashboard_station'] == expected
@@ -220,9 +230,9 @@ def test_dashboard_station_migration_preserves_saved_connection(tmp_path):
 
 
 @pytest.mark.parametrize('custom_role', [False, True], ids=['manager-role', 'custom-role'])
-def test_access_role_controls_manager_deye_visibility_edit_and_delete(client, owner, cloud, custom_role):
+def test_access_roles_cannot_override_owner_sharing_or_grant_configuration(client, owner, cloud, custom_role):
     uid, manager = user(client, owner, 'manager', 'deye-role-manager')
-    policy = {'name': 'Solar managers', 'sections': [], 'editable_sections': [], 'deletable_sections': []}
+    policy = {'name': 'Wakil', 'sections': ['deye'], 'editable_sections': ['deye'], 'deletable_sections': ['deye']}
     if custom_role:
         created = client.post('/api/access-roles', headers=owner, json=policy)
         assert created.status_code == 201, created.text
@@ -232,41 +242,21 @@ def test_access_role_controls_manager_deye_visibility_edit_and_delete(client, ow
         assert assigned.status_code == 200, assigned.text
     else:
         role_id = 'builtin:manager'
-    url = '/api/access-roles/' + role_id
-
-    def grants(read, edit=False, delete=False):
-        policy.update(sections=['deye'] if read else [], editable_sections=['deye'] if edit else [],
-                      deletable_sections=['deye'] if delete else [])
-        result = client.put(url, headers=owner, json=policy)
-        assert result.status_code == 200, result.text
-        identity = client.get('/api/auth/me', headers=manager).json()
-        for key in ('sections', 'editable_sections', 'deletable_sections'):
-            assert identity[key] == policy[key]
-
-    grants(False)
+        assert client.put('/api/access-roles/' + role_id, headers=owner, json=policy).status_code == 200
     assert client.get(PATH, headers=manager).status_code == 403
-    grants(True)
-    assert client.get(PATH, headers=manager).status_code == 200
     assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
     assert client.delete(PATH, headers=manager).status_code == 403
-    assert cloud == []  # Denied requests never reach Deye.
-
-    grants(True, edit=True)
-    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 200
+    assert cloud == []
+    assert client.put(PATH, headers=owner, json=CONFIG).status_code == 200
+    assert client.put(PATH + '/sharing/' + uid, headers=owner, json={'enabled': True}).status_code == 200
     assert client.get(PATH + '/stations/123/latest', headers=manager).status_code == 200
+    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
     assert client.delete(PATH, headers=manager).status_code == 403
-
-    grants(True)  # Revoke editing without removing the saved connection.
-    assert client.get(PATH + '/stations/123/latest', headers=manager).json()['battery_soc'] == 76
-    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
-    calls_before = len(cloud)
-    grants(False)
-    for path in (PATH, PATH + '/stations', PATH + '/stations/123/latest'):
-        assert client.get(path, headers=manager).status_code == 403
-    assert len(cloud) == calls_before
-    assert client.get(PATH, headers=owner).status_code == 200
-
-    grants(True, delete=True)
-    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
-    assert client.delete(PATH, headers=manager).status_code == 200
-    assert client.get(PATH, headers=manager).json()['configured'] is False
+    assert client.get(PATH + '/sharing', headers=manager).status_code == 403
+    assert client.put(PATH + '/sharing/' + uid, headers=manager, json={'enabled': True}).status_code == 403
+    # Explicit sharing also works when a Wakil's role has no Deye section grant.
+    policy.update(sections=[], editable_sections=[], deletable_sections=[])
+    assert client.put('/api/access-roles/' + role_id, headers=owner, json=policy).status_code == 200
+    assert client.get(PATH + '/stations/123/latest', headers=manager).status_code == 200
+    assert client.put(PATH + '/sharing/' + uid, headers=owner, json={'enabled': False}).status_code == 200
+    assert client.get(PATH, headers=manager).status_code == 403

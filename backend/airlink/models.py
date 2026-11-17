@@ -505,6 +505,12 @@ class DeyeConnection(Base):
     dashboard_station = Column(JSON, nullable=True)
 
 
+class DeyeShare(Base):
+    __tablename__ = 'deye_shares'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    owner_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+
 class DeyeGridHistory(Base):
     __tablename__ = 'deye_grid_history'
     user_id = Column(String(36), ForeignKey('deye_connections.user_id', ondelete='CASCADE'), primary_key=True)

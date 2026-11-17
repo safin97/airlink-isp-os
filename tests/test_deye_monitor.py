@@ -73,35 +73,36 @@ def test_monitor_follows_pinned_station_and_keeps_other_station_cached(client, o
     assert snapshot(owner)['deye']['dashboard_station']['id'] == '123'
 
 
-def test_monitor_stops_for_revoked_inactive_or_disconnected_accounts(client, owner, cloud):
+def test_monitor_shared_readings_revoke_immediately_and_inactive_owners_stop(client, owner, cloud):
     mid, manager = user(client, owner, 'manager', 'solar-monitor')
-    with SessionLocal() as db:
-        db.add(UserSectionAccess(user_id=mid, sections=['deye']))
-        db.add(UserSectionEdits(user_id=mid, sections=['deye']))
-        db.commit()
-    client.put(PATH, headers=manager, json=CONFIG)
-    deye_monitor.poll_account(mid)
+    client.put(PATH, headers=owner, json=CONFIG)
+    owner_id = uid()
+    client.put(PATH + '/sharing/' + mid, headers=owner, json={'enabled': True})
+    deye_monitor.poll_account(owner_id)
     assert snapshot(manager)['deye']['readings']['123']['solar_w'] == 4200
-    expire()
-    with SessionLocal() as db:
-        db.get(UserSectionAccess, mid).sections = []
-        db.commit()
+    shared, owned = snapshot(manager)['deye'], snapshot(owner)['deye']
+    assert shared['dashboard_station'] == owned['dashboard_station']
+    for key in ('solar_w', 'load_w', 'battery_soc', 'fetched_at'):
+        assert shared['readings']['123'][key] == owned['readings']['123'][key]
     calls = len(cloud)
     deye_monitor.poll_account(mid)
     assert len(cloud) == calls
+    client.put(PATH + '/sharing/' + mid, headers=owner, json={'enabled': False})
+    assert snapshot(manager)['deye'] is None
+    client.put(PATH + '/sharing/' + mid, headers=owner, json={'enabled': True})
+    with SessionLocal() as db:
+        db.get(User, owner_id).active = False
+        db.commit()
+    deye_monitor.poll_account(owner_id)
+    assert len(cloud) == calls
     assert snapshot(manager)['deye'] is None
     with SessionLocal() as db:
-        db.get(UserSectionAccess, mid).sections = ['deye']
-        db.get(User, mid).active = False
+        db.get(User, owner_id).active = True
+        db.delete(db.get(DeyeConnection, owner_id))
         db.commit()
-    deye_monitor.poll_account(mid)
+    deye_monitor.poll_account(owner_id)
     assert len(cloud) == calls
-    with SessionLocal() as db:
-        db.get(User, mid).active = True
-        db.delete(db.get(DeyeConnection, mid))
-        db.commit()
-    deye_monitor.poll_account(mid)
-    assert len(cloud) == calls
+    assert snapshot(manager)['deye'] == {'configured': False}
 
 
 def test_monitor_failure_is_redacted_rate_limited_and_recovers(client, owner, cloud, monkeypatch):
@@ -154,7 +155,7 @@ def test_cache_bound_preserves_dashboard_station(client, owner, cloud):
 def test_monitor_lifecycle_is_idempotent_and_slow_accounts_do_not_block_others(client, owner, cloud, monkeypatch):
     client.put(PATH, headers=owner, json=CONFIG)
     owner_id = uid()
-    mid, manager = user(client, owner, 'manager', 'other-solar')
+    mid, manager = user(client, owner, 'owner', 'other-solar')
     with SessionLocal() as db:
         db.add(UserSectionAccess(user_id=mid, sections=['deye']))
         db.add(UserSectionEdits(user_id=mid, sections=['deye']))

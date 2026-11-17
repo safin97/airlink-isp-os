@@ -17,10 +17,10 @@ const assignableSections = <String, String>{
   'software_updates': 'Software Updates',
   'settings': 'Settings',
   'access_roles': 'Access Roles',
-  'deye': 'Deye Solar',
 };
 const pageSections = <String, String>{
   ...assignableSections,
+  'deye': 'Deye Solar',
   'managers': 'Managers',
 };
 const ownerSections = <String, String>{
@@ -48,6 +48,10 @@ bool hasSection(Map<String, dynamic> user, String key) {
         visible == null ||
         visible.contains(key);
   }
+  if (key == 'deye') {
+    return user['show_deye_solar'] as bool? ??
+        (user['sections'] as List? ?? []).contains('deye');
+  }
   if ((key == 'access_roles') && !usesSectionPermissions(user)) {
     return user['role'] == 'owner';
   }
@@ -61,6 +65,7 @@ bool hasSection(Map<String, dynamic> user, String key) {
 
 bool canEditSection(Map<String, dynamic> user, String key) {
   if (user['role'] == 'owner') return true;
+  if (key == 'deye') return false;
   if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
   final editable = user['editable_sections'] as List?;
   return editable == null || editable.contains(key);
@@ -68,6 +73,7 @@ bool canEditSection(Map<String, dynamic> user, String key) {
 
 bool canDeleteSection(Map<String, dynamic> user, String key) {
   if (user['role'] == 'owner') return true;
+  if (key == 'deye') return false;
   if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
   final deletable = user['deletable_sections'] as List?;
   return deletable == null

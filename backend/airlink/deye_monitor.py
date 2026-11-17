@@ -21,7 +21,7 @@ def poll_account(user_id):
             return
         with deye.lock_for(user):
             db.expire_all()
-            if not user.active:
+            if not user.active or user.role != 'owner':
                 return
             try:
                 deye.access(user, db)
@@ -88,7 +88,7 @@ class DeyeMonitor:
                                 log.warning('Deye monitoring iteration failed; retrying automatically')
                     with SessionLocal() as db:
                         ids = list(db.scalars(select(DeyeConnection.user_id).join(
-                            User, User.id == DeyeConnection.user_id).where(User.active.is_(True))))
+                            User, User.id == DeyeConnection.user_id).where(User.active.is_(True), User.role == 'owner')))
                     due = {uid: due.get(uid, 0) for uid in ids}
                     for uid in sorted(ids, key=lambda uid: due[uid]):
                         if len(pending) >= WORKERS or self.stop_event.is_set():
