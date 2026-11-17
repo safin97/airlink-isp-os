@@ -120,8 +120,11 @@ def test_background_job_cannot_switch_release_after_owner_approval(publisher, mo
     approved = update.read(update.ROOT / 'request.json', {})
     assert approved['sequence'] == 2 and approved['sha256'] == meta['sha256']
     assert len(calls) == 1
-    publish({**meta, 'version': '0.3.0', 'sequence': 3})
-    update.action('check', {})
+    changed = publish({**meta, 'version': '0.3.0', 'sequence': 3})
+    with pytest.raises(ValueError, match='queued or running'):
+        update.action('check', {})
+    # Even an out-of-band file replacement cannot change the approved release.
+    update.atomic(update.ROOT / 'manifest.json', changed)
     with pytest.raises(ValueError, match='changed after approval'):
         update.install()
     state = update.status()['state']

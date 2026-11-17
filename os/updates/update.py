@@ -105,8 +105,8 @@ def manifest():
     return verify_manifest(envelope, KEY.read_bytes(), seq)
 
 
-def verify_package(meta):
-    package = ROOT / "package.deb"
+def verify_package(meta, package=None):
+    package = package or ROOT / "package.deb"
     if package.stat().st_size != meta["size"]:
         raise ValueError("Package size mismatch")
     sha = hashlib.sha256()
@@ -164,6 +164,7 @@ def status():
     if available and available["sequence"] <= installed["sequence"]:
         available = None
     return {"configured": CONFIG.exists() and KEY.exists(), "rollback_supported": False,
+            "local_update_supported": KEY.exists(),
             "install_supported": True, "restart_supported": True, "restart": restart_status(),
             "state": read(ROOT / "state.json", {"status": "idle"}),
             "transfer": read(ROOT / "transfer.json", {}),
@@ -199,10 +200,15 @@ def action(name, payload):
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     if name == "status":
         return status()
-    if not CONFIG.exists() or not KEY.exists():
+    if not KEY.exists() or (not name.startswith('local.') and not CONFIG.exists()):
         raise ValueError("No trusted release source is configured. Install the publisher public key locally.")
     with open(ROOT / "lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if name.startswith('local.'):
+            from .local import action as local_action
+            return local_action(name.removeprefix('local.'), payload)
+        if read(ROOT / 'state.json', {}).get('status') in {'queued', 'installing'}:
+            raise ValueError('An installation is already queued or running. Wait for it to finish.')
         if name == "check":
             return check_release()
         guard_pc_updates()
@@ -244,17 +250,22 @@ def action(name, payload):
                 subprocess.run(["systemctl", "daemon-reload"], check=True)
                 subprocess.run(["systemctl", "enable", "--now", "airlink-update-job.timer"], check=True)
             else:
-                atomic(ROOT / "request.json", approved)
-                previous = read(ROOT / "state.json", {"status": "idle"})
-                atomic(ROOT / "state.json", {"status": "queued", "version": meta["version"]})
-                try:
-                    subprocess.run(["systemctl", "start", "--no-block", "airlink-update-job.service"], check=True)
-                except Exception:
-                    atomic(ROOT / "state.json", previous)
-                    raise
+                queue_install(meta)
         else:
             raise ValueError("Unsupported update action")
         return {"version": meta["version"], "status": name}
+
+
+def queue_install(meta):
+    approved = {field: meta[field] for field in ("version", "sequence", "sha256", "size")}
+    atomic(ROOT / "request.json", approved)
+    previous = read(ROOT / "state.json", {"status": "idle"})
+    atomic(ROOT / "state.json", {"status": "queued", "version": meta["version"]})
+    try:
+        subprocess.run(["systemctl", "start", "--no-block", "airlink-update-job.service"], check=True)
+    except Exception:
+        atomic(ROOT / "state.json", previous)
+        raise
 
 
 def health_check():

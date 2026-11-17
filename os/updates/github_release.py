@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -107,9 +108,13 @@ def prepare(repo, key_file, package, version, sequence, expires, notes, output, 
     shutil.copyfile(package, output / asset)
     (output / 'stable.json').write_text(json.dumps(envelope, indent=2) + '\n')
     (output / 'release-notes.md').write_text(meta['release_notes'])
+    bundle = f'airlink-isp-os_{version}_amd64.airlink-update'
+    with zipfile.ZipFile(output / bundle, 'w', compression=zipfile.ZIP_STORED) as archive:
+        archive.write(output / 'stable.json', 'manifest.json')
+        archive.write(output / asset, 'package.deb')
     (output / 'SHA256SUMS').write_text(''.join(
-        f'{digest(output / name)}  {name}\n' for name in (asset, 'stable.json')))
-    return {'repository': repo, 'tag': tag, 'directory': str(output), 'assets': [asset, 'stable.json']}
+        f'{digest(output / name)}  {name}\n' for name in (asset, 'stable.json', bundle)))
+    return {'repository': repo, 'tag': tag, 'directory': str(output), 'assets': [asset, 'stable.json', bundle]}
 
 
 def main():

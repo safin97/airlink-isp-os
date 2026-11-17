@@ -1,5 +1,6 @@
 import json
 import stat
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -57,6 +58,11 @@ def test_prepared_manifest_works_with_existing_updater(tmp_path):
     assert result['tag'] == 'v0.2.0'
     assert meta['url'] == 'https://github.com/owner/airlink/releases/download/v0.2.0/airlink-isp-os_0.2.0_amd64.deb'
     assert (output / result['assets'][0]).read_bytes() == package.read_bytes()
+    with zipfile.ZipFile(output / result['assets'][2]) as bundle:
+        assert bundle.namelist() == ['manifest.json', 'package.deb']
+        assert bundle.read('manifest.json') == (output / 'stable.json').read_bytes()
+        assert bundle.read('package.deb') == package.read_bytes()
+        assert all(entry.compress_type == zipfile.ZIP_STORED for entry in bundle.infolist())
     with pytest.raises(ValueError):
         verify_manifest(envelope, public.read_bytes(), current_sequence=2)
     envelope['manifest']['url'] = 'https://example.test/replaced.deb'

@@ -4,13 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
 import 'section_access.dart';
+import 'local_update.dart';
+import 'backup_picker.dart';
+import 'backup_selection.dart';
 
 const updateFeedUrl =
     'https://github.com/safin97/airlink-isp-os/releases/latest/download/stable.json';
 
 class UpdateCenter extends StatefulWidget {
   final Api api;
-  const UpdateCenter({super.key, required this.api});
+  final Future<BackupSelection?> Function() pickLocalFile;
+  const UpdateCenter({
+    super.key,
+    required this.api,
+    this.pickLocalFile = pickUpdateFile,
+  });
 
   @override
   State<UpdateCenter> createState() => _UpdateCenterState();
@@ -24,6 +32,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   String? phase;
   bool checking = false;
   bool busy = false;
+  bool localDialog = false;
   bool fetching = false;
   Timer? timer;
 
@@ -68,7 +77,10 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       if (check &&
           canEdit &&
           data['state']?['configured'] == true &&
-          data['state']?['state']?['status'] != 'installing') {
+          !const {
+            'queued',
+            'installing',
+          }.contains(data['state']?['state']?['status'])) {
         await widget.api.request('/updates/check', method: 'POST', body: {});
         data = Map<String, dynamic>.from(await widget.api.request('/updates'));
       }
@@ -248,6 +260,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
   }
 
   Future<void> runUpdate(Map<String, dynamic> release, {String? at}) async {
+    final local = release['upload_token'] != null;
     final expected = {
       'version': release['version'],
       'sequence': release['sequence'],
@@ -257,21 +270,25 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       busy = true;
       error = null;
       message = null;
-      phase = 'Downloading signed update…';
+      phase = local
+          ? 'Starting local installation…'
+          : 'Downloading signed update…';
     });
     try {
-      await widget.api.request(
-        '/updates/download',
-        method: 'POST',
-        body: expected,
-      );
-      if (!mounted) return;
-      setState(() => phase = 'Verifying package…');
-      await widget.api.request(
-        '/updates/verify',
-        method: 'POST',
-        body: expected,
-      );
+      if (!local) {
+        await widget.api.request(
+          '/updates/download',
+          method: 'POST',
+          body: expected,
+        );
+        if (!mounted) return;
+        setState(() => phase = 'Verifying package…');
+        await widget.api.request(
+          '/updates/verify',
+          method: 'POST',
+          body: expected,
+        );
+      }
       if (!mounted) return;
       if (at != null) {
         await widget.api.request(
@@ -286,9 +303,11 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
       }
       setState(() => phase = 'Starting installation…');
       await widget.api.request(
-        '/updates/install',
+        local ? '/updates/local/install' : '/updates/install',
         method: 'POST',
-        body: expected,
+        body: local
+            ? {...expected, 'token': release['upload_token'], 'confirm': true}
+            : expected,
       );
       final deadline = DateTime.now().add(const Duration(minutes: 30));
       while (mounted && DateTime.now().isBefore(deadline)) {
@@ -353,6 +372,26 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
         } catch (_) {}
       }
     }
+  }
+
+  Future<void> localUpdate() async {
+    if (!canEdit || busy || installing || recovering || restartPending) return;
+    setState(() {
+      busy = true;
+      localDialog = true;
+    });
+    final release = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) =>
+          LocalUpdateDialog(api: widget.api, pickFile: widget.pickLocalFile),
+    );
+    if (!mounted) return;
+    setState(() {
+      busy = false;
+      localDialog = false;
+    });
+    if (release != null) await runUpdate(release);
   }
 
   @override
@@ -449,7 +488,7 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
             'The last installation failed. Review local recovery before retrying.',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-        if (busy || installing || restartPending) ...[
+        if ((busy && !localDialog) || installing || restartPending) ...[
           const SizedBox(height: 16),
           Text(
             phase ??
@@ -484,6 +523,20 @@ class _UpdateCenterState extends State<UpdateCenter> with LanguageRebuild {
             OutlinedButton(
               onPressed: canInstall ? scheduleUpdate : null,
               child: const AppText('Schedule update'),
+            ),
+            OutlinedButton.icon(
+              onPressed:
+                  canEdit &&
+                      installSupported &&
+                      service['local_update_supported'] == true &&
+                      !busy &&
+                      !installing &&
+                      !recovering &&
+                      !restartPending
+                  ? localUpdate
+                  : null,
+              icon: const Icon(Icons.upload_file),
+              label: const AppText('Update from file'),
             ),
             OutlinedButton.icon(
               onPressed: canRestart ? restartSystem : null,

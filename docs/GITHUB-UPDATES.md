@@ -71,7 +71,7 @@ Write release notes in `release-notes.md`, then prepare the public assets on the
   --output dist/github-release-0.2.0
 ```
 
-Choose an appropriate future expiry, and increase the sequence for every release. The helper validates the signed manifest and stages the package, `stable.json`, notes, and checksums in a new directory. It does not execute or certify the package; the appliance also checks the Debian name, architecture and version. Never reuse a version/tag with different content. All appliances must have a sufficiently accurate clock to validate expiry and HTTPS.
+Choose an appropriate future expiry, and increase the sequence for every release. The helper validates the signed manifest and stages the package, `stable.json`, a single `.airlink-update` offline bundle, notes, and checksums in a new directory. The bundle contains the same signed manifest and package; no publisher key or executable installer is added. It does not execute or certify the package; the appliance also checks the Debian name, architecture and version. Never reuse a version/tag with different content. All appliances must have a sufficiently accurate clock to validate expiry and HTTPS.
 
 ## 4. Publish the reviewed release
 
@@ -81,13 +81,14 @@ Authenticate GitHub CLI on the publisher workstation, push the reviewed source a
 gh release create v0.2.0 \
   dist/github-release-0.2.0/airlink-isp-os_0.2.0_amd64.deb \
   dist/github-release-0.2.0/stable.json \
+  dist/github-release-0.2.0/airlink-isp-os_0.2.0_amd64.airlink-update \
   dist/github-release-0.2.0/SHA256SUMS \
   --repo safin97/airlink-isp-os --verify-tag --latest \
   --title 'AirLink ISP OS 0.2.0' \
   --notes-file dist/github-release-0.2.0/release-notes.md
 ```
 
-The assets must be public. Never attach `.release-secrets/`, private keys, backups, or appliance configuration containing credentials. Source commits alone do not produce an update. The owner uses **Software Updates → Check → Download → Verify → Install**, or schedules an installation. Updating remains owner-controlled; merely linking GitHub never triggers installation.
+The assets must be public. Never attach `.release-secrets/`, private keys, backups, or appliance configuration containing credentials. Source commits alone do not produce an update. The owner uses **Software Updates → Check → Download → Verify → Install**, or schedules an installation. Updating remains user-controlled; merely linking GitHub never triggers installation. From 0.1.38-dev, Software Updates also offers **Update from file** for the `.airlink-update` asset, with no internet needed on the appliance. Owners or explicitly authorized Software Updates editors must verify and confirm before installation.
 
 ## Verification and limits
 

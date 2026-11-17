@@ -1,5 +1,34 @@
 # Signed software updates
 
+## Local file updates (0.1.38-dev)
+
+When the AirLink server cannot reach GitHub, download the release asset ending in
+`.airlink-update` on another computer. In **Software Updates → Update from file**,
+select **Browse update file**, then **Upload and verify**. Review the version and
+release notes and select **Install verified update**. Keep the dashboard open
+during upload; after installation starts it reconnects through service restarts.
+The local button remains available when an online check fails.
+
+No online source configuration or internet connection is needed for this path;
+the previously installed publisher public key is required. A raw `.deb`, source
+archive, backup archive or an archive containing a replacement public key is not
+accepted. The single `.airlink-update` file contains exactly `manifest.json` and
+`package.deb` in an uncompressed ZIP. It retains all signature, expiration, replay,
+size, digest and Debian identity checks. Installation rechecks the prepared file
+and uses the existing backup/health/installation job. Local update is not rollback
+or a way to bypass a failed installation requiring local recovery.
+
+Uploads use bounded chunks rather than loading the whole file into browser
+memory. Cancellation deletes the staged upload. An interrupted upload can be
+replaced by browsing and uploading again as the same user; abandoned uploads
+expire after one hour without activity and are removed on the next local update
+request. The server permits one staged local upload at a time. Owners and users
+explicitly granted Software Updates edit access can use this option; read-only
+users cannot. The Mac preview cannot install updates.
+
+The browse-file interface first ships in 0.1.38-dev. Older dashboards must receive
+this release through their existing updater before the new button appears.
+
 For online kernel, driver, microcode and system package maintenance, owners use **Diagnostics → PC & driver updates**. See [PC-UPDATES.md](PC-UPDATES.md) for the review/install workflow, supported hardware updates and recovery limits. This is separate from the signed AirLink application releases below.
 
 For a public GitHub repository, use the configuration and signed release tools in [GITHUB-UPDATES.md](GITHUB-UPDATES.md). They work with the current ISO's update format. Linking a repository does not automatically install releases.

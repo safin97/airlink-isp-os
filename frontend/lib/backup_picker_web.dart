@@ -3,10 +3,14 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'backup_selection.dart';
 
-Future<BackupSelection?> pickBackupFile() async {
+Future<BackupSelection?> pickBackupFile() => pickFile('.airlink');
+
+Future<BackupSelection?> pickUpdateFile() => pickFile('.airlink-update');
+
+Future<BackupSelection?> pickFile(String accept) async {
   final input = web.HTMLInputElement()
     ..type = 'file'
-    ..accept = '.airlink'
+    ..accept = accept
     ..style.display = 'none';
   final result = Completer<BackupSelection?>();
   input.addEventListener(

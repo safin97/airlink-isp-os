@@ -1140,6 +1140,18 @@ def update_action(action: str, payload: dict, user=Depends(updates_access), db=D
     return result
 
 
+@app.post('/api/updates/local/{action}')
+def local_update_action(action: str, payload: dict, user=Depends(updates_access), db=Depends(get_db)):
+    if action not in {'start', 'chunk', 'finish', 'install', 'cancel'}:
+        raise HTTPException(404, 'Unknown local update action')
+    result = broker('updates.local.' + action, {**payload, 'user_id': user.id})
+    if action in {'finish', 'install'}:
+        version = result.get('version') or result.get('release', {}).get('version', __version__)
+        db.add(UpdateHistory(version=version, status='local.' + action, detail=version))
+        commit(db, user, 'updates.local.' + action)
+    return result
+
+
 @app.websocket("/api/ws")
 async def live(websocket: WebSocket):
     await websocket.accept()
