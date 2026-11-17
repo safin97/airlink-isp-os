@@ -18,7 +18,7 @@ def test_subnet_mask_and_dns_validation():
 def test_local_privileged_actions_recheck_owner(monkeypatch, role):
     monkeypatch.setattr(panel, 'api', lambda *args: {'role': role})
     monkeypatch.setattr(panel, 'run', lambda *args, **kwargs: pytest.fail('Unauthorized system command'))
-    for action in ('settings', 'save_settings', 'backup', 'restore', 'restart_services', 'shutdown', 'logs'):
+    for action in ('settings', 'save_settings', 'backup', 'restore', 'restart_services', 'shutdown', 'logs', 'terminal'):
         with pytest.raises(panel.SessionExpired):
             panel.local_action(action, {'confirm': True}, 'token')
 
@@ -122,3 +122,92 @@ def test_panel_restore_inherits_maintenance_lock(tmp_path, monkeypatch):
     monkeypatch.setattr(panel, 'run', run)
     assert 'Database restored' in panel.local_action('restore', {'confirm': True, 'backup': 'saved'}, 'owner-token')
     assert len(executed) == 1
+
+
+@pytest.fixture
+def terminal_setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(panel, 'api', lambda *args: {'role': 'owner', 'id': 'owner'})
+    monkeypatch.setattr(panel.os, 'geteuid', lambda: 0)
+    monkeypatch.setenv('DISPLAY', ':0')
+    monkeypatch.setenv('XAUTHORITY', '/root/.Xauthority')
+    monkeypatch.setattr(panel.update, 'ROOT', tmp_path)
+    monkeypatch.setattr(panel.update, 'restart_status', lambda: {'pending': False})
+    commands = []
+    monkeypatch.setattr(panel, 'run', lambda args, **kw: commands.append((args, kw)) or '')
+    monkeypatch.setattr(panel.subprocess, 'run', lambda args, **kw: commands.append((args, kw)))
+    return commands
+
+
+@pytest.mark.parametrize('state', ['idle', 'failed', 'installing'])
+def test_terminal_can_review_failed_or_interrupted_update(terminal_setup, state):
+    panel.update.atomic(panel.update.ROOT/'state.json', {'status': state})
+    result = panel.local_action('terminal', {'confirm': True, 'command': 'ignored'}, 'owner-token')
+    command = next(args for args, kw in terminal_setup if args[0] == '/usr/bin/systemd-run')
+    assert command[-1] == '/opt/airlink/os/console/terminal.sh'
+    assert 'ignored' not in command
+    assert '--property=RuntimeMaxSec=900' in command
+    assert '--property=BindsTo=airlink-console.service' in command
+    assert '--property=KillMode=control-group' in command
+    assert '--setenv=DISPLAY=:0' in command
+    assert '--setenv=XAUTHORITY=/root/.Xauthority' in command
+    assert any(args[:2] == ['/usr/bin/systemctl', 'stop'] for args, kw in terminal_setup)
+    assert 'Sign in again' in result
+
+
+def test_terminal_requires_confirmation(terminal_setup):
+    with pytest.raises(ValueError, match='Confirm'):
+        panel.local_action('terminal', {}, 'owner-token')
+    assert not terminal_setup
+
+
+@pytest.mark.parametrize('display', ['', 'localhost:10.0', '192.0.2.1:0'])
+def test_terminal_requires_local_display(terminal_setup, monkeypatch, display):
+    monkeypatch.setenv('DISPLAY', display)
+    with pytest.raises(ValueError, match='PC screen'):
+        panel.local_action('terminal', {'confirm': True}, 'owner-token')
+    assert not terminal_setup
+
+
+def test_terminal_rejects_expired_session(terminal_setup, monkeypatch):
+    def expired(*args):
+        raise panel.SessionExpired('expired')
+    monkeypatch.setattr(panel, 'api', expired)
+    with pytest.raises(panel.SessionExpired):
+        panel.local_action('terminal', {'confirm': True}, 'expired')
+    assert not terminal_setup
+
+
+def test_terminal_waits_for_active_installer(terminal_setup):
+    import fcntl
+    with (panel.update.ROOT/'lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ValueError, match='operation is running'):
+            panel.local_action('terminal', {'confirm': True}, 'owner-token')
+    assert not terminal_setup
+
+
+@pytest.mark.parametrize('pending', ['queued', 'restart'])
+def test_terminal_waits_for_queued_update_or_restart(terminal_setup, monkeypatch, pending):
+    panel.update.atomic(panel.update.ROOT/'state.json', {'status': pending})
+    monkeypatch.setattr(panel.update, 'restart_status', lambda: {'pending': pending == 'restart'})
+    with pytest.raises(ValueError, match='pending'):
+        panel.local_action('terminal', {'confirm': True}, 'owner-token')
+    assert not terminal_setup
+
+
+def test_terminal_retains_lock_and_cleans_up_after_timeout(terminal_setup, monkeypatch):
+    import fcntl
+    import subprocess
+    def run(args, **kwargs):
+        if args[0] == '/usr/bin/systemd-run':
+            with (panel.update.ROOT/'lock').open('w') as lock:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            raise subprocess.TimeoutExpired(args, kwargs['timeout'])
+        return ''
+    monkeypatch.setattr(panel, 'run', run)
+    with pytest.raises(subprocess.TimeoutExpired):
+        panel.local_action('terminal', {'confirm': True}, 'owner-token')
+    assert any(args[:2] == ['/usr/bin/systemctl', 'stop'] for args, kw in terminal_setup)
+    with (panel.update.ROOT/'lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

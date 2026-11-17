@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -98,11 +99,55 @@ def backup_paths():
                   and (p / 'SHA256SUMS').is_file())
 
 
+def system_terminal(user):
+    """Run one bounded, local root terminal; never accept a caller-supplied command."""
+    display = os.environ.get('DISPLAY', '')
+    if os.geteuid() != 0 or not re.fullmatch(r':\d+(?:\.\d+)?', display):
+        raise ValueError('Open the terminal from the installed AirLink PC screen')
+    update.ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (update.ROOT / 'lock').open('w') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('An update or maintenance operation is running. Wait before opening the terminal.') from None
+        # Failed or interrupted installations need this recovery path. A held
+        # lock identifies an active installer; queued jobs must finish first.
+        if update.read(update.ROOT / 'state.json', {}).get('status') == 'queued' or update.restart_status()['pending']:
+            raise ValueError('An update or restart is pending. Wait before opening the terminal.')
+        unit = 'airlink-local-terminal-' + uuid.uuid4().hex
+        command = ['/usr/bin/systemd-run', '--quiet', '--wait', '--collect', '--service-type=exec',
+                   '--unit=' + unit, '--property=RuntimeMaxSec=900',
+                   '--property=BindsTo=airlink-console.service', '--property=After=airlink-console.service',
+                   '--property=KillMode=control-group', '--property=TimeoutStopSec=5',
+                   '--property=SendSIGHUP=yes', '--property=UMask=0077',
+                   '--property=WorkingDirectory=/root',
+                   '--setenv=DISPLAY=' + display, '--setenv=HOME=/root']
+        if os.environ.get('XAUTHORITY'):
+            command.append('--setenv=XAUTHORITY=' + os.environ['XAUTHORITY'])
+        command += ['/usr/bin/xterm', '-T', 'AirLink system terminal (root)',
+                    '-geometry', '132x40+0+0', '-fa', 'DejaVu Sans Mono', '-fs', '13',
+                    '-bg', '#071426', '-fg', 'white', '-e', '/bin/bash',
+                    '/opt/airlink/os/console/terminal.sh']
+        run(['logger', '-t', 'airlink-panel', '--', 'Owner ' + str(user.get('id')) + ': terminal.open'])
+        try:
+            run(command, timeout=930)
+        finally:
+            # Also stop descendants if the launcher times out or exits abnormally.
+            subprocess.run(['/usr/bin/systemctl', 'stop', unit + '.service'],
+                           capture_output=True, timeout=15)
+            run(['logger', '-t', 'airlink-panel', '--', 'Owner ' + str(user.get('id')) + ': terminal.closed'])
+    return 'Terminal closed. Sign in again to continue.'
+
+
 def local_action(name, data, token):
     # Check the live API session and owner role before EVERY privileged operation.
     user = api('GET', '/auth/me', token)
     if user.get('role') != 'owner':
         raise SessionExpired('Owner access is required')
+    if name == 'terminal':
+        if data.get('confirm') is not True:
+            raise ValueError('Confirm root terminal access first')
+        return system_terminal(user)
     if name == 'settings':
         return settings_status()
     if name == 'logs':

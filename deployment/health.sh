@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-# Workers publish health only after completing their first iteration. API
-# readiness alone does not mean the workers have finished starting.
+# Wait for service and worker readiness. The monitor reports a heartbeat while
+# its scheduler and database are responsive, including during slow device probes.
 for attempt in $(seq 1 30); do
   failures=()
   if ! curl --fail --silent --connect-timeout 1 --max-time 2 \

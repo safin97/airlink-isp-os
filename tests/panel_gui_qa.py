@@ -41,6 +41,7 @@ def local(name, data, token):
     if name == 'backups': return ['20261101T110000Z-abcdef']
     if name == 'logs': return 'AirLink API started\nNetworkManager connection active'
     if name == 'save_settings': return 'Settings saved'
+    if name == 'terminal': return 'Terminal closed. Sign in again to continue.'
     raise AssertionError(name)
 
 panel.actions.api = api
@@ -82,6 +83,26 @@ window.grab().save(str(out/'hostname-time.png'))
 window.save_settings(); settle()
 for index in (3, 4, 5, 6):
     window.tabs.setCurrentIndex(index); settle(); window.grab().save(str(out/f'tab-{index}.png'))
+before = len(calls)
+window.confirm = lambda *args: False
+window.open_terminal(); settle()
+assert len(calls) == before and window.isVisible() and window.token
+window.confirm = lambda *args: True
+window.open_terminal(); settle()
+assert ('local', 'terminal', {'confirm': True}) in calls
+assert window.isVisible() and not window.terminal_open
+assert not window.token and window.pages.currentIndex() == 0
+assert window.message.text() == 'Terminal closed. Sign in again to continue.'
+window.token = 'test-token'; window.pages.setCurrentIndex(1)
+def failed_terminal(*args):
+    raise ValueError('Terminal startup failed')
+panel.actions.local_action = failed_terminal
+window.open_terminal(); settle()
+assert window.isVisible() and not window.terminal_open and not window.token
+assert window.pages.currentIndex() == 0 and window.message.text() == 'Terminal startup failed'
+panel.actions.local_action = local
+window.token = 'test-token'; window.pages.setCurrentIndex(1)
+print('PANEL_GUI_TERMINAL_CONFIRMATION_RETURN_FAILURE_AND_LOCK_OK')
 window.last_activity = time.monotonic() - 301
 # Finishing a background operation must not reset the inactivity deadline.
 window.perform(lambda: 'finished'); settle(); window.tick(); settle()

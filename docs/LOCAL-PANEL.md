@@ -8,9 +8,11 @@ The local display opens **PC settings** automatically on installed AirLink syste
 - **Updates:** check GitHub, download and verify, install, schedule with an explicit timezone offset, and restart the system. All packages use the existing signed feed and replay protection. Refresh status to follow installation. The panel may restart as part of an update.
 - **Backups:** create local backups, select an existing backup and restore its database after confirmation. Restore replaces current records and first creates a safety backup. Configuration archives are retained for manual recovery review; they are not silently restored. Copy backups off the appliance as well.
 - **Logs:** view the latest 100 relevant service journal entries.
-- **System:** restart AirLink services, restart or shut down the PC, with confirmation and update-operation guards.
+- **System:** **Open Terminal** opens a root maintenance shell on the PC's own screen after owner confirmation. Type `exit` to return to the locked sign-in screen. Sessions and their child processes close after 15 minutes or when the console service stops. The terminal remains available for failed-update recovery, but waits for active updates and pending restarts to finish. This tab also offers service restart, restart and shutdown controls.
 
 The panel locks after five minutes without user input. Each local privileged action rechecks the live owner session; network and update actions also use owner-protected APIs. Local maintenance is serialized against the updater. Closing the panel does not expose a root shell. Recovery remains available from the installer media.
+
+The terminal has its own fixed 15-minute session limit. Opening and closing it are recorded in the `airlink-panel` journal; shell history is not saved. It requires a working local owner login. If the API cannot start, use installer-media Recovery Mode. This terminal feature is local-only and does not add a browser command endpoint. Source changes must be installed on the appliance before the button appears.
 
 ## Existing installations
 

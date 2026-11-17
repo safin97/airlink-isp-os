@@ -52,6 +52,7 @@ class Panel(QMainWindow):
         self.pending = None
         self.network_state = {}
         self.available = None
+        self.terminal_open = False
         self.last_activity = time.monotonic()
         self.last_probe = 0
         self.central = QWidget()
@@ -150,6 +151,13 @@ class Panel(QMainWindow):
         self.busy = False
         self.pages.setEnabled(True)
         self.lock_button.setEnabled(True)
+        if self.terminal_open:
+            self.terminal_open = False
+            self.showFullScreen()
+            self.raise_()
+            self.activateWindow()
+            self.lock(message=str(error) if error else str(value))
+            return
         if error:
             if isinstance(error, actions.SessionExpired):
                 self.lock()
@@ -227,7 +235,7 @@ class Panel(QMainWindow):
             self.refresh_page()
         self.perform(task, ready, 'Signing in…')
 
-    def lock(self):
+    def lock(self, *_, message='Panel locked'):
         if self.busy:
             return
         old_token = self.token
@@ -238,7 +246,7 @@ class Panel(QMainWindow):
         self.pages.setCurrentIndex(0)
         self.lock_button.setVisible(False)
         if old_token:
-            self.perform(lambda: actions.api('POST', '/auth/logout', old_token), lambda _: self.message.setText('Panel locked'))
+            self.perform(lambda: actions.api('POST', '/auth/logout', old_token), lambda _: self.message.setText(message))
 
     def build_overview(self):
         layout = self.tab('Overview')
@@ -484,12 +492,25 @@ class Panel(QMainWindow):
 
     def build_system(self):
         layout = self.tab('System')
+        self.button(layout, 'Open Terminal', self.open_terminal)
+        self.note(layout, 'Open a root maintenance shell on this PC. Type exit to return to sign-in. The terminal closes automatically after 15 minutes; active updates must finish first.')
         self.note(layout, 'Restart services or safely restart/shut down this PC. Power actions are blocked during an update or when a failed installation needs review.')
         self.button(layout, 'Restart AirLink services', lambda: self.maintenance('restart_services', 'Briefly interrupt monitoring and dashboard access to restart AirLink services?'))
         self.button(layout, 'Restart system', self.restart)
         self.button(layout, 'Shut down system', lambda: self.maintenance('shutdown', 'Shut down this PC? Monitoring will stop until it is powered on again.'))
         self.note(layout, 'For recovery, use the AirLink recovery option on the installer media. Keep backups on another device as well as on this PC.')
         layout.addStretch()
+
+    def open_terminal(self):
+        if self.busy or not self.token:
+            return
+        if not self.confirm('Open root terminal?', 'Commands will have full control of this AirLink PC. Type exit to return. The terminal closes after 15 minutes and the panel locks. Continue?'):
+            return
+        token = self.token
+        self.terminal_open = True
+        self.hide()
+        self.perform(lambda: actions.local_action('terminal', {'confirm': True}, token),
+                     message='Local root terminal is open…')
 
     def maintenance(self, name, question, data=None):
         if not self.confirm('Confirm operation', question):

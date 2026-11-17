@@ -144,6 +144,29 @@ async def poll(device_id, semaphore):
                 lock.release()
 
 
+async def poll_devices(device_ids, semaphore):
+    """Report scheduler readiness while bounded network probes are in flight."""
+    tasks = [asyncio.create_task(poll(device_id, semaphore)) for device_id in device_ids]
+    pending = set(tasks)
+    try:
+        while True:
+            # Readiness means the scheduler, database and Redis are responsive;
+            # device availability is recorded separately by each completed poll.
+            with SessionLocal() as db:
+                db.execute(select(1))
+            cache.set("health:monitor", str(time.time()), ex=180)
+            if not pending:
+                return
+            done, pending = await asyncio.wait(pending, timeout=5)
+            for task in done:
+                task.result()
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def main():
     settings.validate()
     semaphore = asyncio.Semaphore(8)
@@ -152,8 +175,7 @@ async def main():
             with SessionLocal() as db:
                 ids = [d.id for d in db.scalars(select(Device).where(Device.enabled.is_(True)))
                        if not d.last_poll or (now() - aware(d.last_poll)).total_seconds() >= d.poll_interval]
-            await asyncio.gather(*(poll(device_id, semaphore) for device_id in ids))
-            cache.set("health:monitor", str(time.time()), ex=180)
+            await poll_devices(ids, semaphore)
         except Exception:
             log.exception("Monitoring iteration failed")
         await asyncio.sleep(5)
