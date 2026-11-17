@@ -124,3 +124,72 @@ def test_grid_history_migration_keeps_connection_data(tmp_path):
         migration.downgrade()
         assert connection.execute(text('SELECT encrypted_credentials FROM deye_connections')).scalar() == 'preserved'
     engine.dispose()
+
+
+def test_current_outage_uses_confirmed_samples_and_resets_on_unknown_gaps(client, owner, cloud):
+    client.put(PATH, headers=owner, json=CONFIG)
+    base = now()
+    with SessionLocal() as db:
+        uid = db.query(DeyeConnection).one().user_id
+        def record(seconds, state='down', observed=None):
+            result = deye_grid.record(db, uid, '123', {'state': state,
+                'observed_at': (base + timedelta(seconds=seconds if observed is None else observed)).isoformat()},
+                base + timedelta(seconds=seconds))
+            db.commit()
+            return result
+        assert record(0)['current_outage_seconds'] == 0
+        result = record(30)
+        assert result['current_outage_seconds'] == result['downtime_seconds'] == 30
+        assert record(60, observed=30)['current_outage_seconds'] == 30
+        assert record(90, 'unknown')['current_outage_seconds'] is None
+        assert record(120)['current_outage_seconds'] == 0
+        result = record(150)
+        assert result['current_outage_seconds'] == 30 and result['downtime_seconds'] == 60
+        result = record(180, 'up')
+        assert result['current_outage_seconds'] == 0 and result['current_outage_started_at'] is None
+        assert record(210)['current_outage_seconds'] == 0
+        assert record(400)['current_outage_seconds'] == 0  # Interrupted polling cannot bridge an outage.
+        result = record(430)
+        assert result['current_outage_seconds'] == 30 and result['downtime_seconds'] == 90
+        history = db.get(DeyeGridHistory, (uid, '123')).history
+        result = deye_grid.public(history, base + timedelta(seconds=600))
+        assert result['current_outage_seconds'] is None and result['downtime_seconds'] == 90
+    with SessionLocal() as db:
+        restored = deye_grid.public(db.get(DeyeGridHistory, (uid, '123')).history, base + timedelta(seconds=430))
+        assert restored['current_outage_seconds'] == 30 and restored['downtime_seconds'] == 90
+        assert deye_grid.cached(db, uid, '456')['current_outage_seconds'] is None
+
+
+def test_existing_totals_survive_current_outage_tracking_upgrade(client, owner, cloud):
+    client.put(PATH, headers=owner, json=CONFIG)
+    base = now()
+    with SessionLocal() as db:
+        uid = db.query(DeyeConnection).one().user_id
+        db.add(DeyeGridHistory(user_id=uid, station_id='123', history={
+            'started_at': base.isoformat(), 'sample_at': base.isoformat(), 'poll_at': base.isoformat(),
+            'tracking_from': base.isoformat(), 'state': 'down', 'eligible': True, 'down_seconds': 123}))
+        db.commit()
+        for seconds, outage in [(30, 0), (60, 30)]:
+            stamp = base + timedelta(seconds=seconds)
+            result = deye_grid.record(db, uid, '123', {'state': 'down', 'observed_at': stamp.isoformat()}, stamp)
+            db.commit()
+            assert result['downtime_seconds'] == 123 + seconds
+            assert result['current_outage_seconds'] == outage
+
+
+def test_cloud_failure_snapshot_retains_totals_without_live_power(client, owner, cloud):
+    from airlink.models import User
+    client.put(PATH, headers=owner, json=CONFIG)
+    base = now()
+    with SessionLocal() as db:
+        row = db.query(DeyeConnection).one()
+        row.cache = {'readings': {'123': {'error': True, 'at': __import__('time').time()}}}
+        db.add(DeyeGridHistory(user_id=row.user_id, station_id='123', history={
+            'started_at': (base - timedelta(hours=1)).isoformat(), 'state': 'unknown',
+            'down_seconds': 120, 'up_seconds': 600, 'poll_at': base.isoformat()}))
+        db.commit()
+        snapshot = deye.live_snapshot(db, db.get(User, row.user_id))
+        reading = snapshot['readings']['123']
+        assert reading['error'] and 'solar_w' not in reading
+        assert reading['grid_availability']['downtime_seconds'] == 120
+        assert reading['grid_availability']['current_outage_seconds'] is None

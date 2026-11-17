@@ -374,7 +374,8 @@ def cached_reading(db, user_id, station_id, cached):
     from . import deye_grid
     if cached.get('error'):
         return {'error': 'Deye Cloud is unavailable. Retrying automatically.',
-                'fetched_at': cached.get('fetched_at')}
+                'fetched_at': cached.get('fetched_at'),
+                'grid_availability': deye_grid.cached(db, user_id, station_id)}
     result = normalized(cached.get('raw', {}))
     result['fetched_at'] = cached.get('fetched_at')
     result['grid_availability'] = deye_grid.cached(db, user_id, station_id)
@@ -436,6 +437,7 @@ def read_station(db, row, station_id):
 
 def live_snapshot(db, user):
     """Database-only owner telemetry, including explicitly authorized viewers."""
+    from . import deye_grid
     source = deye_access.source(user, db)
     if source is None:
         return None
@@ -448,7 +450,8 @@ def live_snapshot(db, user):
     for station_id, cached in reading_cache(row).items():
         if not 0 <= time.time() - cached.get('at', 0) <= 90:
             readings[station_id] = {'error': 'Waiting for a new cloud reading.',
-                                    'fetched_at': cached.get('fetched_at')}
+                                    'fetched_at': cached.get('fetched_at'),
+                                    'grid_availability': deye_grid.cached(db, source.id, station_id)}
         else:
             readings[station_id] = cached_reading(db, source.id, station_id, cached)
     return {'configured': True, 'dashboard_station': selected, 'readings': readings,

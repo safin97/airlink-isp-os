@@ -99,55 +99,64 @@ class DeyeEnergyOverview extends StatelessWidget {
     final load = dark ? const Color(0xffc7afff) : const Color(0xff7943b4);
     if (compact) {
       final recent = reading?['freshness'] == 'recent';
-      return _CompactEnergyBridge(
-        gridState: gridState,
-        directions: recent
-            ? [
-                (measure('solar_w') ?? 0) > 0 ? 1 : 0,
-                direction('discharge_w', 'charge_w'),
-                gridState == 'up' ? direction('import_w', 'export_w') : 0,
-                (measure('load_w') ?? 0) > 0 ? -1 : 0,
-              ]
-            : [0, 0, 0, 0],
-        colors: [solar, battery, grid, load],
-        nodes: [
-          _BridgeNode(
-            title: 'Solar panels',
-            icon: Icons.solar_power_outlined,
-            color: solar,
-            value: power('solar_w'),
-          ),
-          _BridgeNode(
-            title: 'Battery',
-            icon: Icons.battery_charging_full,
-            color: battery,
-            value: soc == null ? 'Unavailable' : '${soc.toStringAsFixed(0)}%',
-            charge: soc,
-            details: [
-              'Power: ${power('battery_w')}',
-              recent ? batteryMode : 'Last: $batteryMode',
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _CompactEnergyBridge(
+            gridState: gridState,
+            directions: recent
+                ? [
+                    (measure('solar_w') ?? 0) > 0 ? 1 : 0,
+                    direction('discharge_w', 'charge_w'),
+                    gridState == 'up' ? direction('import_w', 'export_w') : 0,
+                    (measure('load_w') ?? 0) > 0 ? -1 : 0,
+                  ]
+                : [0, 0, 0, 0],
+            colors: [solar, battery, grid, load],
+            nodes: [
+              _BridgeNode(
+                title: 'Solar panels',
+                icon: Icons.solar_power_outlined,
+                color: solar,
+                value: power('solar_w'),
+              ),
+              _BridgeNode(
+                title: 'Battery',
+                icon: Icons.battery_charging_full,
+                color: battery,
+                value: soc == null
+                    ? 'Unavailable'
+                    : '${soc.toStringAsFixed(0)}%',
+                charge: soc,
+                details: [
+                  'Power: ${power('battery_w')}',
+                  recent ? batteryMode : 'Last: $batteryMode',
+                ],
+              ),
+              _BridgeNode(
+                title: 'Grid',
+                status: _GridMode(reading?['grid_availability']),
+                icon: gridState == 'down'
+                    ? Icons.power_off_outlined
+                    : Icons.electrical_services_outlined,
+                color: grid,
+                value: power('grid_w'),
+                details: [
+                  'Import: ${power('import_w')}',
+                  'Export: ${power('export_w')}',
+                ],
+              ),
+              _BridgeNode(
+                title: 'Load',
+                icon: Icons.home_outlined,
+                color: load,
+                value: loadWatts,
+                status: loadCurrent,
+              ),
             ],
           ),
-          _BridgeNode(
-            title: 'Grid',
-            status: _GridMode(reading?['grid_availability']),
-            icon: gridState == 'down'
-                ? Icons.power_off_outlined
-                : Icons.electrical_services_outlined,
-            color: grid,
-            value: power('grid_w'),
-            details: [
-              'Import: ${power('import_w')}',
-              'Export: ${power('export_w')}',
-            ],
-          ),
-          _BridgeNode(
-            title: 'Load',
-            icon: Icons.home_outlined,
-            color: load,
-            value: loadWatts,
-            status: loadCurrent,
-          ),
+          const SizedBox(height: 12),
+          _GridAvailability(reading?['grid_availability']),
         ],
       );
     }
@@ -786,6 +795,11 @@ class _GridAvailability extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text(
+            'Grid downtime',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 12,
             runSpacing: 6,
@@ -819,14 +833,25 @@ class _GridAvailability extends StatelessWidget {
                 style: const TextStyle(fontSize: 11),
               ),
               Text(
+                state == 'up'
+                    ? 'Current outage: None'
+                    : 'Current outage: ${known && state == 'down' ? duration(values['current_outage_seconds']) : 'Unknown'}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
                 'Unknown time: ${known ? duration(values['unknown_seconds']) : 'Unavailable'}',
                 style: const TextStyle(fontSize: 11),
               ),
             ],
           ),
           const SizedBox(height: 5),
-          const Text(
-            'Cloud estimates · dashboard station monitored in background',
+          Text(
+            known
+                ? 'Totals since ${DateTime.tryParse(values['started_at'].toString())?.toLocal().toString().split('.').first ?? values['started_at']} · updates with confirmed cloud samples'
+                : 'Tracking begins when grid readings are available.',
             style: TextStyle(fontSize: 10),
           ),
         ],

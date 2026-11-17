@@ -125,7 +125,7 @@ class _DeyeSolarState extends State<DeyeSolar> {
       final current = values is Map ? values[stationId] : null;
       if (widget.dashboard && frame['monitor_error'] != null) {
         error = frame['monitor_error'].toString();
-        reading = null;
+        reading = gridHistoryOnly(current is Map ? current : reading);
       } else if (current is Map) {
         // An HTTP response and a live frame can cross in flight.
         final incoming = DateTime.tryParse(
@@ -140,7 +140,9 @@ class _DeyeSolarState extends State<DeyeSolar> {
           return;
         }
         error = current['error']?.toString();
-        reading = error == null ? Map<String, dynamic>.from(current) : null;
+        reading = error == null
+            ? Map<String, dynamic>.from(current)
+            : gridHistoryOnly(current);
       }
     });
     // Healthy live views receive readings through the socket, without HTTP reloads.
@@ -150,6 +152,19 @@ class _DeyeSolarState extends State<DeyeSolar> {
         !(timer?.isActive ?? false)) {
       timer = Timer(refreshInterval, autoRefresh);
     }
+  }
+
+  Map<String, dynamic>? gridHistoryOnly(dynamic values) {
+    final grid = values is Map ? values['grid_availability'] : null;
+    if (grid is! Map) return null;
+    return {
+      'grid_availability': {
+        ...grid,
+        'state': 'unknown',
+        'current_outage_seconds': null,
+        'current_outage_started_at': null,
+      },
+    };
   }
 
   void schedule() {
@@ -315,7 +330,7 @@ class _DeyeSolarState extends State<DeyeSolar> {
     } catch (e) {
       if (mounted) {
         error = e.toString();
-        reading = null;
+        reading = gridHistoryOnly(reading);
       }
     } finally {
       if (mounted) {

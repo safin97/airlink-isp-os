@@ -185,20 +185,36 @@ void main() {
         'observed_at': '2026-11-15T10:01:00Z',
         'fetched_at': '2026-11-15T10:01:01Z',
       };
-      push({'123': power(5500)});
+      const grid = {
+        'state': 'down',
+        'started_at': '2026-11-15T09:00:00Z',
+        'downtime_seconds': 120,
+        'uptime_seconds': 1800,
+        'unknown_seconds': 30,
+        'current_outage_seconds': 60,
+      };
+      push({
+        '123': {...power(5500), 'grid_availability': grid},
+      });
       await settleSolar(tester);
       expect(find.text('5.50 kW'), findsOneWidget);
       expect(requests, initial);
       push({
-        '123': {'error': 'Cloud unavailable'},
+        '123': {
+          'error': 'Cloud unavailable',
+          'grid_availability': {...grid, 'state': 'unknown'},
+        },
       }, failure: 'Cloud unavailable');
       await settleSolar(tester);
       expect(find.text('5.50 kW'), findsNothing);
       expect(find.byTooltip('Cloud unavailable'), findsOneWidget);
+      expect(find.text('Observed downtime: 0h 2m 0s'), findsOneWidget);
+      expect(find.text('Current outage: Unknown'), findsOneWidget);
       pinnedStation = '456';
       push({'456': power(6800)}, station: '456');
       await settleSolar(tester);
       expect(find.text('6.80 kW'), findsOneWidget);
+      expect(find.text('Observed downtime: 0h 2m 0s'), findsNothing);
       expect(find.byTooltip('Cloud unavailable'), findsNothing);
       expect(requests, initial);
       // A healthy stream does not reload the card, including beyond the old 33s cycle.
@@ -236,59 +252,58 @@ void main() {
     },
   );
 
-  testWidgets(
-    'compact flow shows battery power and direction without grid history',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(390, 1500));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      var reading = <String, dynamic>{
-        'battery_soc': 76,
-        'battery_w': 2200,
-        'charge_w': 2200,
-        'discharge_w': 0,
-        'solar_w': 4200,
-        'load_w': 1800,
-        'grid_w': 0,
-        'import_w': 0,
-        'export_w': 0,
-        'freshness': 'recent',
-        'observed_at': '2026-11-15T10:00:00Z',
-        'grid_availability': {
-          'state': 'up',
-          'started_at': '2026-11-15T09:00:00Z',
-          'uptime_seconds': 1800,
-          'downtime_seconds': 60,
-          'unknown_seconds': 120,
-        },
-      };
-      Widget view() => MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: DeyeEnergyOverview(reading: reading, compact: true),
-          ),
+  testWidgets('compact flow shows battery power and grid downtime', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1500));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var reading = <String, dynamic>{
+      'battery_soc': 76,
+      'battery_w': 2200,
+      'charge_w': 2200,
+      'discharge_w': 0,
+      'solar_w': 4200,
+      'load_w': 1800,
+      'grid_w': 0,
+      'import_w': 0,
+      'export_w': 0,
+      'freshness': 'recent',
+      'observed_at': '2026-11-15T10:00:00Z',
+      'grid_availability': {
+        'state': 'up',
+        'started_at': '2026-11-15T09:00:00Z',
+        'uptime_seconds': 1800,
+        'downtime_seconds': 60,
+        'unknown_seconds': 120,
+      },
+    };
+    Widget view() => MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: DeyeEnergyOverview(reading: reading, compact: true),
         ),
-      );
-      await tester.pumpWidget(view());
-      await settleSolar(tester);
-      expect(find.text('Power: 2.20 kW'), findsOneWidget);
-      expect(find.text('Charging · 2.20 kW'), findsOneWidget);
-      expect(find.text('Grid available · voltage estimate'), findsNothing);
-      expect(find.text('Observed uptime: 0h 30m 0s'), findsNothing);
-      expect(find.text('Observed downtime: 0h 1m 0s'), findsNothing);
-      reading = {
-        ...reading,
-        'charge_w': 0,
-        'discharge_w': 2200,
-        'observed_at': '2026-11-15T10:01:00Z',
-      };
-      await tester.pumpWidget(view());
-      await settleSolar(tester);
-      expect(find.text('Discharging · 2.20 kW'), findsOneWidget);
-      expect(find.text('Charging · 2.20 kW'), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+      ),
+    );
+    await tester.pumpWidget(view());
+    await settleSolar(tester);
+    expect(find.text('Power: 2.20 kW'), findsOneWidget);
+    expect(find.text('Charging · 2.20 kW'), findsOneWidget);
+    expect(find.text('Grid available · voltage estimate'), findsOneWidget);
+    expect(find.text('Observed uptime: 0h 30m 0s'), findsOneWidget);
+    expect(find.text('Observed downtime: 0h 1m 0s'), findsOneWidget);
+    reading = {
+      ...reading,
+      'charge_w': 0,
+      'discharge_w': 2200,
+      'observed_at': '2026-11-15T10:01:00Z',
+    };
+    await tester.pumpWidget(view());
+    await settleSolar(tester);
+    expect(find.text('Discharging · 2.20 kW'), findsOneWidget);
+    expect(find.text('Charging · 2.20 kW'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets(
     'station selected on page two persists on dashboard and refreshes saved changes',
@@ -523,7 +538,7 @@ void main() {
       expect(find.text('Deye Solar'), findsNothing);
       expect(find.text('North solar'), findsNothing);
       expect(find.byType(IconButton), findsNothing);
-      expect(find.textContaining('Observed uptime'), findsNothing);
+      expect(find.textContaining('Observed uptime'), findsOneWidget);
       expect(find.text('Live updates · 30s refresh'), findsNothing);
       expect(find.text('Recent cloud reading'), findsNothing);
       expect(find.text('Connection'), findsNothing);

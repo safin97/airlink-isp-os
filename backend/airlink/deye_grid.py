@@ -106,13 +106,24 @@ def record(db, user_id, station_id, sample, current=None):
         tracking_from = current
     # Count only intervals bounded by two distinct, fresh, equal-state samples
     # collected while polling stayed continuous. Repeated cloud samples add nothing.
+    increment = 0
     if (state in ('up', 'down') and history.get('state') == state and history.get('eligible') and continuous and stamp and previous
             and 0 < (stamp - previous).total_seconds() <= FRESH_SECONDS):
         key = state + '_seconds'
-        history[key] = history.get(key, 0) + max(0, (stamp - max(previous, tracking_from)).total_seconds())
+        increment = max(0, (stamp - max(previous, tracking_from)).total_seconds())
+        history[key] = history.get(key, 0) + increment
     started = history.get('started_at') or current.isoformat()
     eligible = state in ('up', 'down') and stamp is not None and (previous is None or stamp > previous
                 or (continuous and history.get('eligible', False) and history.get('state') == state and stamp == previous))
+    if state == 'down' and eligible:
+        outage_start = observation(history.get('outage_started_at'))
+        if not continuous or not history.get('eligible') or history.get('state') != 'down' or not outage_start:
+            history.update(outage_started_at=current.isoformat(), outage_seconds=0)
+        else:
+            confirmed = min(increment, max(0, (stamp - max(previous, outage_start)).total_seconds())) if stamp and previous else 0
+            history['outage_seconds'] = history.get('outage_seconds', 0) + confirmed
+    else:
+        history.update(outage_started_at=None, outage_seconds=0)
     history.update(started_at=started, state=state, poll_at=current.isoformat(), eligible=eligible, tracking_from=tracking_from.isoformat(),
                    sample_at=max(filter(None, [stamp, previous])).isoformat() if stamp or previous else None,
                    reason=sample.get('reason'), voltages_v=sample.get('voltages_v', []))
@@ -130,7 +141,10 @@ def public(history, current=None):
     if not sample or not poll or not 0 <= (current - sample).total_seconds() <= FRESH_SECONDS or (current - poll).total_seconds() > MAX_POLL_GAP:
         state = 'unknown'
     up, down = history.get('up_seconds', 0), history.get('down_seconds', 0)
+    active = state == 'down' and history.get('eligible') and history.get('outage_started_at') is not None
     return {'state': state, 'uptime_seconds': up, 'downtime_seconds': down,
+            'current_outage_seconds': history.get('outage_seconds', 0) if active else 0 if state == 'up' else None,
+            'current_outage_started_at': history.get('outage_started_at') if active else None,
             'unknown_seconds': max(0, (current - started).total_seconds() - up - down) if started else 0,
             'started_at': history.get('started_at'), 'observed_at': history.get('sample_at'),
             'voltages_v': history.get('voltages_v', []), 'reason': history.get('reason'),
