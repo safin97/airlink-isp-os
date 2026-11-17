@@ -35,6 +35,7 @@ def recovery(tmp_path, monkeypatch, owner):
     service = mega_service.MegaBackupService(root, archive=local_backup.archive,
         restore_validate=local.validate, restore_apply=local.stage)
     monkeypatch.setattr(mega, 'binary', lambda: '/usr/bin/rclone')
+    monkeypatch.setattr(mega, 'backend_available', lambda: bool(mega.binary()))
     monkeypatch.setattr(mega, 'check_connection', lambda *args: None)
     monkeypatch.setattr(mega.time, 'sleep', lambda _: None)
     connect(service)
@@ -149,6 +150,7 @@ def test_archive_rejects_unsafe_or_incompatible_members(tmp_path, unsafe):
 
 
 def test_transport_lists_only_backups_and_download_stays_in_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(mega, 'backend_available', lambda: True)
     calls = []
     def run(args, **kwargs):
         calls.append(args)

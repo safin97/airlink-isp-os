@@ -1,5 +1,6 @@
 """MEGA transport via rclone. Credentials never appear in process arguments."""
 from contextlib import contextmanager
+from functools import lru_cache
 import hashlib
 import json
 import re
@@ -37,13 +38,38 @@ def run(arguments, *, input=None, timeout=7200):
         raise MegaError('MEGA transfer could not finish. Check your connection and retry.') from None
     if result.returncode:
         # Never echo subprocess output: it may include credentials or account data.
+        error = (result.stderr or '').lower()
+        if ("didn't find backend called" in error or "didn't find filing system for" in error) and 'mega' in error:
+            raise MegaError('The installed transfer tool has no MEGA support. Install the latest AirLink update; changing your password will not fix this installation error.')
         raise MegaError('MEGA rejected the operation. Check your login, available storage and transfer quota. '
                         'Accounts requiring a one-time sign-in code are not supported for automatic backups.')
     return result.stdout
 
 
+@lru_cache(maxsize=4)
+def _backend_available(path, modified, size):
+    try:
+        run(['help', 'backend', 'mega'], timeout=15)
+        return True
+    except MegaError:
+        return False
+
+
+def backend_available():
+    path = binary()
+    if not path:
+        return False
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return False
+    return _backend_available(path, stat.st_mtime_ns, stat.st_size)
+
+
 @contextmanager
 def remote(config, root):
+    if not backend_available():
+        raise MegaError('MEGA support is missing from the installed transfer tool. Install the latest AirLink update before testing your account.')
     with tempfile.TemporaryDirectory(prefix='connection-', dir=root) as temporary:
         path = Path(temporary)/'rclone.conf'
         obscured = run(['obscure', '-'], input=config['account_password'] + '\n', timeout=15).strip()

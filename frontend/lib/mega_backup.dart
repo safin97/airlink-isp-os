@@ -238,7 +238,7 @@ class _MegaBackupState extends State<MegaBackup> {
               ),
             if (data['transfer_available'] == false)
               const Text(
-                'MEGA transfer support is not installed on this server. Follow the MEGA backup setup instructions.',
+                'MEGA transfer support is not installed or is incomplete. Install the latest AirLink update, then test the connection again.',
               ),
             if (data['supported'] == false &&
                 data['transfer_available'] == true)

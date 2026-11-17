@@ -67,9 +67,9 @@ class MegaBackupService:
                     'connected': bool(config.get('verified')),
                     'has_account_password': bool(config.get('account_password')),
                     'has_backup_password': bool(config.get('backup_password')),
-                    'supported': bool(mega.binary()) and self.enabled and
+                    'supported': mega.backend_available() and self.enabled and
                         (self.archive is not None or Path(cloud.BACKUP_SCRIPT).exists()),
-                    'transfer_available': bool(mega.binary()), 'local_mode': self.archive is not None,
+                    'transfer_available': mega.backend_available(), 'local_mode': self.archive is not None,
                     'running': self.running, 'testing': self.testing, 'state': self.state(),
                     'restore': self.recovery.public()}
 

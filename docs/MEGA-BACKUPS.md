@@ -14,7 +14,7 @@ This integration uses rclone's MEGA backend with unattended email/password authe
 
 ## Local Mac and installed appliance
 
-The installed image includes the transfer binary; application packages built from that image include it too. The installed controller starts the scheduler at boot. Backups contain the same PostgreSQL database/configuration archive used by the other appliance backup options.
+The installed image includes the checksum-pinned official rclone distribution with MEGA backend support; application packages built from that image include it too. The installed controller starts the scheduler at boot. Backups contain the same PostgreSQL database/configuration archive used by the other appliance backup options.
 
 For the local checkout, install the transfer helper once:
 
@@ -48,3 +48,7 @@ Local SQLite backups and appliance PostgreSQL backups are not interchangeable. L
 Implementation references: [rclone MEGA backend](https://rclone.org/mega/), [rclone copyto](https://rclone.org/commands/rclone_copyto/), [file listing](https://rclone.org/commands/rclone_lsjson/), [download verification](https://rclone.org/commands/rclone_check/), and [password input via stdin](https://rclone.org/commands/rclone_obscure/). rclone password obscuring is reversible; AirLink uses its own encrypted settings storage and a short-lived private rclone configuration file.
 
 Automated tests exercise scheduling/catch-up/restarts, owner permissions, secret redaction, encrypted archive recovery and transfer failure handling. A successful live MEGA login/upload requires the owner's account and is not implied by the automated tests.
+
+## Connection failure in 0.1.36-dev
+
+The Linux 0.1.36-dev package bundled a distribution build of rclone without its MEGA backend. Its generic rejection message did not indicate a password failure: the operation could not reach MEGA. Install 0.1.37-dev or newer, then select **Test MEGA connection** again. Saved account credentials and encryption passwords are preserved. New builds verify the MEGA backend during packaging, and runtime capability checks distinguish missing support from account errors.

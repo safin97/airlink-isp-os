@@ -27,6 +27,7 @@ def service(tmp_path, monkeypatch):
     def archive(path): path.write_bytes(b'private-database-and-config')
     worker = mega_service.MegaBackupService(tmp_path/'mega', archive=archive)
     monkeypatch.setattr(mega, 'binary', lambda: '/usr/bin/rclone')
+    monkeypatch.setattr(mega, 'backend_available', lambda: bool(mega.binary()))
     monkeypatch.setattr(mega, 'check_connection', lambda *args: None)
     yield worker
     worker.stop()
@@ -189,6 +190,7 @@ def test_missing_transfer_support_never_reports_upload_success(service, monkeypa
 
 
 def test_transport_keeps_credentials_out_of_argv_and_config_is_private(tmp_path, monkeypatch):
+    monkeypatch.setattr(mega, 'backend_available', lambda: True)
     monkeypatch.setattr(mega, 'binary', lambda: '/usr/bin/rclone')
     monkeypatch.setattr(mega.time, 'sleep', lambda _: None)
     monkeypatch.setenv('RCLONE_CONFIG_AIRLINKMEGA_TYPE', 'local')
@@ -230,6 +232,7 @@ def test_transport_errors_redacted(failure, monkeypatch):
 
 
 def test_verification_failure_never_returns_success(tmp_path, monkeypatch):
+    monkeypatch.setattr(mega, 'backend_available', lambda: True)
     monkeypatch.setattr(mega.time, 'sleep', lambda _: None)
     def run(args, **kwargs):
         if args[0] == 'obscure': return 'obscured'

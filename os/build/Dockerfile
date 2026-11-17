@@ -19,17 +19,16 @@ RUN bash /tmp/install-gpu-drivers.sh && rm /tmp/install-gpu-drivers.sh
 FROM graphics AS runtime
 COPY backend/requirements.lock /tmp/requirements.lock
 RUN python3 -m venv /opt/airlink/venv && /opt/airlink/venv/bin/pip install --no-cache-dir -r /tmp/requirements.lock
-RUN apt-get update && apt-get install -y --no-install-recommends rclone && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Debian's rclone build omits MEGA. Bundle the checksum-pinned upstream build instead.
+COPY scripts/install-backup-transfer.py /tmp/install-backup-transfer.py
+RUN python3 /tmp/install-backup-transfer.py --output /opt/airlink/tools && \
+    rm /tmp/install-backup-transfer.py
 COPY backend /opt/airlink/backend
 COPY database /opt/airlink/database
 COPY monitoring /opt/airlink/monitoring
 COPY os /opt/airlink/os
 COPY deployment /opt/airlink/deployment
 COPY docs /opt/airlink/docs
-# Bundle the transfer binary in application updates as well as the offline ISO.
-RUN mkdir -p /opt/airlink/tools && cp /usr/bin/rclone /opt/airlink/tools/rclone && \
-    cp -a /usr/share/doc/rclone /opt/airlink/tools/rclone-licenses
 COPY tests/guest_install.py /opt/airlink/tests/guest_install.py
 COPY frontend/build/web /opt/airlink/frontend/build/web
 RUN cp /opt/airlink/deployment/systemd/* /etc/systemd/system/ && \
