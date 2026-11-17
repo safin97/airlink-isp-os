@@ -504,7 +504,7 @@ def towers(user=Depends(current_user), db=Depends(get_db)):
         devices = db.scalars(devices_query(db, user).where(Device.tower_id == tower.id)).all()
         statuses = [effective_status(d) for d in devices]
         item.update(sector_count=db.scalar(select(func.count()).select_from(Sector).where(Sector.tower_id == tower.id)),
-                    status="offline" if "offline" in statuses else "warning" if "unknown" in statuses else "online" if statuses else "unknown")
+                    status="online" if statuses and all(status == "online" for status in statuses) else "offline")
         result.append(item)
     return result
 
@@ -666,10 +666,14 @@ def delete_sector(sector_id: str, user=Depends(current_user), db=Depends(get_db)
     commit(db, user, "sector.delete", sector_id)
 
 
+def device_status_fresh(device):
+    return bool(device.enabled and device.last_poll and
+                (now() - aware(device.last_poll)).total_seconds() <= device.poll_interval * 3 + 30)
+
+
 def effective_status(device):
-    if not device.enabled or not device.last_poll or (now() - aware(device.last_poll)).total_seconds() > device.poll_interval * 3 + 30:
-        return "unknown"
-    return device.status
+    # Public availability is binary; retain internal polling state for alert thresholds.
+    return "online" if device_status_fresh(device) and device.status == "online" else "offline"
 
 
 def snmp_status(device, metric):
@@ -714,7 +718,7 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
         effective_vendor = device.vendor if device.vendor != 'generic' else detected or 'generic'
         device_status = effective_status(device)
         downtime = (max(0, int((now() - aware(device.down_since)).total_seconds()))
-                    if device_status == 'offline' and device.down_since else None)
+                    if device_status_fresh(device) and device.status == 'offline' and device.down_since else None)
         result.append({**public(device), 'detected_vendor': detected,
                        'vendor_label': VENDOR_LABELS.get(effective_vendor, effective_vendor),
                        'vendor_auto': device.vendor == 'generic',
@@ -744,7 +748,7 @@ def add_device(data: DeviceInput, user=Depends(current_user), db=Depends(get_db)
     db.add(obj)
     db.flush()
     commit(db, user, "device.create", obj.id)
-    return public(obj)
+    return {**public(obj), "status": effective_status(obj)}
 
 
 @app.put("/api/devices/{device_id}")
@@ -760,7 +764,7 @@ def edit_device(device_id: str, data: DeviceInput, user=Depends(current_user), d
     for key, value in data.model_dump().items():
         setattr(obj, key, value)
     commit(db, user, "device.update", obj.id)
-    return public(obj)
+    return {**public(obj), "status": effective_status(obj)}
 
 
 @app.put('/api/devices/{device_id}/snmp-profile')
@@ -1001,7 +1005,7 @@ def summary(db, user):
         Metric.collected_at >= now() - timedelta(hours=24))).one()
     return {"towers": db.scalar(select(func.count()).select_from(Tower).where(Tower.id.in_(tower_ids(db, user)))),
             "sectors": len(sectors(user, db)), "devices": len(ids), "online": online, "offline": offline,
-            "unknown": len(ids) - online - offline, "connected_clients": None,
+            "connected_clients": None,
             "active_alerts": db.scalar(select(func.count()).select_from(Alert).where(Alert.device_id.in_(ids), Alert.resolved_at.is_(None))),
             "availability_24h": round(100 * (successes or 0) / observations, 2) if observations else None,
             "sample_count": observations, "observed_at": now(), "system": system_stats_service.read()}

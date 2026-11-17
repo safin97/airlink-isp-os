@@ -51,7 +51,7 @@ class NocScreen extends StatelessWidget {
   );
 
   Widget status(dynamic value) => Text(
-    (value ?? 'unknown').toString().toUpperCase(),
+    (value ?? 'offline').toString().toUpperCase(),
     style: TextStyle(
       color: statusColor(value),
       fontSize: 12,
@@ -104,7 +104,6 @@ class NocScreen extends StatelessWidget {
     final metrics = [
       ('Online devices', 'online', _green),
       ('Offline devices', 'offline', _red),
-      ('Unknown devices', 'unknown', _muted),
       ('Active alerts', 'active_alerts', _orange),
     ];
     final devicesById = {for (final device in devices) device['id']: device};
@@ -125,7 +124,7 @@ class NocScreen extends StatelessWidget {
                 ),
                 SizedBox(height: 8),
                 AppText(
-                  'Live network health • Unknown means no recent telemetry',
+                  'Live network health',
                   style: TextStyle(color: _muted),
                 ),
               ],

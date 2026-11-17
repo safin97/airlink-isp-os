@@ -408,9 +408,9 @@ const translations = <String, List<String>>{
   ],
   "Add verified link": ["لینکا پشتڕاستکری زێدە بکە", "إضافة رابط موثّق"],
   "Add SNMPv3 profile": ["پلانا SNMPv3 زێدە بکە", "إضافة ملف SNMPv3"],
-  "Live network health • Unknown means no recent telemetry": [
-    "ڕەوشا زیندی یا تۆڕێ • نەدیار واتە پێوانێن نوو نینن",
-    "حالة الشبكة المباشرة • غير معروف يعني عدم وجود قياسات حديثة",
+  "Live network health": [
+    "ڕەوشا زیندی یا تۆڕێ",
+    "حالة الشبكة المباشرة",
   ],
   'Day style': ['شێوازێ ڕۆژێ', 'المظهر النهاري'],
   'Night style': ['شێوازێ شەڤێ', 'المظهر الليلي'],

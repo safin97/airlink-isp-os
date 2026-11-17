@@ -183,10 +183,10 @@ class _NetworkMapState extends State<NetworkMap> with LanguageRebuild {
                             child: Semantics(
                               button: true,
                               label:
-                                  '${tower['name']}, ${tower['status'] ?? 'unknown'}. Open tower devices',
+                                  '${tower['name']}, ${tower['status'] ?? 'offline'}. Open tower devices',
                               child: Tooltip(
                                 message:
-                                    '${tower['name']} • ${tower['status'] ?? 'unknown'}',
+                                    '${tower['name']} • ${tower['status'] ?? 'offline'}',
                                 child: GestureDetector(
                                   behavior: HitTestBehavior.opaque,
                                   onTap: () => widget.openDevices(tower['id']),

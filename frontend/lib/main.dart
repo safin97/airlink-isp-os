@@ -1228,7 +1228,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         Icon(Icons.circle, size: 7, color: color),
         const SizedBox(width: 7),
         Text(
-          status?.toString() ?? 'unknown',
+          status?.toString() ?? 'offline',
           style: TextStyle(color: color, fontSize: 12),
         ),
       ],
@@ -1341,15 +1341,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   Text('${summary['online'] ?? 0} devices'),
                   badge('offline'),
                   Text('${summary['offline'] ?? 0} devices'),
-                  badge('unknown'),
-                  Text('${summary['unknown'] ?? 0} devices'),
                 ],
               ),
               const SizedBox(height: 16),
               HealthBar(
                 online: (summary['online'] ?? 0) as int,
                 offline: (summary['offline'] ?? 0) as int,
-                unknown: (summary['unknown'] ?? 0) as int,
               ),
             ],
           ),
@@ -3892,19 +3889,18 @@ class _NetworkSettingsState extends State<NetworkSettings>
 }
 
 class HealthBar extends StatelessWidget {
-  final int online, offline, unknown;
+  final int online, offline;
   const HealthBar({
     super.key,
     required this.online,
     required this.offline,
-    required this.unknown,
   });
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(6),
     child: SizedBox(
       height: 12,
-      child: online + offline + unknown == 0
+      child: online + offline == 0
           ? Container(color: navy)
           : Row(
               children: [
@@ -3917,11 +3913,6 @@ class HealthBar extends StatelessWidget {
                   Expanded(
                     flex: offline,
                     child: Container(color: red),
-                  ),
-                if (unknown > 0)
-                  Expanded(
-                    flex: unknown,
-                    child: Container(color: muted),
                   ),
               ],
             ),

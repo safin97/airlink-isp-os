@@ -56,4 +56,4 @@ To host signed application updates on your own public GitHub repository, see [Gi
 - `deployment/`: systemd, Nginx, nftables and offline provisioning.
 - `tests/`: application, security and destructive-operation guard tests plus isolated QEMU harness.
 
-No live metrics are seeded. Unpolled devices are `unknown`; expired telemetry does not remain green. The 24-hour availability percentage represents observed ICMP samples, not a claim about unsampled time.
+No live metrics are seeded. Device status is Online only with a recent online reading; new, disabled and stale devices display Offline. The 24-hour availability percentage represents observed ICMP samples, not a claim about unsampled time.

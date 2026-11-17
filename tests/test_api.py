@@ -125,11 +125,12 @@ def test_no_fabricated_metrics_and_stale_status(client, owner):
     did=device(client,owner,tid)
     summary=client.get('/api/dashboard',headers=owner).json()
     assert summary['connected_clients'] is None and summary['availability_24h'] is None
-    assert summary['online']==0 and summary['unknown']==1
+    assert summary['online']==0 and summary['offline']==1
+    assert 'unknown' not in summary
     with SessionLocal() as db:
         d=db.get(Device,did);d.status='online';d.last_poll=now()-timedelta(hours=1)
         db.add(Metric(device_id=did,values={'icmp_up':True}));db.add(Metric(device_id=did,values={'icmp_up':False}));db.commit()
-    assert client.get('/api/devices',headers=owner).json()[0]['status']=='unknown'
+    assert client.get('/api/devices',headers=owner).json()[0]['status']=='offline'
     assert client.get('/api/dashboard',headers=owner).json()['availability_24h']==50
 
 
@@ -197,3 +198,36 @@ def test_owner_restart_confirmation_and_audit(client, owner, monkeypatch):
     assert response.status_code == 202
     assert calls == [('system.restart',{'confirm':True})]
     assert any(row['action']=='system.restart' for row in client.get('/api/audit',headers=owner).json())
+
+
+@pytest.mark.parametrize('stored_status,enabled,age,expected', [
+    ('unknown', True, None, 'offline'),
+    ('unknown', True, 0, 'offline'),
+    ('online', True, 0, 'online'),
+    ('online', True, 210, 'online'),
+    ('online', True, 211, 'offline'),
+    ('online', False, 0, 'offline'),
+    ('offline', True, 0, 'offline'),
+])
+def test_binary_device_status_is_consistent(client, owner, monkeypatch, stored_status, enabled, age, expected):
+    from airlink import api
+    clock = now()
+    monkeypatch.setattr(api, 'now', lambda: clock)
+    tid = tower(client, owner)
+    created = client.post('/api/devices', headers=owner, json={
+        'tower_id': tid, 'name': 'Status test', 'ip_address': '192.0.2.99'})
+    assert created.status_code == 201
+    assert created.json()['status'] == 'offline'
+    did = created.json()['id']
+    with SessionLocal() as db:
+        row = db.get(Device, did)
+        row.status, row.enabled = stored_status, enabled
+        row.poll_interval = 60
+        row.last_poll = None if age is None else clock - timedelta(seconds=age)
+        db.commit()
+    assert client.get('/api/devices', headers=owner).json()[0]['status'] == expected
+    assert client.get('/api/towers', headers=owner).json()[0]['status'] == expected
+    result = client.get('/api/dashboard', headers=owner).json()
+    assert result[expected] == 1
+    assert result['online'] + result['offline'] == result['devices']
+    assert 'unknown' not in result

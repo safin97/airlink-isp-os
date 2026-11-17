@@ -8,7 +8,7 @@ import 'package:airlink_isp_os/main.dart';
 import 'package:airlink_isp_os/noc_screen.dart';
 
 void main() {
-  testWidgets('NOC preserves unknown status and excludes resolved incidents', (
+  testWidgets('NOC shows binary device status and excludes resolved incidents', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1600);
@@ -22,8 +22,7 @@ void main() {
             child: NocScreen(
               summary: const {
                 'online': 0,
-                'offline': 0,
-                'unknown': 1,
+                'offline': 1,
                 'active_alerts': 1,
               },
               towers: const [
@@ -34,7 +33,7 @@ void main() {
                   'id': 'd',
                   'name': 'No recent poll',
                   'tower_id': 't',
-                  'status': 'unknown',
+                  'status': 'offline',
                   'ip_address': '192.0.2.1',
                 },
               ],
@@ -63,7 +62,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('UNKNOWN'), findsOneWidget);
+    expect(find.text('OFFLINE'), findsOneWidget);
+    expect(find.text('UNKNOWN'), findsNothing);
+    expect(find.text('Unknown devices'), findsNothing);
     expect(find.text('Current incident'), findsOneWidget);
     expect(find.text('Old resolved incident'), findsNothing);
     expect(find.text('All monitored devices report online.'), findsNothing);

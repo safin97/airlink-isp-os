@@ -10,7 +10,7 @@ The root controller listens on a Unix socket and checks Linux peer credentials. 
 
 SNMP profiles are Fernet-encrypted at rest using a per-install key. The API never returns ciphertext or plaintext credentials. Back up that key alongside the database; losing it prevents credential decryption. This does not provide full-disk encryption: someone with unrestricted root/disk access can read local service keys. LUKS, TPM sealing, HA clustering and multi-node worker scaling are outside this development release.
 
-Data retention is 30 days for metrics; other records persist. Devices are polled with a bounded concurrency of eight and distributed Redis locks. Under heavy load, actual polling may lag; stale device state becomes unknown. Capacity benchmarks, load tests, hardware qualification and an external security review remain release gates.
+Data retention is 30 days for metrics; other records persist. Devices are polled with a bounded concurrency of eight and distributed Redis locks. Under heavy load, actual polling may lag; stale devices display Offline. Public device status is Online/Offline; internal polling state still tracks pending checks for alert thresholds. Capacity benchmarks, load tests, hardware qualification and an external security review remain release gates.
 
 Official implementation references:
 

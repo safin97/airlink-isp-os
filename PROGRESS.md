@@ -17,7 +17,7 @@ Application version **0.1.3-dev** (installer ISO: **0.1.2-dev**), built 1 Novemb
 
 ## Release boundaries
 
-- Unsupported metrics are `null`/unavailable, not fabricated. New/stale devices are `unknown`.
+- Unsupported metrics are `null`/unavailable, not fabricated. New, disabled and stale devices display Offline; Online requires a recent online reading.
 - The 24-hour availability percentage covers observed ICMP samples, not unsampled time.
 - Secure Boot is unsupported by this custom development image; disable it for VM/hardware testing.
 - Database and Redis are not exposed publicly. The installed PostgreSQL listener uses its local Unix socket.
