@@ -370,6 +370,9 @@ def get_dashboard(user=Depends(sas4_access), db=Depends(get_db)):
     connection = db.get(SAS4UserConnection, user.id)
     if not connection:
         raise HTTPException(409, 'Configure the SAS4 connection first')
+    from .sas4_dashboard import service as dashboards
+    if dashboards.running:
+        return dashboards.read(db, user)
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
         return fetch_dashboard(connection, password)

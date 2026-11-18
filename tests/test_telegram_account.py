@@ -45,6 +45,10 @@ def telegram(client, owner, monkeypatch):
                 calls.append('logout')
                 if fake.failure: raise fake.failure
                 return NS()
+            if isinstance(request, ta.functions.contacts.ResolveUsernameRequest):
+                calls.append(('username', request.username))
+                if fake.failure: raise fake.failure
+                return fake.result
             calls.append(('lookup', request.phone))
             if fake.failure: raise fake.failure
             return fake.result
@@ -166,13 +170,36 @@ def test_flood_cooldown_survives_new_login_attempt(client, owner, telegram):
     fake.failure = errors.FloodWaitError(None, capture=120)
     response = client.post(PATH + '/login', headers=owner, json=LOGIN)
     assert response.status_code == 429 and response.headers['Retry-After'] == '120'
+    assert '120 seconds' in response.json()['detail']
+    status = client.get(PATH, headers=owner)
+    assert 0 < status.json()['retry_after_seconds'] <= 120
+    assert status.json()['retry_at']
+    assert 'PRIVATE' not in status.text and LOGIN['api_hash'] not in status.text
     assert client.delete(PATH, headers=owner).status_code == 429
     clear_rate()
     count = len(calls)
     assert client.post(PATH + '/login', headers=owner, json=LOGIN).status_code == 429
     assert len(calls) == count
+    assert not list(api.cache.scan_iter('telegram-account:rate:login:*'))
     with SessionLocal() as db:
         assert db.get(TelegramAccount, actor).retry_at
+
+
+def test_cooldown_expires_without_resetting_session_or_automatically_requesting_code(client, owner, telegram, monkeypatch):
+    actor, calls, fake = telegram
+    started = now()
+    monkeypatch.setattr(ta, 'now', lambda: started)
+    fake.failure = errors.FloodWaitError(None, capture=120)
+    assert client.post(PATH + '/login', headers=owner, json=LOGIN).status_code == 429
+    before = list(calls)
+    monkeypatch.setattr(ta, 'now', lambda: started + timedelta(seconds=119, milliseconds=500))
+    assert client.get(PATH, headers=owner).json()['retry_after_seconds'] == 1
+    monkeypatch.setattr(ta, 'now', lambda: started + timedelta(seconds=120))
+    assert 'retry_after_seconds' not in client.get(PATH, headers=owner).json()
+    assert calls == before
+    clear_rate()
+    fake.failure = None
+    assert client.post(PATH + '/login', headers=owner, json=LOGIN).json()['stage'] == 'code'
 
 
 def test_invalid_code_can_retry_but_errors_are_redacted(client, owner, telegram):
@@ -335,13 +362,82 @@ def test_phone_test_denies_managers_and_other_owners(client, owner, telegram):
     assert not [c for c in telegram[1] if isinstance(c, tuple) and c[0] == 'send']
 
 
-def test_phone_test_new_lookup_cannot_bypass_recipient_cooldown(client, owner, telegram):
+def test_manual_tests_have_no_fixed_recipient_wait(client, owner, telegram):
     connect(client, owner)
     token = phone_test_token(client, owner)
     assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': token}).status_code == 200
     api.cache.delete('telegram-account:rate:lookup:' + str(PERSON.id))
     token = phone_test_token(client, owner)
-    assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': token}).status_code == 429
+    assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': token}).status_code == 200
+
+
+def test_success_allows_another_explicit_test_without_repeating_lookup(client, owner, telegram):
+    connect(client, owner)
+    first = phone_test_token(client, owner)
+    response = client.post(PATH + '/users/7/test', headers=owner, json={'test_token': first})
+    second = response.json()['next_test_token']
+    assert second != first
+    assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': second}).status_code == 200
+    assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': first}).status_code == 409
+    sends = [c[1] for c in telegram[1] if isinstance(c, tuple) and c[0] == 'send']
+    assert len(sends) == 2 and sends[0].random_id != sends[1].random_id
+    assert len([c for c in telegram[1] if isinstance(c, tuple) and c[0] == 'lookup']) == 1
+
+
+def test_username_recipient_preview_and_manual_test_without_phone(client, owner, telegram, monkeypatch):
+    connect(client, owner)
+    monkeypatch.setattr(ta.customers, 'record_for', lambda *args: {'username': 'customer7', 'phone': None})
+    response = client.post(PATH + '/users/7/recipient', headers=owner, json={'username': '@example'})
+    assert response.status_code == 200 and response.json()['matched_by'] == 'username'
+    assert response.json()['profile']['id'] == str(PERSON.id)
+    assert ('username', 'example') in telegram[1]
+    assert not [c for c in telegram[1] if isinstance(c, tuple) and c[0] == 'send']
+    response = client.post(PATH + '/users/7/test', headers=owner, json={'test_token': response.json()['test_token']})
+    assert response.status_code == 200 and response.json()['sent']
+    with SessionLocal() as db:
+        assert db.scalar(select(CustomerTelegramLink)) is None
+
+
+@pytest.mark.parametrize('mode', ['missing', 'channel', 'bot', 'partial'])
+def test_username_lookup_does_not_enable_unsupported_recipients(client, owner, telegram, mode):
+    connect(client, owner)
+    if mode == 'missing': telegram[2].failure = errors.UsernameNotOccupiedError(None)
+    elif mode == 'channel': telegram[2].result = NS(peer=NS(channel_id=1), users=[])
+    else:
+        person = NS(**vars(PERSON))
+        if mode == 'bot': person.bot = True
+        else: person.min = True
+        telegram[2].result = NS(peer=NS(user_id=person.id), users=[person])
+    response = client.post(PATH + '/users/7/recipient', headers=owner, json={'username': '@example'})
+    assert response.status_code == 200 and response.json()['test_token'] is None
+
+
+def test_username_selection_requires_owner_and_customer_access(client, owner, telegram, monkeypatch):
+    connect(client, owner)
+    _, manager = user(client, owner, 'manager')
+    assert client.post(PATH + '/users/7/recipient', headers=manager, json={'username': 'example'}).status_code == 403
+    before = len(telegram[1])
+    assert client.post(PATH + '/users/7/recipient', headers=owner, json={'username': 'https://bad.example'}).status_code == 422
+    def deny(*args): raise HTTPException(403, 'No customer access')
+    monkeypatch.setattr(ta.customers, 'record_for', deny)
+    assert client.post(PATH + '/users/7/recipient', headers=owner, json={'username': 'example'}).status_code == 403
+    assert len(telegram[1]) == before
+
+
+def test_repeat_sending_still_respects_telegram_account_flood_wait(client, owner, telegram):
+    connect(client, owner)
+    first = phone_test_token(client, owner)
+    _, other = user(client, owner, 'owner', name='secondowner')
+    connect(client, other)
+    clear_rate()
+    second = phone_test_token(client, other)
+    telegram[2].failure = errors.FloodWaitError(None, capture=120)
+    assert client.post(PATH + '/users/7/test', headers=owner, json={'test_token': first}).status_code == 429
+    before = len(telegram[1])
+    telegram[2].failure = None
+    response = client.post(PATH + '/users/7/test', headers=other, json={'test_token': second})
+    assert response.status_code == 429 and int(response.headers['Retry-After']) > 100
+    assert len(telegram[1]) == before
 
 
 def test_unknown_phone_never_gets_send_token(client, owner, telegram):

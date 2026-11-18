@@ -95,7 +95,7 @@ class DeviceInput(Strict):
     sector_id: Optional[str] = None
     name: str = Field(min_length=1, max_length=120)
     ip_address: str
-    vendor: Literal["generic", "mikrotik", "mikrotik_switch", "ubiquiti", "ubiquiti_m5", "ubiquiti_ac", "mimosa"] = "generic"
+    vendor: Literal["generic", "mikrotik", "mikrotik_switch", "ubiquiti", "ubiquiti_m5", "ubiquiti_ac", "mimosa", "tenda", "tplink", "ruijie", "hikvision"] = "generic"
     model: str = Field(default="", max_length=120)
     snmp_profile_id: Optional[str] = None
     poll_interval: int = Field(default=60, ge=15, le=86400)

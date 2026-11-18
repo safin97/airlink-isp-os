@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+import math
 import re
 import secrets
 from contextlib import contextmanager
@@ -45,6 +46,11 @@ class PhoneTestInput(BaseModel):
     language: Literal['en', 'ku', 'ar'] = 'en'
 
 
+class RecipientInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    username: str = Field(min_length=1, max_length=64)
+
+
 TEST_MESSAGES = {
     'en': 'AirLink: This is a test message from your internet service provider.',
     'ku': 'AirLink: ئەڤە پەیامەکا تاقیکرنێ یە ژ دابینکەرێ ئینتەرنێتا تە.',
@@ -62,10 +68,14 @@ def save(db, row, state):
     db.commit()
 
 
-def public(state):
+def public(state, row=None):
     expired = state.get('expires_at') and datetime.fromisoformat(state['expires_at']) <= now()
-    return {'stage': 'disconnected' if expired else state.get('stage', 'disconnected'),
-            'profile': state.get('profile') if state.get('stage') == 'connected' else None}
+    result = {'stage': 'disconnected' if expired else state.get('stage', 'disconnected'),
+              'profile': state.get('profile') if state.get('stage') == 'connected' else None}
+    wait = cooldown_seconds(row)
+    if wait:
+        result.update(retry_after_seconds=wait, retry_at=aware(row.retry_at).isoformat())
+    return result
 
 
 def profile(person):
@@ -119,14 +129,31 @@ def client_for(state):
     return client
 
 
+def cooldown_seconds(row):
+    return max(0, math.ceil((aware(row.retry_at) - now()).total_seconds())) if row and row.retry_at else 0
+
+
+def cooldown_error(wait):
+    return HTTPException(429, f'Telegram requested a cooldown. Try again in {wait} seconds.',
+                         headers={'Retry-After': str(wait)})
+
+
 def check_cooldown(row):
-    if row.retry_at and aware(row.retry_at) > now():
-        wait = max(1, int((aware(row.retry_at) - now()).total_seconds()) + 1)
-        raise HTTPException(429, 'Telegram requested a cooldown. Try again later.', headers={'Retry-After': str(wait)})
+    wait = cooldown_seconds(row)
+    if wait:
+        raise cooldown_error(wait)
 
 
 def perform(db, row, state, operation, delivery=False):
     check_cooldown(row)
+    if state.get('profile'):
+        from .api import cache
+        try:
+            wait = cache.ttl('telegram-account:rate:account:' + state['profile']['id'])
+        except RedisError:
+            raise HTTPException(503, 'Telegram account service is temporarily unavailable.') from None
+        if wait > 0:
+            raise cooldown_error(wait)
 
     async def run():
         client = client_for(state)
@@ -149,9 +176,10 @@ def perform(db, row, state, operation, delivery=False):
             from .api import cache
             try:
                 cache.set('telegram-account:rate:lookup:' + state['profile']['id'], '1', ex=wait)
+                cache.set('telegram-account:rate:account:' + state['profile']['id'], '1', ex=wait)
             except RedisError:
                 pass  # The persistent owner cooldown still applies.
-        raise HTTPException(429, 'Telegram requested a cooldown. Try again later.', headers={'Retry-After': str(wait)}) from None
+        raise cooldown_error(wait) from None
     except (errors.PhoneCodeInvalidError, errors.PasswordHashInvalidError):
         raise HTTPException(400, 'Incorrect Telegram code or two-step password.') from None
     except errors.PhoneCodeExpiredError:
@@ -175,7 +203,7 @@ def perform(db, row, state, operation, delivery=False):
 @router.get('')
 def status(user=Depends(owner), db=Depends(get_db)):
     row = db.get(TelegramAccount, user.id)
-    return public(read(row))
+    return public(read(row), row)
 
 
 @router.post('/login')
@@ -188,6 +216,7 @@ def login(data: LoginInput, user=Depends(owner), db=Depends(get_db)):
         row = db.get(TelegramAccount, user.id)
         if read(row).get('stage') == 'connected':
             raise HTTPException(409, 'Disconnect the current Telegram account first.')
+        check_cooldown(row)
         throttle('login:' + user.id, 60)
         row = row or TelegramAccount(user_id=user.id)
         state = {'api_id': data.api_id, 'api_hash': api_hash, 'phone': '+' + phone,
@@ -212,6 +241,7 @@ def verify(data: VerifyInput, user=Depends(owner), db=Depends(get_db)):
         state = read(row)
         if public(state)['stage'] not in ('code', 'password'):
             raise HTTPException(409, 'Request a new Telegram login code first.')
+        check_cooldown(row)
         throttle('verify:' + user.id, 3)
 
         async def request(client):
@@ -281,20 +311,49 @@ def lookup(customer_id: int, user=Depends(owner), db=Depends(get_db)):
                 result = await client(functions.contacts.ResolvePhoneRequest(phone='+' + phone))
             except (errors.PhoneNotOccupiedError, errors.PhoneNumberUnoccupiedError):
                 result = None
-            peer_id = getattr(getattr(result, 'peer', None), 'user_id', None)
-            person = next((p for p in getattr(result, 'users', []) if p.id == peer_id
-                           and not getattr(p, 'deleted', False) and not getattr(p, 'bot', False)), None)
-            # A lookup is not consent to receive bot messages. Never modify bot links.
-            test_token = None
-            if person and getattr(person, 'access_hash', None) is not None and not getattr(person, 'min', False):
-                # Short-lived, encrypted recipient details bind a button click to
-                # the displayed match, saved customer phone and connected sender.
-                target = {'purpose': 'customer_phone_test', 'owner': user.id, 'customer': customer_id, 'username': record.get('username'),
-                          'phone_hash': customers.phone_hash(record), 'sender': state['profile']['id'],
-                          'peer': person.id, 'access_hash': person.access_hash, 'random_id': secrets.randbits(63)}
-                test_token = cipher().encrypt(json.dumps(target).encode()).decode()
-            return {'status': 'found' if person else 'unknown', 'profile': profile(person) if person else None,
-                    'checked_at': now().isoformat(), 'bot_link_required': True, 'test_token': test_token}
+            return recipient_preview(result, user, customer_id, record, state, 'phone')
+        return perform(db, row, state, request)
+
+
+def test_intent(target):
+    return cipher().encrypt(json.dumps({**target, 'random_id': secrets.randbits(63)}).encode()).decode()
+
+
+def recipient_preview(result, user, customer_id, record, state, method):
+    peer_id = getattr(getattr(result, 'peer', None), 'user_id', None)
+    person = next((p for p in getattr(result, 'users', []) if p.id == peer_id
+                   and not getattr(p, 'deleted', False) and not getattr(p, 'bot', False)), None)
+    token = None
+    if person and getattr(person, 'access_hash', None) is not None and not getattr(person, 'min', False):
+        target = {'purpose': 'customer_phone_test', 'owner': user.id, 'customer': customer_id,
+                  'username': record.get('username'), 'phone_hash': customers.phone_hash(record),
+                  'sender': state['profile']['id'], 'peer': person.id, 'access_hash': person.access_hash,
+                  'lookup_method': method}
+        token = test_intent(target)
+    # Previewing a recipient never sends a message or changes the customer's bot link.
+    return {'status': 'found' if person else 'unknown', 'profile': profile(person) if person else None,
+            'checked_at': now().isoformat(), 'bot_link_required': True, 'test_token': token, 'matched_by': method}
+
+
+@router.post('/users/{customer_id}/recipient')
+def select_recipient(customer_id: int, data: RecipientInput, user=Depends(owner), db=Depends(get_db)):
+    record = customers.record_for(db, user, customer_id)
+    username = data.username.strip().removeprefix('@')
+    if not re.fullmatch(r'[A-Za-z0-9_]{1,32}', username):
+        raise HTTPException(422, 'Enter the customer’s Telegram @username.')
+    with locked(user.id):
+        row = db.get(TelegramAccount, user.id)
+        state = read(row)
+        if public(state)['stage'] != 'connected':
+            raise HTTPException(409, 'Connect your Telegram account before selecting a recipient.')
+
+        async def request(client):
+            throttle('username:' + state['profile']['id'], 3)
+            try:
+                result = await client(functions.contacts.ResolveUsernameRequest(username=username))
+            except (errors.UsernameInvalidError, errors.UsernameNotOccupiedError):
+                result = None
+            return recipient_preview(result, user, customer_id, record, state, 'username')
         return perform(db, row, state, request)
 
 
@@ -307,7 +366,7 @@ def send_phone_test(customer_id: int, data: PhoneTestInput, user=Depends(owner),
         if not isinstance(target, dict) or target.get('purpose') != 'customer_phone_test':
             raise ValueError()
     except Exception:
-        raise HTTPException(409, 'Phone lookup expired. Check the saved phone again before sending a test.') from None
+        raise HTTPException(409, 'Recipient check expired. Check the saved phone or Telegram username again before sending a test.') from None
     with locked(user.id):
         row = db.get(TelegramAccount, user.id)
         state = read(row)
@@ -316,19 +375,19 @@ def send_phone_test(customer_id: int, data: PhoneTestInput, user=Depends(owner),
         if (target.get('owner') != user.id or target.get('customer') != customer_id
                 or target.get('sender') != state['profile']['id']
                 or target.get('username') != record.get('username')
-                or not customers.phone_hash(record) or target.get('phone_hash') != customers.phone_hash(record)):
-            raise HTTPException(409, 'The customer phone or Telegram account changed. Check the saved phone again.')
+                or (target.get('lookup_method', 'phone') == 'phone' and not customers.phone_hash(record))
+                or target.get('phone_hash') != customers.phone_hash(record)):
+            raise HTTPException(409, 'The customer phone or Telegram account changed. Check the recipient again.')
 
         async def request(client):
             from .api import cache
             from .recharge_telegram import language_for, test_message
-            throttle('test:' + state['profile']['id'] + ':' + str(target['peer']), 30)
             try:
                 # Consume before sending, including ambiguous failures. No queue,
                 # background retry, or repeat send from the same lookup token.
                 if not cache.set('telegram-account:test-used:' + hashlib.sha256(token.encode()).hexdigest(),
                                  '1', nx=True, ex=600):
-                    raise HTTPException(409, 'This test was already attempted. Check the chat, then check the saved phone again for a new test.')
+                    raise HTTPException(409, 'This test was already attempted. Check the chat, then check the recipient again for a new test.')
             except RedisError:
                 raise HTTPException(503, 'Test delivery protection is unavailable. Try again later.') from None
             audit(db, user, 'telegram_account.test.attempt', str(customer_id))
@@ -344,6 +403,7 @@ def send_phone_test(customer_id: int, data: PhoneTestInput, user=Depends(owner),
                 raise HTTPException(429, 'Telegram restricted messaging from this account. Check the account in Telegram before trying again.') from None
             audit(db, user, 'telegram_account.test.accepted', str(customer_id))
             db.commit()
-            return {'sent': True, 'sent_at': now().isoformat(), 'sender': 'telegram_account'}
+            return {'sent': True, 'sent_at': now().isoformat(), 'sender': 'telegram_account',
+                    'next_test_token': test_intent(target)}
 
         return perform(db, row, state, request, delivery=True)

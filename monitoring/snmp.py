@@ -50,6 +50,10 @@ STATION_TABLES = {
     },
     'ubiquiti': {'ssid': '1.3.6.1.4.1.41112.1.4.5.1.2'},
 }
+# Mimosa vendor MIBs use DecimalOne (tenths of dBm). These are measured
+# receive power/RSSI, never the configured target signal or PHY capacity.
+MIMOSA_TOTAL_RX = '1.3.6.1.4.1.43356.2.1.2.6.6'
+MIMOSA_CLIENT_RSSI = '1.3.6.1.4.1.43356.2.1.2.9.6.1.1.11'
 
 
 def counter_rate(previous, current, seconds, rebooted=False, discontinuity_changed=False):
@@ -178,6 +182,16 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
         values["interfaces"] = interfaces
         family = "ubiquiti" if vendor in ("ubiquiti", "ubiquiti_m5", "ubiquiti_ac") else vendor
         wireless = {}
+        if family == 'mimosa':
+            total = (await read_table(engine, auth, target, MIMOSA_TOTAL_RX)).get('0')
+            if isinstance(total, (int, float)) and -1500 <= total < 0:
+                values['signal_dbm'] = total / 10
+            else:
+                rssi = await read_table(engine, auth, target, MIMOSA_CLIENT_RSSI)
+                measured = {index: value / 10 for index, value in rssi.items()
+                            if isinstance(value, (int, float)) and -1500 <= value < 0}
+                if measured:
+                    wireless['signal_dbm'] = measured
         for name, oid in STATION_TABLES.get(family, {}).items():
             table = await read_table(engine, auth, target, oid, textual=name == 'ssid')
             table = {index: value for index, value in table.items() if

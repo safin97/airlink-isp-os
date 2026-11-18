@@ -9,7 +9,8 @@ import threading
 import time
 from .models import CustomerProbeSettings, SAS4UserConnection, User, now
 from .security import cipher
-from .vendor_identity import VENDOR_LABELS
+from .vendor_identity import VENDOR_LABELS, BRAND_ONLY_VENDORS
+from .device_api import detect_vendor
 
 DEFAULTS = {'enabled': True, 'community': '', 'api_username': '', 'api_password': '',
             'verify_tls': True, 'allow_http': True, 'try_public_snmp': False}
@@ -54,6 +55,15 @@ def valid_address(value):
 PROBE_BUDGET = 55
 
 
+async def public_vendor(address, config):
+    try:
+        return await asyncio.wait_for(detect_vendor(address, {
+            'allow_http': config.get('allow_http', True),
+            'verify_tls': config.get('verify_tls', True)}), timeout=4)
+    except Exception:
+        return 'generic'
+
+
 async def probe(address, config):
     from .online_device_auto import detect_and_connect
     from .device_management import ManagementError
@@ -67,23 +77,35 @@ async def probe(address, config):
         return result
     candidates = config.get('snmp_candidates', [])
     has_api = bool(config.get('api_username') and config.get('api_password'))
-    if not candidates and not has_api:
-        return result
     for credentials in candidates:
         try:
             values = await asyncio.wait_for(
                 snmp.collect(address, credentials, 0, vendor='auto', link_only=True), 12)
             readings = snmp_readings(values)
             vendor = values.get('detected_vendor', 'generic')
+            source = 'SNMP'
+            if vendor == 'generic':
+                vendor = await public_vendor(address, config)
+                if vendor != 'generic':
+                    source = 'Public device page'
             return {**result, **readings, 'telemetry_status': 'available',
                     'telemetry_source': 'SNMP v' + ('2' if credentials['version'] == '2c' else '1'),
                     'snmp_version': credentials['version'], 'detected_vendor': vendor,
                     'vendor_label': VENDOR_LABELS.get(vendor, 'Unknown / Generic'),
-                    'vendor_detection_source': 'SNMP', 'device_reachable': True}
+                    'vendor_detection_source': source, 'device_reachable': True}
         except Exception:
             continue
+    # A bounded public-page read can identify routers without a supported login
+    # adapter. Never send their password through MikroTik/Ubiquiti adapters.
+    vendor = await public_vendor(address, config)
+    if vendor in VENDOR_LABELS and vendor != 'generic':
+        result.update(detected_vendor=vendor, vendor_label=VENDOR_LABELS[vendor],
+                      vendor_detection_source='Public device page', device_reachable=True)
+        if vendor in BRAND_ONLY_VENDORS or not has_api:
+            result['telemetry_status'] = 'identity_only'
+            return result
     if not has_api:
-        result['telemetry_status'] = 'snmp_unavailable'
+        result['telemetry_status'] = 'snmp_unavailable' if candidates else 'credentials_required'
         return result
     try:
         data = await asyncio.wait_for(detect_and_connect(address, {
@@ -171,10 +193,6 @@ class ProbeService:
             address = valid_address(row.get('ip_address'))
             if not address:
                 row['telemetry_status'] = 'invalid_address'
-                continue
-            if not config.get('snmp_candidates') and not (
-                    config.get('api_username') and config.get('api_password')):
-                row['telemetry_status'] = 'credentials_required'
                 continue
             key = (user.id, address, str(row.get('session_id')), str(row.get('username')), fingerprint)
             with self.lock:

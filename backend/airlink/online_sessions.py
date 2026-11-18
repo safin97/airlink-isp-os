@@ -55,6 +55,12 @@ def collect(connection, password, stopped):
 
 
 class OnlineSessions:
+    def authorize(self, user):
+        allowed(user)
+
+    def collect_data(self, connection, password, stopped):
+        return collect(connection, password, stopped)
+
     def __init__(self):
         self.lock = threading.RLock()
         self.pool = None
@@ -94,7 +100,7 @@ class OnlineSessions:
             for user, connection in db.execute(select(User, SAS4UserConnection).join(
                     SAS4UserConnection, SAS4UserConnection.user_id == User.id).where(User.active.is_(True))):
                 try:
-                    allowed(user)
+                    self.authorize(user)
                     accounts.append((connection_key(user, connection), connection.username, connection.encrypted_password))
                 except Exception:
                     continue
@@ -134,14 +140,14 @@ class OnlineSessions:
                 self.last_account = key[0]
                 try:
                     password = cipher().decrypt(encrypted.encode()).decode()
-                    self.tasks[key] = self.pool.submit(collect, SimpleNamespace(username=username), password, self.stopped)
+                    self.tasks[key] = self.pool.submit(self.collect_data, SimpleNamespace(username=username), password, self.stopped)
                 except Exception:
                     self.errors.add(key)
                     self.retry_at[key] = clock + 60
 
     def snapshot(self, db, user):
         # Recheck permissions and saved credentials on every read, including in-flight changes.
-        allowed(user)
+        self.authorize(user)
         connection = db.get(SAS4UserConnection, user.id)
         if not user.active or not connection:
             return None

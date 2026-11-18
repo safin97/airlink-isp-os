@@ -1,8 +1,11 @@
 import 'app_language.dart';
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_recharge.dart';
 import 'customer_telegram.dart';
+import 'whatsapp.dart';
 import 'section_access.dart';
 
 class Sas4UserDetails extends StatefulWidget {
@@ -26,15 +29,28 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
   bool editing = false;
   bool changed = false;
   bool saved = false;
+  bool fetching = false;
+  int requestVersion = 0;
+  Timer? refreshTimer;
 
   @override
   void initState() {
     super.initState();
     load();
+    refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!loading &&
+          !saving &&
+          !editing &&
+          !fetching &&
+          (ModalRoute.of(context)?.isCurrent ?? true)) {
+        load(quiet: true);
+      }
+    });
   }
 
   @override
   void dispose() {
+    refreshTimer?.cancel();
     for (final controller in controllers.values) {
       controller.dispose();
     }
@@ -62,7 +78,10 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
     return value != field['value'] && !(value == null && field['value'] == '');
   }
 
-  Future<void> load({bool preserveEdits = false}) async {
+  Future<void> load({bool preserveEdits = false, bool quiet = false}) async {
+    if (quiet && (fetching || editing || saving)) return;
+    final version = ++requestVersion;
+    fetching = true;
     final editedKeys = <String>{
       if (preserveEdits && details != null)
         for (final field in details!['fields'])
@@ -72,7 +91,14 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
       final data = Map<String, dynamic>.from(
         await widget.api.request('/integrations/sas4/users/${widget.userId}'),
       );
-      if (!mounted) return;
+      if (!mounted || version != requestVersion) return;
+      if (quiet &&
+          (editing || saving || !(ModalRoute.of(context)?.isCurrent ?? true))) {
+        return;
+      }
+      if (quiet && error == null && jsonEncode(details) == jsonEncode(data)) {
+        return;
+      }
       for (final field in data['fields']) {
         final key = field['key'] as String;
         if (editedKeys.contains(key)) continue;
@@ -80,11 +106,19 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
         controllers.putIfAbsent(key, () => TextEditingController()).text =
             field['value']?.toString() ?? '';
       }
-      setState(() => details = data);
+      setState(() {
+        details = data;
+        error = null;
+      });
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted && version == requestVersion) {
+        setState(() => error = e.toString());
+      }
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (version == requestVersion) fetching = false;
+      if (mounted && version == requestVersion && loading) {
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -109,6 +143,8 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
     }
     setState(() {
       saving = true;
+      requestVersion++;
+      fetching = false;
       error = null;
     });
     try {
@@ -401,6 +437,20 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
                             ),
                       icon: const Icon(Icons.send_outlined),
                       label: const Text('Customer Telegram'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: !canEdit || saving
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => CustomerWhatsApp(
+                                  api: widget.api,
+                                  customerId: widget.userId,
+                                ),
+                              ),
+                            ),
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('Customer WhatsApp'),
                     ),
                     const SizedBox(height: 20),
                     AppText(

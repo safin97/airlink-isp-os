@@ -44,11 +44,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('1.000 Mbps'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 15));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(find.text('Unknown'), findsOneWidget);
       expect(find.text('1.000 Mbps'), findsNothing);
-      await tester.pump(const Duration(seconds: 15));
+      await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(find.text('ether1'), findsNothing);
       expect(find.textContaining('Access denied'), findsOneWidget);

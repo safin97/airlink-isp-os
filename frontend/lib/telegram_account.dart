@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'recharge_telegram.dart';
+import 'telegram_cooldown.dart';
 
 const telegramAccountPath = '/integrations/telegram-account';
 
@@ -12,7 +13,8 @@ class TelegramAccountSettings extends StatefulWidget {
       _TelegramAccountSettingsState();
 }
 
-class _TelegramAccountSettingsState extends State<TelegramAccountSettings> {
+class _TelegramAccountSettingsState extends State<TelegramAccountSettings>
+    with TelegramCooldown<TelegramAccountSettings> {
   final apiId = TextEditingController();
   final apiHash = TextEditingController();
   final phone = TextEditingController();
@@ -43,14 +45,19 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings> {
   }
 
   Future<void> run(Future<void> Function() action) async {
+    if (coolingDown) return;
     setState(() {
       busy = true;
       error = null;
+      cooldownNotice = false;
     });
     try {
       await action();
+      if (mounted) acceptCooldown(status['retry_after_seconds']);
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted && !acceptCooldownError(e)) {
+        setState(() => error = e.toString());
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -135,6 +142,7 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings> {
         ),
         const SizedBox(height: 16),
         if (busy) const LinearProgressIndicator(),
+        if (cooldownNotice) cooldownMessage,
         if (error != null)
           Text(
             error!,
@@ -155,14 +163,14 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings> {
           ),
           field(code, 'Telegram login code', secret: true, numeric: true),
           FilledButton(
-            onPressed: busy ? null : () => run(verify),
+            onPressed: busy || coolingDown ? null : () => run(verify),
             child: const Text('Verify code'),
           ),
         ] else if (stage == 'password') ...[
           const Text('Your Telegram account uses two-step verification.'),
           field(password, 'Telegram two-step password', secret: true),
           FilledButton(
-            onPressed: busy ? null : () => run(verify),
+            onPressed: busy || coolingDown ? null : () => run(verify),
             child: const Text('Sign in to Telegram'),
           ),
         ] else ...[
@@ -174,13 +182,13 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings> {
           field(apiHash, 'Telegram API hash', secret: true),
           field(phone, 'Your Telegram phone number (+country code)'),
           FilledButton(
-            onPressed: busy ? null : () => run(login),
+            onPressed: busy || coolingDown ? null : () => run(login),
             child: const Text('Send login code'),
           ),
         ],
         if (stage != 'disconnected' || error != null)
           TextButton(
-            onPressed: busy
+            onPressed: busy || coolingDown
                 ? null
                 : () => run(() async {
                     status = Map<String, dynamic>.from(
@@ -220,7 +228,9 @@ class TelegramPhoneLookup extends StatefulWidget {
   State<TelegramPhoneLookup> createState() => _TelegramPhoneLookupState();
 }
 
-class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
+class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
+    with TelegramCooldown<TelegramPhoneLookup> {
+  final recipientUsername = TextEditingController();
   bool busy = true, connected = false;
   String? error, message;
   Map<String, dynamic>? result, sender;
@@ -231,13 +241,48 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
     check();
   }
 
-  Future<void> check() async {
-    if (widget.api.user?['role'] != 'owner') return;
+  @override
+  void dispose() {
+    recipientUsername.dispose();
+    super.dispose();
+  }
+
+  Future<void> selectUsername() async {
+    if (busy ||
+        coolingDown ||
+        !connected ||
+        widget.api.user?['role'] != 'owner') {
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
       result = null;
       message = null;
+      cooldownNotice = false;
+    });
+    try {
+      final found = await widget.api.request(
+        '$telegramAccountPath/users/${widget.customerId}/recipient',
+        method: 'POST',
+        body: {'username': recipientUsername.text.trim()},
+      );
+      if (mounted) result = Map<String, dynamic>.from(found);
+    } catch (e) {
+      if (mounted && !acceptCooldownError(e)) error = e.toString();
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> check() async {
+    if (widget.api.user?['role'] != 'owner' || coolingDown) return;
+    setState(() {
+      busy = true;
+      error = null;
+      result = null;
+      message = null;
+      cooldownNotice = false;
     });
     try {
       final account = await widget.api.request(telegramAccountPath);
@@ -246,6 +291,8 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
       sender = account['profile'] == null
           ? null
           : Map<String, dynamic>.from(account['profile']);
+      acceptCooldown(account['retry_after_seconds']);
+      if (coolingDown) return;
       if (connected) {
         final found = await widget.api.request(
           '$telegramAccountPath/users/${widget.customerId}/lookup',
@@ -254,7 +301,7 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
         if (mounted) result = Map<String, dynamic>.from(found);
       }
     } catch (e) {
-      if (mounted) error = e.toString();
+      if (mounted && !acceptCooldownError(e)) error = e.toString();
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -262,11 +309,15 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
 
   Future<void> sendTest() async {
     final token = result?['test_token'];
-    if (busy || token == null) return;
+    if (busy || coolingDown || token == null) return;
     setState(() {
       busy = true;
       error = null;
       message = null;
+      cooldownNotice = false;
+      // Consume this intent locally before sending; only an acknowledged success
+      // supplies another intent for a new, explicit click.
+      result?.remove('test_token');
     });
     try {
       final response = await widget.api.request(
@@ -281,15 +332,16 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
       }
       if (mounted) {
         message = 'Telegram accepted the test from your connected account.';
+        if (response['next_test_token'] is String) {
+          result?['test_token'] = response['next_test_token'];
+        }
       }
     } catch (e) {
-      if (mounted) error = e.toString();
+      if (mounted && !acceptCooldownError(e)) error = e.toString();
     } finally {
       if (mounted) {
         setState(() {
           busy = false;
-          // Rechecking the phone is required before another explicit test.
-          result?.remove('test_token');
         });
       }
     }
@@ -310,6 +362,7 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
             if (busy) const LinearProgressIndicator(),
+            if (cooldownNotice) cooldownMessage,
             if (error != null)
               Text(
                 error!,
@@ -322,6 +375,10 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
               ),
             if (result?['status'] == 'found') ...[
               const Text('Telegram account found'),
+              if (result?['matched_by'] == 'username')
+                const Text(
+                  'Selected by username for this customer’s test. Check the name and Telegram ID below before sending.',
+                ),
               Text(
                 '${person?['first_name'] ?? ''} ${person?['last_name'] ?? ''}',
               ),
@@ -329,32 +386,57 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup> {
               Text('Telegram ID: ${person?['id'] ?? ''}'),
             ],
             if (result?['status'] == 'unknown')
-              const Text(
-                'Unknown — Telegram returned no accessible match. Privacy settings may prevent discovery.',
+              Text(
+                result?['matched_by'] == 'username'
+                    ? 'No accessible user account found for this username. Enter a person’s Telegram @username.'
+                    : 'Unknown — Telegram returned no accessible match. Privacy settings may prevent discovery. You can select the customer by Telegram username below.',
               ),
             if (result != null)
               const Text(
                 'Phone tests and enabled automatic recharge receipts use the connected Telegram user account. The customer must still start and link the owner bot for bot notifications.',
               ),
             if (connected) ...[
+              const SizedBox(height: 12),
+              TextField(
+                controller: recipientUsername,
+                enabled: !busy && !coolingDown,
+                autocorrect: false,
+                decoration: const InputDecoration(
+                  labelText: 'Customer Telegram @username (optional)',
+                ),
+                onChanged: (_) => setState(() {
+                  result = null;
+                  message = null;
+                  error = null;
+                }),
+              ),
+              OutlinedButton.icon(
+                onPressed:
+                    busy || coolingDown || recipientUsername.text.trim().isEmpty
+                    ? null
+                    : selectUsername,
+                icon: const Icon(Icons.person_search_outlined),
+                label: const Text('Find by username'),
+              ),
+              const SizedBox(height: 12),
               Text(
                 sender?['username'] != null
                     ? 'Test sender: @${sender!['username']}'
                     : 'Test sender: ${sender?['first_name'] ?? 'connected Telegram account'} ${sender?['last_name'] ?? ''}',
               ),
               FilledButton.icon(
-                onPressed: busy || result?['test_token'] == null
+                onPressed: busy || coolingDown || result?['test_token'] == null
                     ? null
                     : sendTest,
                 icon: const Icon(Icons.send_outlined),
                 label: const Text('Send test from connected account'),
               ),
               const Text(
-                'Uses the notification language selected below. Wait 30 seconds between tests. Telegram privacy settings may prevent delivery. Recheck the saved phone if the lookup is older than five minutes.',
+                'Each click sends one test in the selected notification language. You can send another after Telegram accepts it. Telegram cooldowns and privacy settings still apply. Check the recipient again if the selection is older than five minutes.',
               ),
             ],
             OutlinedButton.icon(
-              onPressed: busy ? null : check,
+              onPressed: busy || coolingDown ? null : check,
               icon: const Icon(Icons.search),
               label: const Text('Check saved phone'),
             ),

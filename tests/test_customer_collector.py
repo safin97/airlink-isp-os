@@ -1,9 +1,17 @@
 import threading
+import pytest
 from types import SimpleNamespace
 from airlink import customer_collector as collector, sas4, online_sessions
 from airlink.customer_probes import ProbeService
 from test_api import user
 from test_online_sessions import ImmediatePool, response
+
+
+@pytest.fixture(autouse=True)
+def isolated_dashboard_collection(monkeypatch):
+    from airlink.sas4_dashboard import DashboardSnapshots
+    monkeypatch.setattr(collector, 'dashboards', DashboardSnapshots())
+    monkeypatch.setattr(sas4, 'fetch_dashboard', lambda *a: {'online_users': 1})
 
 
 def setup_collector(client, owner, monkeypatch):

@@ -95,7 +95,10 @@ void main() {
       await tester.tap(find.widgetWithText(ListTile, 'Dashboard'));
       await tester.pumpAndSettle();
       expect(find.text('51.0%'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 31));
+      for (var i = 0; i < 4; i++) {
+        sockets.single.controller.add({'type': 'heartbeat'});
+        await tester.pump(const Duration(seconds: 8));
+      }
       expect(requests, initial);
       // Solar connection status is read once each time Dashboard is opened;
       // network performance still updates exclusively through the live stream.

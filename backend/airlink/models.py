@@ -34,6 +34,53 @@ class TelegramAccount(Base):
     retry_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class WhatsAppSettings(Base):
+    __tablename__ = 'whatsapp_settings'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    encrypted_token = Column(Text, nullable=False)
+    config = Column(JSON, nullable=False)
+    version = Column(String(36), nullable=False, default=uid)
+    verified_at = Column(DateTime(timezone=True))
+    retry_at = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class WhatsAppCustomer(Base):
+    __tablename__ = 'whatsapp_customers'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    customer_id = Column(Integer, primary_key=True)
+    customer_username = Column(String(128), nullable=False)
+    phone_hash = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    version = Column(String(36), nullable=False, default=uid)
+    consent_at = Column(DateTime(timezone=True))
+    next_check = Column(DateTime(timezone=True), nullable=False, default=now, index=True)
+    last_checked = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+
+
+class WhatsAppEvent(Base):
+    __tablename__ = 'whatsapp_events'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    actor_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'))
+    customer_id = Column(Integer, nullable=False, index=True)
+    version = Column(String(36), nullable=False)
+    customer_version = Column(String(36), nullable=False)
+    kind = Column(String(20), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default='pending', index=True)
+    detail = Column(String(300))
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    accepted_at = Column(DateTime(timezone=True))
+    message_id = Column(String(256))
+
+
 class RechargeTelegramSettings(Base):
     __tablename__ = 'recharge_telegram_settings'
     id = Column(Integer, primary_key=True)

@@ -109,10 +109,12 @@ async def preview_lifespan(app):
     monitor_task = None
     alert_task = None
     customer_messages = None
+    whatsapp_messages = None
     api.system_stats_service.start()
     if args.live:
         mega_backups.start()
         customer_messages = asyncio.create_task(api.customer_telegram.worker())
+        whatsapp_messages = asyncio.create_task(api.whatsapp.worker())
         api.deye_monitor_service.start()
         from monitoring import worker
         worker.cache = api.cache
@@ -143,6 +145,10 @@ async def preview_lifespan(app):
         yield
     finally:
         mega_backups.stop()
+        if whatsapp_messages:
+            whatsapp_messages.cancel()
+            with suppress(asyncio.CancelledError):
+                await whatsapp_messages
         if customer_messages:
             customer_messages.cancel()
             with suppress(asyncio.CancelledError):

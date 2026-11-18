@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
@@ -19,6 +20,7 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
   List<dynamic> outages = [];
   String? error;
   bool busy = false;
+  bool fetching = false;
   int generation = 0;
   Timer? timer;
 
@@ -27,7 +29,7 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
     super.initState();
     load();
     timer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (!busy) load();
+      if (!busy) load(quiet: true);
     });
   }
 
@@ -46,28 +48,40 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
     super.dispose();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool quiet = false}) async {
+    if (quiet && fetching) return;
+    fetching = true;
     final request = ++generation;
-    setState(() {
-      busy = true;
-      error = null;
-    });
+    if (!quiet) {
+      setState(() {
+        busy = true;
+        error = null;
+      });
+    }
     try {
       final result = await widget.api.request(
         '/devices/${Uri.encodeComponent(widget.deviceId)}/outages?limit=100',
       );
-      if (mounted && request == generation) {
-        setState(() => outages = List<dynamic>.from(result));
+      if (mounted &&
+          request == generation &&
+          (error != null || jsonEncode(outages) != jsonEncode(result))) {
+        setState(() {
+          outages = List<dynamic>.from(result);
+          error = null;
+        });
       }
     } catch (e) {
       if (mounted && request == generation) {
         setState(() {
           error = e.toString();
-          outages = [];
+          if (!quiet) outages = [];
         });
       }
     } finally {
-      if (mounted && request == generation) setState(() => busy = false);
+      if (request == generation) fetching = false;
+      if (mounted && request == generation && busy) {
+        setState(() => busy = false);
+      }
     }
   }
 

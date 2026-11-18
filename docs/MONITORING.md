@@ -26,7 +26,7 @@ Sources: [RFC 3418](https://www.rfc-editor.org/rfc/rfc3418), [RFC 2863](https://
 
 ## MikroTik and Ubiquiti radio adapters
 
-Select **MikroTik**, **Ubiquiti airMAX M5** or **Ubiquiti airMAX AC** on the device. Existing Ubiquiti entries use the same airMAX adapter. Generic/Mimosa entries continue standard monitoring.
+Select **MikroTik**, **Ubiquiti airMAX M5** or **Ubiquiti airMAX AC** on the device. Existing Ubiquiti entries use the same airMAX adapter. Generic entries continue standard monitoring. Mimosa has the additional support described below.
 
 | Vendor | Metric | Table column OID |
 |---|---|---|
@@ -43,6 +43,16 @@ Mappings were checked against the [official MikroTik MIB](https://download.mikro
 Monitoring displays the sum of reported radio client counts, weakest reported signal and distinct measured frequencies. Raw wireless tables retain their own indices in metrics; station indices are not assumed to match interface indices. These client counts are radio associations, not SAS4 users. Unsupported OIDs stay unavailable; an explicit zero client count remains zero. CPU, RAM and radio fields depend on hardware, operating mode and firmware (including RouterOS wireless driver packages). Configured sector frequency remains inventory metadata.
 
 ## Traffic and validation limits
+
+### Mimosa device rows
+
+Choosing **Mimosa** replaces Wireless SSID with **Signal** and Registration clients with **TX / RX traffic** in the device inventory, including devices opened from Towers or NOC. Automatically detected Mimosa devices use the same view. Mixed-vendor lists label both kinds of readings. Ethernet speed is displayed beside the actual port name: `ether1` is preferred; a device with one Ethernet interface can report another name such as `eth0`. Multiple Ethernet ports without an explicit `ether1` remain unavailable instead of selecting an arbitrary port or summing bridge/radio traffic.
+
+The collector reads Mimosa's measured total receive power (`mimosaTotalRxPower`, `1.3.6.1.4.1.43356.2.1.2.6.6.0`). If absent, it uses the weakest reported PTMP client RSSI (`mimosaPtmpClientRssiAvg`, column `1.3.6.1.4.1.43356.2.1.2.9.6.1.1.11`), identified in the signal tooltip. Both use tenths of dBm. Mappings come from Mimosa's vendor-authored [BFIVE MIB, revision 1.02](https://raw.githubusercontent.com/librenms/librenms/master/mibs/mimosa/MIMOSA-NETWORKS-BFIVE-MIB) and [PTMP MIB, revision 0.3](https://raw.githubusercontent.com/librenms/librenms/master/mibs/mimosa/MIMOSA-NETWORKS-PTMP-MIB), mirrored by LibreNMS. Firmware/model variants without these objects remain unavailable; target signal and PHY rates are not substituted for measured readings.
+
+TX/RX are the selected Ethernet port's measured traffic in Mbps, from the device's perspective. Rates require two valid monitoring samples. A measured zero remains zero; missing rates remain unavailable. Stale/failed samples and down ports do not retain healthy-looking traffic readings. Existing live inventory updates carry these values without a page reload. No physical Mimosa device has been used for validation.
+
+### Counter handling
 
 Traffic rates require two valid samples with unchanged counter width/discontinuity and no uptime regression. Missing, reset or wrapped counters produce unavailable values. SNMPv1 skips Counter64 and uses 32-bit counters. For 32-bit counters, rates are omitted when link speed is unknown or the interval could contain a full wrap at link speed; use shorter polling intervals or v2c with Counter64 where supported. Rates are also omitted for the first sample after switching counter width.
 

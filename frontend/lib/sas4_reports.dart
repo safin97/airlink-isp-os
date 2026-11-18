@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
@@ -15,6 +16,8 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
   List<dynamic> reports = [], managers = [];
   int managerId = -1, requestVersion = 0;
   Timer? searchTimer;
+  Timer? refreshTimer;
+  bool backgroundFetching = false;
   String? managerError;
   String selected = 'activation-statistics';
   String operation = 'deposit', period = 'monthly';
@@ -30,11 +33,20 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
   void initState() {
     super.initState();
     initialize();
+    refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!busy &&
+          !backgroundFetching &&
+          reports.isNotEmpty &&
+          !(searchTimer?.isActive ?? false)) {
+        load(page: result?['page'] as int? ?? 1, quiet: true);
+      }
+    });
   }
 
   @override
   void dispose() {
     searchTimer?.cancel();
+    refreshTimer?.cancel();
     search.dispose();
     super.dispose();
   }
@@ -106,7 +118,12 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
     }
   }
 
-  Future<void> load({int page = 1, bool apply = false}) async {
+  Future<void> load({
+    int page = 1,
+    bool apply = false,
+    bool quiet = false,
+  }) async {
+    if (quiet && (busy || backgroundFetching)) return;
     searchTimer?.cancel();
     final version = ++requestVersion;
     if (apply &&
@@ -125,10 +142,14 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
       appliedStart = start;
       appliedEnd = end;
     }
-    setState(() {
-      busy = true;
-      error = null;
-    });
+    if (quiet) {
+      backgroundFetching = true;
+    } else {
+      setState(() {
+        busy = true;
+        error = null;
+      });
+    }
     final query = Uri(
       queryParameters: {
         'page': '$page',
@@ -150,18 +171,26 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
       final data = await widget.api.request(
         '/integrations/sas4/reports/$selected?$query',
       );
-      if (mounted && version == requestVersion) {
-        setState(() => result = Map<String, dynamic>.from(data));
+      if (mounted &&
+          version == requestVersion &&
+          (error != null || jsonEncode(result) != jsonEncode(data))) {
+        setState(() {
+          result = Map<String, dynamic>.from(data);
+          error = null;
+        });
       }
     } catch (e) {
       if (mounted && version == requestVersion) {
         setState(() {
           error = e.toString();
-          result = null;
+          if (!quiet) result = null;
         });
       }
     } finally {
-      if (mounted && version == requestVersion) setState(() => busy = false);
+      if (quiet) backgroundFetching = false;
+      if (!quiet && mounted && version == requestVersion) {
+        setState(() => busy = false);
+      }
     }
   }
 

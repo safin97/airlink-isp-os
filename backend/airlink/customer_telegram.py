@@ -348,6 +348,8 @@ def enqueue(db, user_id, customer_id, kind, key, expiration=None):
 
 def activation(db, user, customer_id, method, transaction_id, receipt=None):
     # A notification problem must never turn a confirmed recharge into a retry.
+    from . import whatsapp
+    whatsapp.activation(db, user, customer_id, method, transaction_id, receipt)
     try:
         with db.begin_nested():
             from . import recharge_telegram

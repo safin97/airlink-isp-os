@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:convert';
 
 import 'api.dart';
 import 'app_language.dart';
@@ -17,25 +19,48 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   Map<String, dynamic>? data;
   String? error;
   bool loading = true;
+  bool fetching = false;
+  Timer? timer;
 
   @override
   void initState() {
     super.initState();
     load();
+    timer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => load(quiet: true),
+    );
   }
 
-  Future<void> load() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> load({bool quiet = false}) async {
+    if (fetching) return;
+    fetching = true;
+    if (!quiet) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
     try {
       final result = await widget.api.request('/diagnostics');
-      if (mounted) setState(() => data = Map<String, dynamic>.from(result));
+      if (mounted &&
+          (error != null || jsonEncode(data) != jsonEncode(result))) {
+        setState(() {
+          data = Map<String, dynamic>.from(result);
+          error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => loading = false);
+      fetching = false;
+      if (mounted && loading) setState(() => loading = false);
     }
   }
 

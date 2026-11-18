@@ -273,9 +273,13 @@ async def detect_vendor(address, config, transport=None):
                     if urlsplit(target).netloc != urlsplit(base).netloc or urlsplit(target).scheme != scheme:
                         continue
                     status, headers, page = await public_page(target)
-                if status != 200:
+                if status not in (200, 401, 403):
                     continue
-                vendor = identify_vendor(description=page[:2048])
+                # Older routers advertise their brand in a public Basic/Digest
+                # realm even when the login page itself requires authentication.
+                branding = (headers.get('www-authenticate', '')[:512] + '\n'
+                            + headers.get('server', '')[:256] + '\n' + page[:2048])
+                vendor = identify_vendor(description=branding)
                 if vendor != 'generic':
                     return vendor
         except (httpx.HTTPError, ValueError):

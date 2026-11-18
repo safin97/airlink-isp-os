@@ -70,3 +70,47 @@ def test_automatic_vendor_display_failure_retention_and_manual_override(client, 
     assert client.put('/api/devices/'+did,headers=owner,json=data).status_code==200
     result=client.get('/api/devices',headers=owner).json()[0]
     assert result['vendor_auto'] is False and result['vendor_label']=='Ubiquiti airMAX M5'
+
+
+@pytest.mark.parametrize('oid,description,expected', [
+    ('1.3.6.1.4.1.59646.1', '', 'tenda'),
+    ('.1.3.6.1.4.1.11863.1', 'Linux', 'tplink'),
+    ('1.3.6.1.4.1.65855', '', 'tplink'),
+    ('1.3.6.1.4.1.4881.1', '', 'ruijie'),
+    ('1.3.6.1.4.1.39165.1', '', 'hikvision'),
+    ('', '<title>Tenda Wireless Router</title>', 'tenda'),
+    ('', '<img src="Tenda_logo.png">', 'tenda'),
+    ('', '<title>TP-Link Router</title>', 'tplink'),
+    ('', '<title>TP LINK Archer</title>', 'tplink'),
+    ('', 'Visit tplinkwifi.net', 'tplink'),
+    ('', 'http://tplinklogin.net/', 'tplink'),
+    ('', '<title>Ruijie Networks</title>', 'ruijie'),
+    ('', '<title>Reyee Router</title>', 'ruijie'),
+    ('', 'HIKVISION Device', 'hikvision'),
+    ('', '<img src="hikvision_logo.png">', 'hikvision'),
+    ('', 'AC1200 WiFi Router', 'generic'),
+    ('', 'attendance router tplinked hikvisionary', 'generic'),
+    ('1.3.6.1.4.1.48810.1', '', 'generic'),
+    ('1.3.6.1.4.1.391650.1', '', 'generic'),
+    ('1.3.6.1.4.1.118630.1', '', 'generic'),
+    ('1.3.6.1.4.1.596460.1', '', 'generic'),
+    ('1.3.6.1.4.1.14988.1', 'Tenda subscriber router', 'mikrotik'),
+])
+def test_additional_router_brand_identity(oid, description, expected):
+    assert identify_vendor(oid, description) == expected
+
+
+@pytest.mark.parametrize('oid,vendor', [('59646','tenda'), ('11863','tplink'), ('65855','tplink'),
+                                       ('4881','ruijie'), ('39165','hikvision')])
+def test_new_brands_use_standard_snmp_tables_without_guessing_radio_oids(monkeypatch, oid, vendor):
+    monkeypatch.setattr(snmp.UdpTransportTarget, 'create', AsyncMock(return_value=object()))
+    monkeypatch.setattr(snmp, 'get_cmd', AsyncMock(side_effect=[
+        (None,0,0,[(snmp.UPTIME,100)]),
+        (None,0,0,[('oid','1.3.6.1.4.1.' + oid), ('descr','Device')])]))
+    tables = AsyncMock(return_value={})
+    monkeypatch.setattr(snmp, 'read_table', tables)
+    result = asyncio.run(snmp.collect('192.168.1.2', {'version':'2c', 'community':'test'}, 0, vendor='auto', link_only=True))
+    assert result['detected_vendor'] == vendor
+    called = {call.args[3] for call in tables.call_args_list}
+    assert snmp.TABLES['if_speed_mbps'] in called
+    assert not called.intersection(oid for fields in snmp.WIRELESS_TABLES.values() for oid in fields.values())

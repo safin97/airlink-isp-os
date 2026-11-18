@@ -7,7 +7,8 @@ import 'package:http/http.dart' as http;
 class ApiException implements Exception {
   final String message;
   final int status;
-  ApiException(this.message, this.status);
+  final int? retryAfterSeconds;
+  ApiException(this.message, this.status, {this.retryAfterSeconds});
   @override
   String toString() => message;
 }
@@ -23,6 +24,7 @@ class Api {
   LiveSocket? _liveSocket;
   StreamSubscription<Map<String, dynamic>>? _liveSubscription;
   Timer? _liveRetry;
+  Timer? _liveWatchdog;
   bool _liveWanted = false;
   int _liveGeneration = 0;
   Api({http.Client? client, LiveConnector? liveConnector})
@@ -39,6 +41,7 @@ class Api {
     _liveWanted = false;
     _liveGeneration++;
     _liveRetry?.cancel();
+    _liveWatchdog?.cancel();
     _liveSubscription?.cancel();
     _liveSubscription = null;
     _liveSocket?.close();
@@ -48,6 +51,9 @@ class Api {
   void _connectLive() {
     if (!_liveWanted || token == null) return;
     final generation = ++_liveGeneration;
+    _liveRetry?.cancel();
+    _liveWatchdog?.cancel();
+    _liveSubscription?.cancel();
     try {
       final origin = base.isEmpty ? Uri.base : Uri.parse(base);
       final endpoint = origin.resolve('/api/live');
@@ -55,11 +61,11 @@ class Api {
         endpoint.replace(scheme: endpoint.scheme == 'https' ? 'wss' : 'ws'),
         token!,
       );
-      if (_liveSocket == null) return;
       bool ended = false;
       Future<void> disconnected([Object? error]) async {
         if (ended || generation != _liveGeneration || !_liveWanted) return;
         ended = true;
+        _liveWatchdog?.cancel();
         _liveSocket?.close();
         _liveEvents.add({'type': 'connection', 'connected': false});
         if (error is LiveAuthenticationExpired) {
@@ -78,9 +84,20 @@ class Api {
         }
       }
 
+      void watch() {
+        _liveWatchdog?.cancel();
+        _liveWatchdog = Timer(const Duration(seconds: 15), disconnected);
+      }
+
+      if (_liveSocket == null) {
+        disconnected();
+        return;
+      }
+      watch();
       _liveSubscription = _liveSocket!.messages.listen(
         (event) {
-          if (_liveWanted && generation == _liveGeneration) {
+          if (!ended && _liveWanted && generation == _liveGeneration) {
+            watch();
             _liveEvents.add(event);
           }
         },
@@ -111,7 +128,10 @@ class Api {
       if (token != null) 'Authorization': 'Bearer $token',
     });
     if (body != null) request.body = jsonEncode(body);
-    final response = await http.Response.fromStream(await client.send(request));
+    final pending = client.send(request).then(http.Response.fromStream);
+    final response = method == 'GET'
+        ? await pending.timeout(const Duration(seconds: 30))
+        : await pending;
     if (response.statusCode == 401 &&
         retry &&
         token != null &&
@@ -131,7 +151,14 @@ class Api {
         final detail = jsonDecode(response.body)['detail'];
         message = detail is String ? detail : detail.toString();
       } catch (_) {}
-      throw ApiException(message, response.statusCode);
+      final retryAfter = int.tryParse(response.headers['retry-after'] ?? '');
+      throw ApiException(
+        message,
+        response.statusCode,
+        retryAfterSeconds: retryAfter != null && retryAfter > 0
+            ? retryAfter
+            : null,
+      );
     }
     if (response.statusCode == 204) return null;
     if (binary) return response.bodyBytes;

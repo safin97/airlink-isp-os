@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
@@ -19,13 +20,17 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
   Map<String, dynamic>? data;
   String? error;
   bool busy = false;
+  bool fetching = false;
   Timer? timer;
 
   @override
   void initState() {
     super.initState();
     load();
-    timer = Timer.periodic(const Duration(seconds: 15), (_) => load());
+    timer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => load(quiet: true),
+    );
   }
 
   @override
@@ -34,14 +39,16 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
     super.dispose();
   }
 
-  Future<void> load() async {
-    if (busy) return;
-    setState(() => busy = true);
+  Future<void> load({bool quiet = false}) async {
+    if (fetching) return;
+    fetching = true;
+    if (!quiet) setState(() => busy = true);
     try {
       final result = await widget.api.request(
         '/devices/${Uri.encodeComponent(widget.device['id'].toString())}/ethernet-ports',
       );
-      if (mounted) {
+      if (mounted &&
+          (error != null || jsonEncode(data) != jsonEncode(result))) {
         setState(() {
           data = Map<String, dynamic>.from(result);
           error = null;
@@ -55,7 +62,8 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
         });
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      fetching = false;
+      if (mounted && busy) setState(() => busy = false);
     }
   }
 

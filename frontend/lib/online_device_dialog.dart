@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'api.dart';
 import 'online_device_dashboard.dart';
 import 'tower_device_panel.dart';
@@ -27,6 +28,9 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   Map<String, dynamic>? data;
   String? error;
   bool busy = true;
+  bool fetching = false;
+  int loadGeneration = 0;
+  Timer? refreshTimer;
   bool loadingProfiles = true, profilesLoaded = false;
   int? loginErrorStatus;
   bool showDetails = false;
@@ -45,6 +49,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
 
   @override
   void dispose() {
+    refreshTimer?.cancel();
     loginUsername.dispose();
     loginPassword.dispose();
     for (final controller in ssids.values) {
@@ -54,6 +59,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   }
 
   void resetConnection() {
+    loadGeneration++;
+    fetching = false;
     setState(() {
       data = null;
       resolvedProfileId = null;
@@ -96,6 +103,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
 
   Future<void> saveRadio(Map radio) async {
     if (!canEdit) return;
+    loadGeneration++;
+    fetching = false;
     setState(() {
       busy = true;
       error = null;
@@ -139,6 +148,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   }
 
   Future<void> saveTowerSettings(Map<String, dynamic> change) async {
+    loadGeneration++;
+    fetching = false;
     setState(() {
       busy = true;
       error = null;
@@ -169,6 +180,17 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   void initState() {
     super.initState();
     loadProfiles();
+    refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!towerLogin &&
+          data != null &&
+          !busy &&
+          !fetching &&
+          !showDetails &&
+          !mustReload &&
+          error == null) {
+        load(quiet: true);
+      }
+    });
   }
 
   Future<void> loadProfiles() async {
@@ -232,7 +254,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
     if (saved == true && mounted) await loadProfiles();
   }
 
-  Future<dynamic> connectCandidate(String candidate) async {
+  Future<dynamic> connectCandidate(String candidate, {int? generation}) async {
     Future<dynamic> connect() => widget.api.request(
       towerLogin
           ? '/devices/${Uri.encodeComponent(widget.towerDeviceId!)}/login'
@@ -241,7 +263,9 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       body: payload(candidate: candidate),
     );
     var result = await connect();
-    if (!mounted) throw StateError('Device panel closed.');
+    if (!mounted || (generation != null && generation != loadGeneration)) {
+      throw StateError('Device connection changed.');
+    }
     final offered = result['requires_trust'] == true
         ? result['ssh_fingerprint']
         : result['ssh_upgrade_fingerprint'];
@@ -257,7 +281,9 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
         // Trust the first key for this login panel, then pin every subsequent request.
         fingerprint = offered;
         result = await connect();
-        if (!mounted) throw StateError('Device panel closed.');
+        if (!mounted || (generation != null && generation != loadGeneration)) {
+          throw StateError('Device connection changed.');
+        }
       }
       if (result['requires_trust'] == true) {
         throw StateError('SSH key verification failed. Connection stopped.');
@@ -270,7 +296,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
     return result;
   }
 
-  Future<void> load() async {
+  Future<void> load({bool quiet = false}) async {
+    if (fetching || (quiet && (busy || data == null || mustReload))) return;
     if (towerLogin && profileId.isEmpty) {
       setState(() => error = 'Choose a saved login from Towers API.');
       return;
@@ -280,13 +307,19 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       setState(() => error = 'Enter the device username and password.');
       return;
     }
-    setState(() {
-      busy = true;
-      error = null;
-      loginErrorStatus = null;
-    });
+    final generation = ++loadGeneration;
+    fetching = true;
+    if (!quiet) {
+      setState(() {
+        busy = true;
+        error = null;
+        loginErrorStatus = null;
+      });
+    }
     try {
-      final candidates = profileId == 'manual'
+      final candidates = quiet && resolvedProfileId != null
+          ? [resolvedProfileId!]
+          : profileId == 'manual'
           ? ['manual']
           : profileId == 'auto'
           ? <String>[
@@ -307,14 +340,19 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
       String? matched;
       Object? lastError;
       for (var index = 0; index < candidates.length; index++) {
-        if (!mounted) return;
-        setState(
-          () => attemptLabel = profileId == 'auto'
-              ? 'Trying saved login ${index + 1} of ${candidates.length}…'
-              : null,
-        );
+        if (!mounted || generation != loadGeneration) return;
+        if (!quiet) {
+          setState(
+            () => attemptLabel = profileId == 'auto'
+                ? 'Trying saved login ${index + 1} of ${candidates.length}…'
+                : null,
+          );
+        }
         try {
-          result = await connectCandidate(candidates[index]);
+          result = await connectCandidate(
+            candidates[index],
+            generation: generation,
+          );
           matched = candidates[index];
           break;
         } on ApiException catch (e) {
@@ -326,29 +364,43 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
           lastError = e;
         }
       }
-      if (!mounted) return;
+      if (!mounted || generation != loadGeneration) return;
+      if (quiet && showDetails) return;
       if (matched == null) {
         throw StateError('No saved device login connected. ${lastError ?? ''}');
       }
       resolvedProfileId = matched;
-      for (final radio in result['settings'] as List? ?? []) {
-        ssids.putIfAbsent(radioKey(radio), () => TextEditingController()).text =
-            radio['ssid'] ?? '';
+      if (!quiet) {
+        for (final radio in result['settings'] as List? ?? []) {
+          ssids
+                  .putIfAbsent(radioKey(radio), () => TextEditingController())
+                  .text =
+              radio['ssid'] ?? '';
+        }
       }
       setState(() {
-        data = Map<String, dynamic>.from(result);
+        data = {
+          ...Map<String, dynamic>.from(result),
+          if (quiet && data!.containsKey('settings'))
+            'settings': data!['settings'],
+          if (quiet && data!.containsKey('tower_settings'))
+            'tower_settings': data!['tower_settings'],
+        };
+        error = null;
+        loginErrorStatus = null;
         mustReload = false;
         message = null;
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && generation == loadGeneration) {
         setState(() {
           error = e.toString();
           loginErrorStatus = e is ApiException ? e.status : null;
         });
       }
     } finally {
-      if (mounted) {
+      if (generation == loadGeneration) fetching = false;
+      if (mounted && generation == loadGeneration && !quiet) {
         setState(() {
           busy = false;
           attemptLabel = null;
@@ -588,7 +640,8 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
             canEdit: canEditSection(widget.api.user ?? {}, 'towers'),
             error: error,
             message: message,
-            onRefresh: load,
+            onRefresh: () =>
+                load(quiet: !showDetails && !mustReload && error == null),
             onSave: saveTowerSettings,
             onClose: () => Navigator.pop(context),
             onChangeLogin: resetConnection,
@@ -603,7 +656,10 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
             showSubscription: !towerLogin,
             error: error,
             message: message,
-            onRefresh: busy ? null : load,
+            onRefresh: busy
+                ? null
+                : () =>
+                      load(quiet: !showDetails && !mustReload && error == null),
             onClose: busy ? null : () => Navigator.pop(context),
             onSettings: () => setState(() => showDetails = !showDetails),
             details: connectedDetails(),

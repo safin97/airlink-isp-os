@@ -16,6 +16,12 @@ from monitoring import snmp
 LOGIN_CONFIG = {**probes.DEFAULTS, 'api_username':'reader', 'api_password':'private-api'}
 
 
+@pytest.fixture(autouse=True)
+def mock_public_probe(monkeypatch):
+    # Unit tests never contact a customer's real router.
+    monkeypatch.setattr(probes, 'detect_vendor', AsyncMock(return_value='generic'))
+
+
 
 
 def test_device_access_secrets_scoped_and_encrypted(client, owner):
@@ -303,7 +309,7 @@ def test_online_user_does_not_reuse_inventory_snmp_data(monkeypatch):
          'telemetry_source':'SNMP','telemetry_status':'available'}
     result=probes.ProbeService().enrich(None,SimpleNamespace(id='one'),{'clients':[row]})['clients'][0]
     assert result['signal_dbm'] is None and result['ssid'] is None
-    assert result['telemetry_source'] is None and result['telemetry_status']=='credentials_required'
+    assert result['telemetry_source'] is None and result['telemetry_status']=='pending'
 
 
 def test_invalid_device_password_is_not_echoed(client, owner):
@@ -321,3 +327,79 @@ def test_read_only_enrichment_never_starts_device_checks(monkeypatch):
         {'username': 'user', 'session_id': 1, 'ip_address': '192.168.1.1'}]}, schedule=False)
     assert result['clients'][0]['telemetry_status'] == 'pending'
     assert not service.pending
+
+
+@pytest.mark.parametrize('vendor,label', [('tenda','Tenda'), ('tplink','TP-Link'), ('ruijie','Ruijie / Reyee'), ('hikvision','Hikvision')])
+@pytest.mark.parametrize('credentials', [False, True])
+def test_router_brand_without_supported_api_keeps_identity_and_does_not_send_password(monkeypatch, vendor, label, credentials):
+    from airlink import online_device_auto
+    detector = AsyncMock(return_value=vendor)
+    monkeypatch.setattr(probes, 'detect_vendor', detector)
+    login = AsyncMock(side_effect=AssertionError('Unsupported brand must not receive login attempts'))
+    monkeypatch.setattr(online_device_auto, 'detect_and_connect', login)
+    result = asyncio.run(probes.probe('192.168.1.20', LOGIN_CONFIG if credentials else probes.DEFAULTS))
+    assert result['detected_vendor'] == vendor and result['vendor_label'] == label
+    assert result['telemetry_status'] == 'identity_only'
+    assert result['ethernet_links'] == [] and result['signal_dbm'] is None
+    assert result['telemetry_source'] is None and result['vendor_detection_source'] == 'Public device page'
+    assert result['device_reachable'] is True
+    assert set(detector.call_args.args[1]) == {'allow_http', 'verify_tls'}
+    login.assert_not_awaited()
+
+
+@pytest.mark.parametrize('page,expected', [('<title>Tenda Router</title>','tenda'),
+    ('<title>TP-Link Wireless Router</title>','tplink'), ('<title>Reyee Login</title>','ruijie'),
+    ('<img src="hikvision_logo.png">','hikvision')])
+def test_new_public_router_pages_detect_without_credentials(page, expected):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        assert request.method == 'GET' and not request.content
+        assert 'authorization' not in request.headers and 'cookie' not in request.headers
+        return httpx.Response(200, text=page)
+    assert asyncio.run(device_api.detect_vendor('192.168.1.20', {**LOGIN_CONFIG, 'allow_http':False},
+        transport=httpx.MockTransport(handler))) == expected
+    assert len(calls) == 1
+
+
+def test_identity_detection_without_credentials_is_scheduled_and_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(probes, 'configuration', lambda *a: probes.DEFAULTS)
+    service = probes.ProbeService()
+    queued = []
+    service.pool = SimpleNamespace(submit=lambda *args: queued.append(args))
+    def rows(): return {'clients':[{'username':'customer', 'session_id':1, 'ip_address':'192.168.1.20'}]}
+    assert service.enrich(None, SimpleNamespace(id='one'), rows())['clients'][0]['telemetry_status'] == 'connecting'
+    assert len(queued) == 1
+    monkeypatch.setattr(probes, 'configuration', lambda *a: {**probes.DEFAULTS, 'enabled':False})
+    assert service.enrich(None, SimpleNamespace(id='one'), rows())['clients'][0]['telemetry_status'] == 'disabled'
+    assert len(queued) == 1
+
+
+def test_generic_snmp_identity_uses_public_brand_and_keeps_real_link_readings(monkeypatch):
+    monkeypatch.setattr(snmp, 'collect', AsyncMock(return_value={
+        'detected_vendor':'generic', 'interfaces': {'1': {'name':'eth0', 'type':6, 'status':1, 'speed_mbps':1000}}}))
+    monkeypatch.setattr(probes, 'detect_vendor', AsyncMock(return_value='tplink'))
+    result = asyncio.run(probes.probe('192.168.1.20', {**LOGIN_CONFIG,
+        'snmp_candidates':[{'version':'2c', 'community':'private'}]}))
+    assert result['vendor_label'] == 'TP-Link'
+    assert result['telemetry_status'] == 'available'
+    assert result['ethernet_links'] == [{'name':'eth0', 'speed_mbps':1000}]
+    assert result['telemetry_source'] == 'SNMP v2'
+    assert result['vendor_detection_source'] == 'Public device page'
+
+
+@pytest.mark.parametrize('status,headers,expected', [
+    (401, {'www-authenticate':'Basic realm="TP-LINK Wireless Router"'}, 'tplink'),
+    (401, {'www-authenticate':'Digest realm="Hikvision"'}, 'hikvision'),
+    (403, {'server':'Ruijie-Webs'}, 'ruijie'),
+    (401, {'www-authenticate':'Basic realm="Router"'}, 'generic'),
+])
+def test_public_authentication_challenge_identifies_brand_without_logging_in(status, headers, expected):
+    calls = []
+    def handler(request):
+        calls.append(request)
+        assert 'authorization' not in request.headers
+        return httpx.Response(status, headers=headers, text='Login required')
+    assert asyncio.run(device_api.detect_vendor('192.168.1.20', {'allow_http':False},
+        transport=httpx.MockTransport(handler))) == expected
+    assert len(calls) == 1

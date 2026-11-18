@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram
+from . import towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, whatsapp
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from .customer_probes import service as customer_probe_service
@@ -46,6 +46,7 @@ async def lifespan(app):
     settings.validate()
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
     customer_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(customer_telegram.worker())
+    whatsapp_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(whatsapp.worker())
     if os.environ.get('AIRLINK_TESTING') != 'true':
         customer_probe_service.start()
         customer_collector_service.start()
@@ -54,6 +55,10 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if whatsapp_messages:
+            whatsapp_messages.cancel()
+            with suppress(asyncio.CancelledError):
+                await whatsapp_messages
         if customer_messages:
             customer_messages.cancel()
             with suppress(asyncio.CancelledError):
@@ -82,6 +87,7 @@ app.include_router(deye.router)
 app.include_router(customer_telegram.router)
 app.include_router(telegram_account.router)
 app.include_router(recharge_telegram.router)
+app.include_router(whatsapp.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -98,6 +104,8 @@ async def headers(request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def safe_device_login_validation(request, exc):
+    if request.url.path.startswith('/api/integrations/whatsapp'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the WhatsApp IDs, access token, template names, language and timezone.'})
     if request.url.path.startswith('/api/integrations/telegram-account'):
         return JSONResponse(status_code=422, content={'detail': 'Check the Telegram API ID, API hash, phone, code or password.'})
     if request.url.path.startswith('/api/integrations/customer-telegram'):
@@ -720,6 +728,15 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
         detected = metric.values.get('detected_vendor') if metric and device.last_poll else None
         detected = detected if detected in VENDOR_LABELS and detected != 'generic' else None
         effective_vendor = device.vendor if device.vendor != 'generic' else detected or 'generic'
+        if effective_vendor == 'mimosa' and fresh:
+            # Keep traffic on one physical Ethernet port, not a bridge/radio sum.
+            # Some Mimosa firmware calls its only Ethernet port eth0 rather than ether1.
+            ports = [port for port in values.get('interfaces', {}).values() if port.get('type') == 6]
+            named = [port for port in ports if str(port.get('name', '')).lower() == 'ether1']
+            selected = named[0] if len(named) == 1 else ports[0] if len(ports) == 1 else None
+            if selected and selected.get('status') == 1 and selected.get('admin_status') != 2:
+                telemetry['ethernet_traffic'] = {key: selected[key]
+                    for key in ('name', 'speed_mbps', 'tx_bps', 'rx_bps') if key in selected}
         device_status = effective_status(device)
         downtime = (max(0, int((now() - aware(device.down_since)).total_seconds()))
                     if device_status_fresh(device) and device.status == 'offline' and device.down_since else None)

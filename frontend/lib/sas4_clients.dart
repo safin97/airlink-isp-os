@@ -30,6 +30,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   Timer? refreshTimer;
   bool busy = true;
   bool backgroundFetching = false;
+  bool checkingConnection = false;
   bool viewingUser = false;
   int requestVersion = 0;
   bool configured = false;
@@ -51,7 +52,11 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     if (canConnect) {
       loadConnection();
       refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-        if (configured && !busy && !backgroundFetching && !viewingUser) {
+        if (!busy && !backgroundFetching && !viewingUser) {
+          if (!configured) {
+            loadConnection();
+            return;
+          }
           fetch(
             page: viewingDashboard ? 1 : result?['page'] as int? ?? 1,
             quiet: true,
@@ -71,6 +76,8 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   }
 
   Future<void> loadConnection() async {
+    if (checkingConnection) return;
+    checkingConnection = true;
     try {
       final data = await widget.api.request('/integrations/sas4');
       if (!mounted) return;
@@ -81,6 +88,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
+      checkingConnection = false;
       if (mounted) setState(() => busy = false);
     }
   }
@@ -367,7 +375,9 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
               : 'Reported signal from the customer device.')
         : switch (row['telemetry_status']) {
             'connecting' =>
-              'Signing into the device using the saved default device login.',
+              'Checking device identity and available monitoring readings.',
+            'identity_only' =>
+              'Device brand detected from its public page. Live readings require supported SNMP access; device login is not supported for every brand.',
             'credentials_required' =>
               'Save a device username and password in Device login in the sidebar.',
             'authentication_failed' =>
@@ -379,7 +389,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
             'disabled' => 'Automatic device readings are disabled.',
             'invalid_address' =>
               'This session does not have a usable customer device IP address.',
-            'pending' => 'Waiting for the background device login.',
+            'pending' => 'Waiting for the background device check.',
             'stale' => 'The device readings are out of date.',
             'failed' => 'The device login failed.',
             'available' =>
@@ -480,6 +490,16 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
           ),
         if (viewingDashboard) ...[
           const SizedBox(height: 20),
+          if (dashboard?['collection_status'] == 'warming')
+            const Text('Waiting for the first background dashboard reading…'),
+          if (dashboard?['collection_status'] == 'unavailable')
+            const Text(
+              'SAS4 dashboard is temporarily unavailable. Automatic retry is active.',
+            ),
+          if (dashboard?['collection_status'] == 'stale')
+            const Text(
+              'SAS4 is temporarily unavailable. Showing the last collected dashboard.',
+            ),
           dashboardCards(),
           for (final warning in (dashboard?['warnings'] as List? ?? []))
             Padding(

@@ -7,6 +7,7 @@ import 'payment_settings.dart';
 import 'customer_device_access.dart';
 import 'customer_telegram.dart';
 import 'telegram_account.dart';
+import 'whatsapp.dart';
 
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
@@ -16,6 +17,7 @@ Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
     'Payment setup': Icons.payments_outlined,
     'Telegram bot token': Icons.send_outlined,
     'Telegram account lookup': Icons.person_search_outlined,
+    'WhatsApp notifications': Icons.chat_outlined,
   },
 };
 
@@ -116,6 +118,7 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
               'Telegram account lookup' => TelegramAccountSettings(
                 api: widget.api,
               ),
+              'WhatsApp notifications' => WhatsAppSettings(api: widget.api),
               _ => profile(),
             },
           ],

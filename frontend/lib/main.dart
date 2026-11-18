@@ -412,6 +412,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String? deviceId;
   StreamSubscription<Map<String, dynamic>>? liveSubscription;
   bool liveConnected = false;
+  Timer? liveFallback;
   Api get api => widget.api;
   String get role => api.user!['role'];
   bool get owner => role == 'owner';
@@ -490,6 +491,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       toggle: toggleNoc,
     );
     liveSubscription = api.liveEvents.listen(applyLive);
+    liveFallback = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && !liveConnected) unawaited(reload(quiet: true));
+    });
     unawaited(
       reload().then((_) {
         if (mounted) api.startLive();
@@ -500,6 +504,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   @override
   void dispose() {
     liveSubscription?.cancel();
+    liveFallback?.cancel();
     api.stopLive();
     stopFullscreen?.call();
     if (nocExpanded) unawaited(fullscreen.leaveFullscreen());
@@ -590,21 +595,19 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     refreshing = true;
     if (!quiet) setState(() => loading = true);
     try {
-      if (!owner) {
-        final identity = await api.request('/auth/me');
-        if (!mounted) return;
-        if (identity is Map &&
-            identity['role'] != null &&
-            jsonEncode(identity) != jsonEncode(api.user)) {
-          setState(() {
-            api.user = Map<String, dynamic>.from(identity);
-            rows = {};
-            summary = {};
-            samples = [];
-            deviceId = null;
-            selectAllowedPage();
-          });
-        }
+      final identity = await api.request('/auth/me');
+      if (!mounted) return;
+      if (identity is Map &&
+          identity['role'] != null &&
+          jsonEncode(identity) != jsonEncode(api.user)) {
+        setState(() {
+          api.user = Map<String, dynamic>.from(identity);
+          rows = {};
+          summary = {};
+          samples = [];
+          deviceId = null;
+          selectAllowedPage();
+        });
       }
       final names = [
         'towers',
@@ -1250,6 +1253,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
+  bool isMimosa(dynamic device) =>
+      (device['vendor'] == 'generic'
+          ? device['detected_vendor']
+          : device['vendor']) ==
+      'mimosa';
+
   Widget deviceDowntime(Map<String, dynamic> device) {
     final seconds = device['downtime_seconds'];
     if (device['status'] == 'online') return const Text('—');
@@ -1274,7 +1283,24 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     String number(num value) => value == value.roundToDouble()
         ? value.toInt().toString()
         : value.toStringAsFixed(1);
-    if (field == 'ethernet_links') {
+    if (field == 'signal_dbm') {
+      final signal = data['signal_dbm'] ?? data['weakest_signal_dbm'];
+      if (signal is num && signal.isFinite && signal >= -150 && signal < 0) {
+        reading = '${number(signal)} dBm';
+      }
+    } else if (field == 'ethernet_traffic') {
+      final port = data['ethernet_traffic'] as Map? ?? {};
+      String rate(dynamic value) => value is num && value.isFinite && value >= 0
+          ? '${(value / 1000000).toStringAsFixed(3)} Mbps'
+          : 'Unavailable';
+      reading = 'TX: ${rate(port['tx_bps'])}\nRX: ${rate(port['rx_bps'])}';
+    } else if (field == 'mimosa_ethernet_speed') {
+      final port = data['ethernet_traffic'] as Map? ?? {};
+      final speed = port['speed_mbps'];
+      if (speed is num && speed.isFinite && speed > 0) {
+        reading = '${port['name'] ?? 'Ethernet'}: ${number(speed)} Mbps';
+      }
+    } else if (field == 'ethernet_links') {
       final links = (data[field] as List? ?? []).whereType<Map>().where(
         (port) => port['name']?.toString().toLowerCase() == 'ether1',
       );
@@ -1295,6 +1321,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     }
     final details = [
       reading,
+      if (field == 'signal_dbm' &&
+          data['signal_dbm'] == null &&
+          data['weakest_signal_dbm'] != null)
+        'Weakest reported client signal',
+      if (field == 'ethernet_traffic')
+        'Ethernet traffic from the device perspective; port: ${data['ethernet_traffic']?['name'] ?? 'Unavailable'}',
       if (data['telemetry_source'] != null) data['telemetry_source'],
       if (data['device_model'] != null) data['device_model'],
       if (data['firmware_version'] != null) data['firmware_version'],
@@ -1777,6 +1809,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   );
   Widget inventory(String resource) {
     final data = filtered(resource);
+    final hasMimosa = resource == 'devices' && data.any(isMimosa);
+    final onlyMimosa = hasMimosa && data.every(isMimosa);
     if (resource == 'devices') {
       data.sort((a, b) => compareIpAddresses(a['ip_address'], b['ip_address']));
     }
@@ -1785,9 +1819,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       'sectors' => ['Name', 'Tower', 'SSID', 'Frequency', 'IP address'],
       'users' => ['Username', 'Role', 'Active', 'Created'],
       _ => [
-        'Wireless SSID',
-        'Registration clients',
-        'ether1 speed',
+        onlyMimosa
+            ? 'Signal'
+            : hasMimosa
+            ? 'Wireless SSID / Signal'
+            : 'Wireless SSID',
+        onlyMimosa
+            ? 'TX / RX traffic'
+            : hasMimosa
+            ? 'Registration clients / TX / RX traffic'
+            : 'Registration clients',
+        hasMimosa ? 'Ethernet speed' : 'ether1 speed',
         'Uptime',
         'Downtime',
         'IP address',
@@ -1885,9 +1927,19 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           row['created_at']?.toString().substring(0, 10),
                         ],
                         _ => [
-                          deviceReading(row, 'wireless'),
-                          wirelessClientCount(row),
-                          deviceReading(row, 'ethernet_links'),
+                          deviceReading(
+                            row,
+                            isMimosa(row) ? 'signal_dbm' : 'wireless',
+                          ),
+                          isMimosa(row)
+                              ? deviceReading(row, 'ethernet_traffic')
+                              : wirelessClientCount(row),
+                          deviceReading(
+                            row,
+                            isMimosa(row)
+                                ? 'mimosa_ethernet_speed'
+                                : 'ethernet_links',
+                          ),
                           deviceReading(row, 'uptime_seconds'),
                           deviceDowntime(row),
                           row['ip_address'],
@@ -2621,6 +2673,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               Option('ubiquiti_m5', 'Ubiquiti airMAX M5'),
               Option('ubiquiti_ac', 'Ubiquiti airMAX AC'),
               Option('mimosa', 'Mimosa'),
+              Option('tenda', 'Tenda'),
+              Option('tplink', 'TP-Link'),
+              Option('ruijie', 'Ruijie / Reyee'),
+              Option('hikvision', 'Hikvision'),
             ],
           ),
           FieldSpec('model', 'Model', initial: ''),

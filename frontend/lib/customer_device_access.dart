@@ -69,18 +69,6 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
 
   Future<void> save() async {
     if (!canEdit) return;
-    final hasApiLogin =
-        username.text.trim().isNotEmpty &&
-        (hasPassword || password.text.isNotEmpty);
-    final hasSnmp =
-        hasCommunity || community.text.trim().isNotEmpty || tryPublicSnmp;
-    if (enabled && !hasApiLogin && !hasSnmp) {
-      setState(
-        () => error =
-            'Enter a device login, an SNMP community, or enable public SNMP detection.',
-      );
-      return;
-    }
     setState(() {
       busy = true;
       error = null;
@@ -108,7 +96,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
           password.clear();
           community.clear();
           message =
-              'Saved. Online users will auto-detect with SNMP v1/v2 and device login fallback.';
+              'Saved. Online users will detect device brands from SNMP or public device pages. Live readings depend on device support and access.';
         });
         widget.onSaved?.call();
       }
@@ -127,7 +115,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
       child: Column(
         children: [
           const AppText(
-            'Automatically detect MikroTik and Ubiquiti devices and read Ethernet speed, wireless signal and SSID. SNMP v2c and v1 are tried first, followed by the saved device login.',
+            'Recognize MikroTik, Ubiquiti, Mimosa, Tenda, TP-Link, Ruijie / Reyee and Hikvision devices. SNMP v2c and v1 are tried first, then public login-page branding. Brand detection does not require a device password. Live Ethernet speed, signal and SSID depend on SNMP or a supported MikroTik/Ubiquiti login.',
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

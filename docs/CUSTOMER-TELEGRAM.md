@@ -32,7 +32,7 @@ separate from the owner bot token. AirLink does not create Telegram accounts.
 
 The owner sees an automatic, single phone check when opening **ISP card →
 customer details → Customer Telegram**, plus **Check saved phone** to check again.
-Only that owner's SAS4-accessible customer's saved phone is accepted. Managers
+Phone lookup uses that owner's SAS4-accessible customer's saved phone. Managers
 cannot access this login, session, or lookup. Each owner has a separate connection.
 
 Lookup uses `contacts.resolvePhone`, without uploading contacts or reading chats.
@@ -48,13 +48,29 @@ subscription details. Automatic activation and expiry messages still use the bot
 
 A five-minute encrypted token binds the displayed recipient to the current saved
 phone, customer identity, owner and Telegram sender. A changed phone or sender
-requires a fresh lookup. Tests are limited to one per recipient/sender every 30
-seconds. Tokens are single-use, with a fixed Telegram random ID for duplicate
-protection. There are no automatic message retries; ambiguous failures tell the
+requires a fresh lookup. Manual tests have no fixed AirLink 30-second wait.
+After Telegram acknowledges a successful test, a new single-use token enables
+the next explicit click without repeating phone lookup. Each token has a fixed
+Telegram random ID for duplicate protection. Replaying an already-used token
+does not send another message. There are no automatic message retries; ambiguous failures tell the
 owner to check the chat. Telegram privacy, blocking, paid-message and account
 restrictions can prevent delivery. AirLink does not authorize Telegram Stars
 payments. A successful result means Telegram accepted the message, not that it
 was read. Existing owner-bot tests remain separate.
+
+If phone lookup returns Unknown, the owner can enter the customer's public
+**Telegram @username**, select **Find by username**, review the displayed name and
+Telegram ID, then click **Send test from connected account**. This selects a user
+for that customer's manual test; it does not verify their phone, update bot links,
+or change automatic receipt routing. Groups, channels, bots and unavailable user
+peers cannot be selected for these tests. Editing the username clears the previous
+selection. A selection expires after five minutes without a successful test.
+
+Telegram-directed flood waits remain enforced across actions and across owners
+connected to the same Telegram identity. The interface displays the required wait
+and disables retry controls. When it ends, the owner must click again; expiry
+never sends a message automatically. Account-level waits survive page reloads
+through the persisted cooldown status.
 
 Sessions, API hashes and pending phone/code-hash values are encrypted with the
 appliance encryption key. Login codes and two-step passwords are never stored.

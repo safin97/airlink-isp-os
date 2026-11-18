@@ -6,6 +6,7 @@ from .db import SessionLocal
 from .models import User, SAS4UserConnection
 from .customer_probes import service as probes
 from .online_sessions import service as sessions
+from .sas4_dashboard import service as dashboards
 
 log = logging.getLogger(__name__)
 PAGE_SIZE = 32
@@ -23,6 +24,7 @@ class CustomerCollector:
         if self.thread and self.thread.is_alive():
             return
         sessions.start()
+        dashboards.start()
         self.stopped.clear()
         self.thread = threading.Thread(target=self.run, name='customer-collector', daemon=True)
         self.thread.start()
@@ -33,6 +35,7 @@ class CustomerCollector:
         if self.thread:
             self.thread.join(timeout=5)
         sessions.stop()
+        dashboards.stop()
 
     def run(self):
         while not self.stopped.is_set():
@@ -46,6 +49,7 @@ class CustomerCollector:
     def poll_once(self):
         # Session lists and username matching must refresh even if device probes are busy.
         sessions.refresh_accounts()
+        dashboards.refresh_accounts()
         with probes.lock:
             capacity = min(PAGE_SIZE, 64 - len(probes.pending)) if probes.pool is not None else 0
         if capacity <= 0:
