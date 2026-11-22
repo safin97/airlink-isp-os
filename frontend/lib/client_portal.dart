@@ -22,7 +22,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       captcha = TextEditingController(),
       pin = TextEditingController();
   Map<String, dynamic>? account, options, card, order, selectedPackage;
-  String? error, message;
+  String? error, message, autoLoginNotice;
   bool busy = true, polling = false, fib = false, signedOut = false;
   Timer? timer;
   int selectedTab = 0;
@@ -56,22 +56,63 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
     if (mounted) setState(() => options = Map<String, dynamic>.from(result));
   }
 
+  String automaticLoginExplanation(Map<String, dynamic> result) {
+    final explanation = switch (result['reason']) {
+      'outside_subscriber_ranges' =>
+        'Your connection IP is outside the automatic-login ranges. Ask your provider to check the subscriber ranges and routing.',
+      'local_connection' =>
+        'Automatic login needs a customer ISP connection. It is unavailable from this local address.',
+      'auto_login_disabled' =>
+        'Automatic login is not configured. Sign in with your PPPoE username and password.',
+      'stale_session' =>
+        'Your SAS4 connection record is more than two minutes old. Ask your provider to check RADIUS accounting updates.',
+      'ambiguous_session' =>
+        'This IP matches more than one SAS4 session. Sign in with your username and password.',
+      'accounting_clock_mismatch' =>
+        'The SAS4 accounting time does not match the server clock. Ask your provider to check the server times.',
+      'accounting_unavailable' || 'verification_unavailable' =>
+        'Automatic login could not be verified. You can still try signing in with your username and password.',
+      'account_unavailable' =>
+        'Your account could not be verified for automatic login. Contact your provider or sign in manually.',
+      'session_not_found' =>
+        'No matching online SAS4 session was found for your connection. Sign in manually, or ask your provider to check the subscriber IP and accounting.',
+      _ =>
+        'Automatic login is unavailable for this connection. Sign in with your PPPoE username and password.',
+    };
+    final ip = result['source_ip'];
+    return '${tr(explanation)}${ip is String && ip.isNotEmpty ? '\n${tr('Connection IP seen by AirLink')}: $ip' : ''}';
+  }
+
   Future<void> restore() async {
     setState(() {
       busy = true;
       error = null;
+      autoLoginNotice = null;
     });
     try {
       try {
         await loadAccount();
       } on ApiException catch (e) {
         if (e.status != 401) rethrow;
-        final result = signedOut
-            ? {'authenticated': false}
-            : await request('/auto-login', method: 'POST');
+        Map<String, dynamic> result = {'authenticated': false};
+        if (!signedOut) {
+          try {
+            result = Map<String, dynamic>.from(
+              await request('/auto-login', method: 'POST'),
+            );
+          } catch (_) {
+            result = {
+              'authenticated': false,
+              'reason': 'verification_unavailable',
+            };
+          }
+        }
         if (result['authenticated'] == true) {
           await loadAccount();
         } else {
+          if (mounted && !signedOut) {
+            setState(() => autoLoginNotice = automaticLoginExplanation(result));
+          }
           await loginOptions();
         }
       }
@@ -163,6 +204,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         selectedTab = 0;
         viewingCards = false;
         selectedPackage = null;
+        autoLoginNotice = null;
         catalog = [];
         catalogSyncedAt = null;
         error = null;
@@ -726,6 +768,10 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                           onPressed: restore,
                           child: const AppText('Retry connection'),
                         ),
+                      if (autoLoginNotice != null) ...[
+                        const SizedBox(height: 16),
+                        Text(autoLoginNotice!),
+                      ],
                       const SizedBox(height: 16),
                       const AppText(
                         'On your ISP connection, we can sign you in automatically when your account is identified. On mobile data, use your username and password.',

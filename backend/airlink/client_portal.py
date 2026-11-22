@@ -120,8 +120,13 @@ def validate_customer(db, actor, customer_id, username):
     return record
 
 
-def automatic_identity(db, actor, ip):
-    """Require a single exact, fresh RADIUS accounting session; fail closed on ambiguity."""
+def automatic_identity(db, actor, ip, diagnostics=None):
+    """Require one exact, fresh session; diagnostics never include customer identity."""
+    def reject(reason):
+        if diagnostics is not None:
+            diagnostics['reason'] = reason
+        return None
+
     connection, password = sas4.local_user_connection(db, actor)
     matches = []
     with sas4.sas4_session(connection, password) as (client, headers):
@@ -129,37 +134,53 @@ def automatic_identity(db, actor, ip):
             result = sas4.response_json(client.post(sas4.DEFAULT_SERVER + sas4.API_PATH + 'index/online', headers=headers,
                 json=sas4.wire_payload({'page': page, 'count': 100, 'sortBy': 'username', 'direction': 'asc', 'search': str(ip)})))
             rows = result.get('data')
-            if not isinstance(rows, list) or len(rows) > 100:
-                return None
+            if not isinstance(rows, list) or len(rows) > 100 or any(not isinstance(row, dict) for row in rows):
+                return reject('accounting_unavailable')
+            try:
+                total, size = int(result['total']), int(result.get('per_page', 100))
+                if total < len(rows) or not 1 <= size <= 100 or len(rows) > size or int(result.get('current_page', page)) != page:
+                    return reject('accounting_unavailable')
+            except (KeyError, ValueError, TypeError, OverflowError):
+                return reject('accounting_unavailable')
             for row in rows:
                 try:
-                    if ipaddress.ip_address(row.get('framedipaddress')) != ip:
-                        continue
-                    matches.append(row)
+                    if ipaddress.ip_address(row.get('framedipaddress')) == ip:
+                        matches.append(row)
                 except (TypeError, ValueError):
                     continue
-            try:
-                if int(result['total']) <= page * int(result.get('per_page', 100)):
-                    break
-            except (KeyError, ValueError, TypeError):
-                return None
+            if total <= page * size:
+                break
+            if not rows:
+                return reject('accounting_unavailable')
         else:
-            return None
+            return reject('accounting_unavailable')
+    if not matches:
+        return reject('session_not_found')
     if len(matches) != 1:
-        return None
+        return reject('ambiguous_session')
     row = matches[0]
+    if row.get('acctstoptime') not in (None, ''):
+        return reject('session_not_found')
     try:
-        started = datetime.fromisoformat(row['acctstarttime'])
+        raw_started = row['acctstarttime']
+        started = datetime.fromisoformat(raw_started[:-1] + '+00:00' if raw_started.endswith('Z') else raw_started)
         if started.tzinfo is None:
             started = started.replace(tzinfo=ZoneInfo('Asia/Baghdad'))
-        age = (now() - (started + timedelta(seconds=int(row['acctsessiontime'])))).total_seconds()
+        duration = int(row['acctsessiontime'])
+        if duration < 0 or isinstance(row['acctsessiontime'], bool):
+            return reject('accounting_unavailable')
+        age = (now() - (started + timedelta(seconds=duration))).total_seconds()
         customer_id = int(row['user_details']['id'])
         username = row['username']
-        if not 0 <= age <= 120 or customer_id < 1 or not isinstance(username, str) or not username:
-            return None
+        if customer_id < 1 or not isinstance(username, str) or not username:
+            return reject('accounting_unavailable')
+        if age < 0:
+            return reject('accounting_clock_mismatch')
+        if age > 120:
+            return reject('stale_session')
         return customer_id, username
-    except (ValueError, TypeError, KeyError):
-        return None
+    except (ValueError, TypeError, KeyError, OverflowError, AttributeError):
+        return reject('accounting_unavailable')
 
 
 class CustomerLogin(BaseModel):
@@ -233,15 +254,26 @@ def auto_login(request: Request, response: Response, db=Depends(get_db)):
     rate(request, 'auto')
     config, actor = configured(db)
     ip = peer_ip(request)
-    if not ip or ip.is_loopback or not any(ip in ipaddress.ip_network(net) for net in config.subscriber_networks):
-        return {'authenticated': False}
+
+    def unavailable(reason):
+        return {'authenticated': False, 'reason': reason, 'source_ip': str(ip) if ip else None}
+
+    if not ip or ip.is_loopback:
+        return unavailable('local_connection')
+    if not config.subscriber_networks:
+        return unavailable('auto_login_disabled')
+    if not any(ip in ipaddress.ip_network(net) for net in config.subscriber_networks):
+        return unavailable('outside_subscriber_ranges')
     try:
-        identity = automatic_identity(db, actor, ip)
+        diagnostics = {}
+        identity = automatic_identity(db, actor, ip, diagnostics=diagnostics)
         if not identity:
-            return {'authenticated': False}
+            return unavailable(diagnostics.get('reason', 'session_not_found'))
         validate_customer(db, actor, *identity)
-    except (sas4.SAS4Error, sas4.httpx.HTTPError, HTTPException):
-        return {'authenticated': False}
+    except HTTPException as exc:
+        return unavailable('account_unavailable' if exc.status_code == 401 else 'verification_unavailable')
+    except (sas4.SAS4Error, sas4.httpx.HTTPError):
+        return unavailable('verification_unavailable')
     return create_session(db, config, *identity, response, ip=ip)
 
 

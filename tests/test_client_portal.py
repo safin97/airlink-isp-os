@@ -146,10 +146,10 @@ def test_manual_recharge_is_card_only_and_bound_to_session(client, owner, config
 
 
 def test_auto_login_ignores_untrusted_headers_and_binds_network_session(client, owner, configured, monkeypatch):
-    monkeypatch.setattr(portal, 'automatic_identity', lambda *a: pytest.fail('Not a trusted subscriber IP'))
-    assert client.post('/api/client/auto-login', headers={**HEADERS, 'X-Forwarded-For':'10.1.2.3', 'X-Real-IP':'10.1.2.3'}).json() == {'authenticated': False}
+    monkeypatch.setattr(portal, 'automatic_identity', lambda *a, **k: pytest.fail('Not a trusted subscriber IP'))
+    assert client.post('/api/client/auto-login', headers={**HEADERS, 'X-Forwarded-For':'10.1.2.3', 'X-Real-IP':'10.1.2.3'}).json()['authenticated'] is False
     monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address('10.1.2.3'))
-    monkeypatch.setattr(portal, 'automatic_identity', lambda *a: (7,'subscriber'))
+    monkeypatch.setattr(portal, 'automatic_identity', lambda *a, **k: (7,'subscriber'))
     assert client.post('/api/client/auto-login', headers=HEADERS).json()['authenticated']
     assert client.get('/api/client/account').status_code == 200
     monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address('10.1.2.4'))
@@ -258,3 +258,73 @@ def test_cards_catalog_requires_client_session_and_uses_saved_owner(client, owne
     assert response.status_code==200
     assert seen==[(SETTINGS['username'],SETTINGS['password'])]
     assert 'password' not in response.text
+
+
+def test_owner_can_add_subscriber_ranges_and_auto_login_uses_saved_list(client, owner, configured, monkeypatch):
+    address = ipaddress.ip_address('172.20.5.10')
+    matches = []
+    monkeypatch.setattr(portal, 'peer_ip', lambda request: address)
+    monkeypatch.setattr(portal, 'automatic_identity', lambda db, actor, ip, **kwargs: matches.append(str(ip)) or (7, 'subscriber'))
+    assert client.post('/api/client/auto-login', headers=HEADERS).json()['authenticated'] is False
+    assert matches == []
+    result = client.put('/api/client-portal', headers=owner, json={
+        'enabled': True, 'subscriber_networks': ['10.0.0.0/8', '172.0.0.0/8', '172.0.0.0/8']})
+    assert result.status_code == 200, result.text
+    assert client.get('/api/client-portal', headers=owner).json()['subscriber_networks'] == ['10.0.0.0/8', '172.0.0.0/8']
+    assert client.post('/api/client/auto-login', headers=HEADERS).json()['authenticated'] is True
+    assert matches == ['172.20.5.10']
+    assert client.put('/api/client-portal', headers=owner, json={'enabled': True, 'subscriber_networks': []}).status_code == 200
+    assert client.post('/api/client/auto-login', headers=HEADERS).json()['authenticated'] is False
+    assert matches == ['172.20.5.10']
+
+
+def test_auto_login_explains_range_mismatch_without_trusting_headers_or_disclosing_accounts(client, owner, configured, monkeypatch):
+    monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address('172.20.5.10'))
+    monkeypatch.setattr(portal, 'automatic_identity', lambda *a, **k: pytest.fail('Outside saved subscriber range'))
+    response = client.post('/api/client/auto-login', headers={**HEADERS, 'X-Forwarded-For': '10.1.2.3'})
+    assert response.json() == {'authenticated': False, 'reason': 'outside_subscriber_ranges', 'source_ip': '172.20.5.10'}
+    assert 'set-cookie' not in response.headers
+    assert client.get('/api/auth/me').status_code == 401
+
+
+@pytest.mark.parametrize('kind,expected', [
+    ('fresh_z', None), ('stopped', 'session_not_found'), ('stale', 'stale_session'),
+    ('future', 'accounting_clock_mismatch'), ('duplicate', 'ambiguous_session'),
+    ('overflow', 'accounting_unavailable'), ('bad_page', 'accounting_unavailable'),
+    ('bad_count', 'accounting_unavailable'), ('invalid_row', 'accounting_unavailable'),
+])
+def test_auto_login_handles_accounting_failures_and_reports_safe_reasons(client, owner, configured, monkeypatch, kind, expected):
+    from airlink.models import User
+    started = now() - timedelta(seconds=60)
+    row = {'framedipaddress': '10.1.2.3', 'username': 'subscriber', 'user_details': {'id': 7},
+           'acctstarttime': started.isoformat().replace('+00:00', 'Z'), 'acctsessiontime': 0}
+    if kind == 'stopped': row['acctstoptime'] = now().isoformat()
+    if kind == 'stale': row['acctstarttime'] = (now() - timedelta(minutes=10)).isoformat()
+    if kind == 'future': row['acctstarttime'] = (now() + timedelta(minutes=10)).isoformat()
+    if kind == 'overflow': row['acctsessiontime'] = 10**100
+    rows = [row, row] if kind == 'duplicate' else [None] if kind == 'invalid_row' else [row]
+    result = {'data': rows, 'total': len(rows), 'per_page': 0 if kind == 'bad_count' else 100,
+              'current_page': 2 if kind == 'bad_page' else 1}
+    @contextmanager
+    def session(*args):
+        with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=result))) as remote:
+            yield remote, {}
+    monkeypatch.setattr(sas4, 'sas4_session', session)
+    diagnostics = {}
+    with SessionLocal() as db:
+        identity = portal.automatic_identity(db, db.query(User).filter(User.role == 'owner').one(), ipaddress.ip_address('10.1.2.3'), diagnostics)
+    assert identity == ((7, 'subscriber') if expected is None else None)
+    assert diagnostics == ({} if expected is None else {'reason': expected})
+
+
+def test_auto_login_redacts_remote_failure_and_keeps_password_login_available(client, owner, configured, monkeypatch):
+    monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address('10.1.2.3'))
+    def unavailable(*args, **kwargs):
+        raise sas4.SAS4Error('PRIVATE-REMOTE-TOKEN')
+    monkeypatch.setattr(portal, 'automatic_identity', unavailable)
+    response = client.post('/api/client/auto-login', headers=HEADERS)
+    assert response.json()['reason'] == 'verification_unavailable'
+    assert response.json()['authenticated'] is False
+    assert 'PRIVATE' not in response.text and 'set-cookie' not in response.headers
+    response, _ = login(client)
+    assert response.json()['authenticated'] is True
