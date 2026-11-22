@@ -5,6 +5,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 PCI_ROOT = Path('/sys/bus/pci/devices')
@@ -39,7 +40,19 @@ def number(value):
         return None
 
 
-def detect(pci_root=None):
+def device_names():
+    names = {}
+    for line in command(['lspci', '-D', '-mm']).splitlines():
+        try:
+            row = shlex.split(line)
+            if len(row) >= 4 and address(row[0]):
+                names[address(row[0])] = (row[2] + ' ' + row[3])[:200]
+        except ValueError:
+            continue
+    return names
+
+
+def detect(pci_root=None, name_lookup=None):
     root = PCI_ROOT if pci_root is None else Path(pci_root)
     devices = []
     for path in sorted(root.glob('*')):
@@ -62,14 +75,7 @@ def detect(pci_root=None):
                         'memory_used_mib': None, 'utilization_percent': None, 'temperature_c': None})
     if not devices:
         return []
-    names = {}
-    for line in command(['lspci', '-D', '-mm']).splitlines():
-        try:
-            row = shlex.split(line)
-            if len(row) >= 4 and address(row[0]):
-                names[address(row[0])] = (row[2] + ' ' + row[3])[:200]
-        except ValueError:
-            continue
+    names = (name_lookup or device_names)()
     for gpu in devices:
         gpu['name'] = names.get(gpu['pci_address'], gpu['name'])
     if any(gpu['vendor_id'] == '0x10de' for gpu in devices):
@@ -89,6 +95,23 @@ def detect(pci_root=None):
                        memory_used_mib=number(row[4]), utilization_percent=number(row[5]),
                        temperature_c=number(row[6]))
     return devices
+
+
+class Sampler:
+    """Cache PCI display names, not driver state or live utilization readings."""
+    def __init__(self, pci_root=None):
+        self.pci_root = pci_root
+        self.names = {}
+        self.names_at = None
+
+    def read(self):
+        def lookup():
+            stamp = time.monotonic()
+            if self.names_at is None or stamp - self.names_at >= 60:
+                self.names = device_names()
+                self.names_at = stamp
+            return self.names
+        return detect(self.pci_root, name_lookup=lookup)
 
 
 if __name__ == '__main__':

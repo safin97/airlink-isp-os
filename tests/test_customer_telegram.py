@@ -144,10 +144,12 @@ def test_confirmed_recharge_only_enqueues_once_no_pin(client, owner, customer, m
 def test_bank_confirmation_controls_customer_notification(client, owner, customer, monkeypatch, provider, outcome):
     actor, _, _, _ = customer
     start(client, owner, customer)
-    body, _ = setup_checkout(client, owner, monkeypatch, 'sandbox' if outcome == 'sandbox' else 'production')
-    if provider == 'fastpay':
-        client.put('/api/payments/gateways/fastpay', headers=owner, json={'merchant_id': 'test', 'secret': 'test', 'environment': 'sandbox' if outcome == 'sandbox' else 'production'})
-    body['provider'] = provider
+    environment = 'sandbox' if outcome == 'sandbox' else 'production'
+    if provider == 'fib':
+        from test_fib_cards import checkout
+        body, _ = checkout(client, owner, monkeypatch, environment)
+    else:
+        body, _ = setup_checkout(client, owner, monkeypatch, environment, provider=provider)
     assert client.post('/api/payments/users/7', headers=owner, json=body).status_code == 200
     monkeypatch.setattr(payments, 'verify_provider_payment', lambda order: outcome if outcome in ('pending', 'declined') else 'paid')
     def activate(*a, **kw):

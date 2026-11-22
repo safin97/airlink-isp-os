@@ -5,7 +5,7 @@ RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin
     apt-get update && apt-get install -y --no-install-recommends \
     linux-image-amd64 live-boot live-config live-tools systemd-sysv dbus udev initramfs-tools \
     grub-efi-amd64-bin grub2-common efibootmgr gdisk parted dosfstools e2fsprogs squashfs-tools \
-    network-manager iproute2 iputils-ping dnsutils nftables curl ca-certificates openssl \
+    network-manager network-manager-l2tp strongswan iproute2 iputils-ping dnsutils nftables curl ca-certificates openssl \
     postgresql redis-server nginx python3 python3-venv python3-pip python3-pyqt6 python3-dbus \
     python3-psutil python3-cryptography xserver-xorg xinit openbox xterm fonts-dejavu \
     firmware-linux-free firmware-realtek firmware-iwlwifi sudo less locales rsync procps && \

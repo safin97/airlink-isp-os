@@ -6,7 +6,7 @@ from .models import UserSectionAccess, UserSectionEdits, UserSectionDeletes, Use
 OPERATIONAL = ('dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports')
 ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles', 'deye')
 ALL = (*ASSIGNABLE, 'managers')
-OWNER_PAGES = (*[key for key in ALL if key != 'roles'], 'diagnostics', 'my_account', 'device_login', 'towers_api')
+OWNER_PAGES = (*[key for key in ALL if key != 'roles'], 'diagnostics', 'my_account', 'device_login', 'towers_api', 'card_system')
 OWNER_PINNED = ('access_roles', 'my_account')
 READ_RESOURCES = {
     'dashboard': ('dashboard', 'noc'),
@@ -120,7 +120,7 @@ def enforce_request(user, method, path):
         if user.role != 'owner' and (method not in ('GET', 'HEAD', 'OPTIONS') or not deye_access.visible(user)):
             raise HTTPException(403, 'Deye Solar configuration and sharing are owner-only; viewing requires owner permission')
         return
-    owner_sections = ('/api/backups', '/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
+    owner_sections = ('/api/card-system', '/api/vpn', '/api/backups', '/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
                       '/api/integrations/sas4/device-access', '/api/payments/gateways')
     if user.role != 'owner' and any(path == root or path.startswith(root + '/') for root in owner_sections):
         raise HTTPException(403, 'Owner access required')

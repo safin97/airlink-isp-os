@@ -22,6 +22,7 @@ from . import device_management, device_access, online_device, snmp_visibility, 
 from . import towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, whatsapp
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
+from . import card_system, client_portal
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
 from .registration_usernames import service as registration_username_service
@@ -91,6 +92,9 @@ app.include_router(whatsapp.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
+app.include_router(card_system.router)
+app.include_router(client_portal.router)
+app.include_router(client_portal.settings_router)
 app.include_router(access_roles.router)
 
 
@@ -104,6 +108,10 @@ async def headers(request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def safe_device_login_validation(request, exc):
+    if request.url.path.startswith('/api/client'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the sign-in or recharge details and try again.'})
+    if request.url.path.startswith('/api/card-system'):
+        return JSONResponse(status_code=422, content={'detail': 'Enter a PIN of 1–128 characters and a label of up to 120 characters.'})
     if request.url.path.startswith('/api/integrations/whatsapp'):
         return JSONResponse(status_code=422, content={'detail': 'Check the WhatsApp IDs, access token, template names, language and timezone.'})
     if request.url.path.startswith('/api/integrations/telegram-account'):
@@ -184,6 +192,13 @@ def devices_query(db, user):
     if user.role == "technician":
         return q.join(DeviceAssignment, DeviceAssignment.device_id == Device.id).where(DeviceAssignment.user_id == user.id)
     return q.where(Device.tower_id.in_(tower_ids(db, user)))
+
+
+def sectors_query(db, user):
+    query = select(Sector).where(Sector.tower_id.in_(tower_ids(db, user)))
+    if user.role == 'technician':
+        query = query.where(Sector.id.in_(devices_query(db, user).with_only_columns(Device.sector_id)))
+    return query
 
 
 def check_tower(db, user, tower_id, write=False):
@@ -510,15 +525,28 @@ def save_tower_place(db, tower_id, data, user):
 
 @app.get("/api/towers")
 def towers(user=Depends(current_user), db=Depends(get_db)):
-    result = []
-    for tower in db.scalars(select(Tower).where(Tower.id.in_(tower_ids(db, user))).order_by(Tower.name)):
-        item = {**public(tower), "place_id": tower_place(db, tower.id), **tower_api.public_settings(db, tower.id, user)}
-        devices = db.scalars(devices_query(db, user).where(Device.tower_id == tower.id)).all()
-        statuses = [effective_status(d) for d in devices]
-        item.update(sector_count=db.scalar(select(func.count()).select_from(Sector).where(Sector.tower_id == tower.id)),
-                    status="online" if statuses and all(status == "online" for status in statuses) else "offline")
-        result.append(item)
-    return result
+    scope = tower_ids(db, user)
+    counts = (select(Sector.tower_id, func.count().label('total')).where(Sector.tower_id.in_(scope))
+              .group_by(Sector.tower_id).subquery())
+    query = (select(Tower, TowerPlace.place_id, counts.c.total)
+             .outerjoin(TowerPlace, TowerPlace.tower_id == Tower.id)
+             .outerjoin(counts, counts.c.tower_id == Tower.id)
+             .where(Tower.id.in_(scope)).order_by(Tower.name))
+    # A technician's tower status must still reflect only their assigned devices.
+    statuses = {}
+    stamp = now()
+    device_query = devices_query(db, user).with_only_columns(
+        Device.tower_id, Device.enabled, Device.last_poll, Device.poll_interval, Device.status)
+    for tid, enabled, polled, interval, status in db.execute(device_query):
+        online = bool(enabled and polled and status == 'online' and
+                      (stamp - aware(polled)).total_seconds() <= interval * 3 + 30)
+        statuses[tid] = statuses.get(tid, True) and online
+    configs = tower_api.configurations(db, scope) if user.role == 'owner' else {}
+    return [{**public(tower), 'place_id': place, 'sector_count': count or 0,
+             'status': 'online' if statuses.get(tower.id, False) else 'offline',
+             **(tower_api.public_configuration(configs.get(tower.id, tower_api.DEFAULTS))
+                if user.role == 'owner' else {})}
+            for tower, place, count in db.execute(query)]
 
 
 def manager_check(db, manager_id):
@@ -641,9 +669,7 @@ def delete_tower(tower_id: str, user=Depends(current_user), db=Depends(get_db)):
 
 @app.get("/api/sectors")
 def sectors(user=Depends(current_user), db=Depends(get_db)):
-    q = select(Sector).where(Sector.tower_id.in_(tower_ids(db, user)))
-    if user.role == "technician":
-        q = q.where(Sector.id.in_(devices_query(db, user).with_only_columns(Device.sector_id)))
+    q = sectors_query(db, user)
     return [public(x) for x in db.scalars(q.order_by(Sector.name))]
 
 
@@ -707,14 +733,12 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
               .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1).correlate(Device).scalar_subquery())
     query = devices_query(db, user).add_columns(Metric).outerjoin(Metric, Metric.id == latest).order_by(Device.name)
     result = []
-    configs = {}
+    configs = tower_api.configurations(db, devices_query(db, user).with_only_columns(Device.tower_id).distinct())
     for device, metric in db.execute(query):
-        if device.tower_id not in configs:
-            configs[device.tower_id] = tower_api.configuration(db, device.tower_id)['enabled']
         status = 'not_configured'
         fresh = bool(device.enabled and device.last_poll and metric and
                      (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
-        if configs[device.tower_id]:
+        if configs.get(device.tower_id, tower_api.DEFAULTS)['enabled']:
             status = ('disabled' if not device.enabled else 'pending' if not device.last_poll or not metric
                       else 'stale' if not fresh else metric.values.get('api_status', 'pending'))
         values = metric.values if fresh else {}
@@ -1018,14 +1042,15 @@ def summary(db, user):
     inventory = db.scalars(devices_query(db, user)).all()
     ids = [d.id for d in inventory]
     online = sum(effective_status(d) == "online" for d in inventory)
-    offline = sum(effective_status(d) == "offline" for d in inventory)
+    offline = len(inventory) - online
     # Aggregate in SQL: live clients must not load a day of metrics into memory.
     icmp = Metric.values['icmp_up'].as_boolean()
     sample_count, observations, successes = db.execute(select(func.count(Metric.id), func.count(icmp),
         func.sum(case((icmp.is_(True), 1), else_=0))).where(Metric.device_id.in_(ids),
         Metric.collected_at >= now() - timedelta(hours=24))).one()
     return {"towers": db.scalar(select(func.count()).select_from(Tower).where(Tower.id.in_(tower_ids(db, user)))),
-            "sectors": len(sectors(user, db)), "devices": len(ids), "online": online, "offline": offline,
+            "sectors": db.scalar(sectors_query(db, user).with_only_columns(func.count(), maintain_column_froms=True)),
+            "devices": len(ids), "online": online, "offline": offline,
             "connected_clients": None,
             "active_alerts": db.scalar(select(func.count()).select_from(Alert).where(Alert.device_id.in_(ids), Alert.resolved_at.is_(None))),
             "availability_24h": round(100 * (successes or 0) / observations, 2) if observations else None,
@@ -1132,6 +1157,24 @@ def network(user=Depends(settings_access)):
     return broker("network.status")
 
 
+@app.get('/api/vpn')
+def vpn_status(user=Depends(owner)):
+    return broker('vpn.status')
+
+
+@app.post('/api/vpn/{action}')
+def vpn_action(action: str, payload: dict, user=Depends(owner), db=Depends(get_db)):
+    if action not in {'save', 'connect', 'disconnect', 'delete'}:
+        raise HTTPException(404, 'Unknown VPN action')
+    allowed = {'server', 'username', 'password', 'psk', 'routes'} if action == 'save' else set()
+    if set(payload) - allowed or len(json.dumps(payload)) > 10000:
+        raise HTTPException(422, 'Invalid VPN settings')
+    result = broker('vpn.' + action, payload)
+    # Never write credentials, server details or request bodies to the audit log.
+    commit(db, user, 'vpn.' + action)
+    return result
+
+
 @app.post("/api/network/{action}")
 def network_action(action: str, payload: dict, user=Depends(settings_access), db=Depends(get_db)):
     if action not in {"save", "apply", "confirm", "restore", "test", "dns"}:
@@ -1212,3 +1255,14 @@ async def live_changes(websocket: WebSocket):
 
 from . import telegram
 app.include_router(telegram.router)
+
+
+@app.get('/client', include_in_schema=False)
+@app.get('/client/', include_in_schema=False)
+def client_page():
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    path = Path(__file__).resolve().parents[2] / 'frontend/build/web/index.html'
+    if not path.is_file():
+        raise HTTPException(503, 'Client portal web build is unavailable')
+    return FileResponse(path, media_type='text/html')

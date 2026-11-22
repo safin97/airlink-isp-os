@@ -222,7 +222,8 @@ def test_actual_recharge_receipt_is_safe_and_detail_failure_does_not_repeat_acti
         activations.append(1)
         return httpx.Response(200, json={'status': 200})
     data = sas4.CardRecharge(method=method, pin='PRIVATE_PIN_1234', transaction_id='a' * 32,
-                            expected_cost=manager_cost if manager_cost in ('2000', '0') else '2000', expected_profile_id=3)
+                            expected_cost=manager_cost if manager_cost in ('2000', '0') else '2000', expected_profile_id=3,
+                            expected_expiration='2026-12-01')
     if method == 'credit' and manager_cost in (None, 'unavailable'):
         with pytest.raises(ValueError):
             sas4.redeem_card(SimpleNamespace(**SETTINGS), SETTINGS['password'], 7, data, transport=httpx.MockTransport(transport))

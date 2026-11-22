@@ -16,12 +16,22 @@ def configuration(db, tower_id):
     return {**DEFAULTS, **(json.loads(cipher().decrypt(row.encrypted_credentials.encode())) if row else {})}
 
 
+def configurations(db, tower_ids):
+    """One scoped read for an inventory page; credentials never leave the request."""
+    return {row.tower_id: {**DEFAULTS, **json.loads(cipher().decrypt(row.encrypted_credentials.encode()))}
+            for row in db.scalars(select(TowerAPISettings).where(TowerAPISettings.tower_id.in_(tower_ids)))}
+
+
+def public_configuration(config):
+    return {**{key: config[value] for key, value in KEYS.items() if key != 'api_password'},
+            'has_api_password': bool(config['api_password'])}
+
+
 def public_settings(db, tower_id, user):
     if user.role != 'owner':
         return {}
     config = configuration(db, tower_id)
-    return {**{key: config[value] for key, value in KEYS.items() if key != 'api_password'},
-            'has_api_password': bool(config['api_password'])}
+    return public_configuration(config)
 
 
 def save(db, tower_id, data, user):

@@ -782,9 +782,9 @@ def redeem_card(connection, password, user_id, data, transport=None):
     with sas4_session(connection, password, transport) as (client, headers):
         require_recharge(user_permissions(client, headers), data.method)
         record = raw_user(client, headers, user_id)
-        if data.method != 'card':
+        if data.method != 'card' or data.expected_profile_id is not None:
             if record.get('profile_id') != data.expected_profile_id or (
-                data.expected_expiration is not None and record.get('expiration') != data.expected_expiration):
+                (data.method == 'card' or data.expected_expiration is not None) and record.get('expiration') != data.expected_expiration):
                 raise HTTPException(409, 'The user profile or expiry changed. Reopen recharge to review it.')
         if data.method == 'extend':
             quote = extension_quote(client, headers, record['profile_id'], data.extension_id)

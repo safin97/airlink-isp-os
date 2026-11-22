@@ -29,6 +29,7 @@ void main() {
                   'name': 'Activation statistics',
                 },
                 {'id': 'money-transfers', 'name': 'Money Transfers'},
+                {'id': 'system-cards', 'name': 'System Cards'},
               ]),
               200,
             );
@@ -46,6 +47,24 @@ void main() {
                 502,
               );
             }
+            if (path.endsWith('/system-cards')) {
+              return http.Response(
+                jsonEncode({
+                  'columns': [
+                    {'key': 'series', 'label': 'Series'},
+                    {'key': 'type', 'label': 'Type'},
+                    {'key': 'suspended', 'label': 'Suspended'},
+                  ],
+                  'rows': [
+                    {'series': 'SERIES-A', 'type': 0, 'suspended': 1},
+                  ],
+                  'total': 26,
+                  'page': int.parse(r.url.queryParameters['page']!),
+                  'last_page': 2,
+                }),
+                200,
+              );
+            }
             return http.Response(
               jsonEncode({
                 'columns': [
@@ -61,6 +80,15 @@ void main() {
               200,
             );
           }
+          if (path == '/api/card-system/radius') {
+            return http.Response(
+              '{"rows":[],"columns":[],"total":0,"page":1,"last_page":1,"actions":{}}',
+              200,
+            );
+          }
+          if (path == '/api/card-system') {
+            return http.Response('{"items":[],"total":0}', 200);
+          }
           if (path == '/api/integrations/sas4') {
             return http.Response('{"configured":false}', 200);
           }
@@ -73,8 +101,26 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(pages, isNot(contains('Card System')));
+      expect(find.widgetWithText(ListTile, 'Card System'), findsNothing);
       await tester.tap(find.widgetWithText(ListTile, 'ISP Card'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('isp-card-system')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Live cards from your saved SAS4 Radius connection.'),
+        findsOneWidget,
+      );
+      expect(
+        requests.map((uri) => uri.path),
+        contains('/api/card-system/radius'),
+      );
+      expect(
+        tester
+            .widget<ListTile>(find.byKey(const ValueKey('isp-card-system')))
+            .selected,
+        isTrue,
+      );
       await tester.tap(find.byKey(const ValueKey('isp-card-reports')));
       await tester.pumpAndSettle();
       expect(find.text('SAS4 Reports'), findsOneWidget);
@@ -154,6 +200,29 @@ void main() {
       await tester.tap(find.byTooltip('All managers'));
       await tester.pumpAndSettle();
       expect(requests.last.queryParameters['manager_id'], '-1');
+      await choose('System Cards');
+      expect(requests.last.path, endsWith('/system-cards'));
+      expect(find.text('SERIES-A'), findsOneWidget);
+      expect(find.text('Refill Card'), findsOneWidget);
+      expect(find.text('Yes'), findsOneWidget);
+      expect(find.text('From date'), findsNothing);
+      expect(find.text('To date'), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('sas4-report-search')),
+        'SERIES',
+      );
+      await tester.pump(const Duration(milliseconds: 450));
+      await tester.pumpAndSettle();
+      expect(requests.last.queryParameters['search'], 'SERIES');
+      await tester.tap(find.byTooltip('Next page'));
+      await tester.pumpAndSettle();
+      expect(requests.last.queryParameters['page'], '2');
+      expect(requests.last.queryParameters['search'], 'SERIES');
+      final beforeRefresh = requests.length;
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+      expect(requests.length, greaterThan(beforeRefresh));
+      expect(requests.last.queryParameters['page'], '2');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },

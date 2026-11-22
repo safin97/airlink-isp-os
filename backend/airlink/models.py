@@ -27,6 +27,29 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class ClientPortalSettings(Base):
+    __tablename__ = 'client_portal_settings'
+    id = Column(Integer, primary_key=True)
+    owner_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    subscriber_networks = Column(JSON, nullable=False, default=list)
+    version = Column(String(36), nullable=False, default=uid)
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class ClientPortalSession(Base):
+    __tablename__ = 'client_portal_sessions'
+    digest = Column(String(64), primary_key=True)
+    owner_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    config_version = Column(String(36), nullable=False)
+    customer_id = Column(Integer, nullable=False)
+    username = Column(String(128), nullable=False)
+    source_ip = Column(String(64))
+    encrypted_token = Column(Text)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class TelegramAccount(Base):
     __tablename__ = 'telegram_accounts'
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
@@ -426,6 +449,19 @@ class CustomerProbeSettings(Base):
     updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class SavedRechargeCard(Base):
+    __tablename__ = 'saved_recharge_cards'
+    id = Column(String(36), primary_key=True, default=uid)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    label = Column(String(120), nullable=False, default='')
+    profile_id = Column(Integer, nullable=True)
+    price_iqd = Column(String(40), nullable=True)
+    encrypted_pin = Column(Text, nullable=False)
+    pin_digest = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    __table_args__ = (UniqueConstraint('user_id', 'pin_digest', name='uq_saved_card_pin'),)
+
+
 class PaymentGateway(Base):
     __tablename__ = 'payment_gateways'
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
@@ -454,6 +490,21 @@ class RechargePayment(Base):
     detail = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class RechargeCardReservation(Base):
+    __tablename__ = 'recharge_card_reservations'
+    card_id = Column(String(36), ForeignKey('saved_recharge_cards.id', ondelete='RESTRICT'), primary_key=True)
+    payment_id = Column(String(32), ForeignKey('recharge_payments.id', ondelete='RESTRICT'), nullable=False, unique=True)
+
+
+class RadiusCardReservation(Base):
+    __tablename__ = 'radius_card_reservations'
+    source_key = Column(String(64), primary_key=True)
+    payment_id = Column(String(32), ForeignKey('recharge_payments.id', ondelete='RESTRICT'), nullable=False, unique=True)
+    series = Column(String(128), nullable=False)
+    remote_card_id = Column(Integer, nullable=False)
+    encrypted_pin = Column(Text, nullable=False)
 
 
 class TelegramSettings(Base):

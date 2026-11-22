@@ -21,6 +21,7 @@ import 'sas4_connection.dart';
 import 'sas4_reports.dart';
 import 'account_panel.dart';
 import 'payment_settings.dart';
+import 'card_system.dart';
 import 'fullscreen.dart' as fullscreen;
 import 'tower_marker.dart';
 import 'snmp_profile_dialog.dart';
@@ -37,6 +38,8 @@ import 'device_api_access_panel.dart';
 import 'online_device_dialog.dart';
 import 'diagnostics_screen.dart';
 import 'deye_solar.dart';
+import 'vpn_settings.dart';
+import 'client_portal.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
 Color get panel => themeColor(0xff10233d, 0xffffffff);
@@ -49,8 +52,8 @@ Color get orange => themeColor(0xffffb454, 0xff995000);
 void main() => runApp(const AirLinkApp());
 
 class AirLinkApp extends StatelessWidget {
-  const AirLinkApp({super.key, this.home = const SessionGate()});
-  final Widget home;
+  const AirLinkApp({super.key, this.home});
+  final Widget? home;
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<AppLanguage>(
     valueListenable: appLanguage,
@@ -70,7 +73,12 @@ class AirLinkApp extends StatelessWidget {
         theme: airLinkTheme(Brightness.light),
         darkTheme: airLinkTheme(Brightness.dark),
         themeMode: mode,
-        home: home,
+        home:
+            home ??
+            (Uri.base.path == '/client' || Uri.base.path == '/client/'
+                ? const ClientPortal()
+                : const SessionGate()),
+        initialRoute: '/',
       ),
     ),
   );
@@ -394,6 +402,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   String? settingsPage;
   bool ispDashboard = true;
   bool ispReports = false;
+  bool ispCardSystem = false;
   bool ispOnline = false;
   bool nocExpanded = false;
   void Function()? stopFullscreen;
@@ -877,6 +886,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     dense: true,
                                     selected:
                                         !ispReports &&
+                                        !ispCardSystem &&
                                         ispDashboard == dashboard,
                                     selectedColor: blue,
                                     selectedTileColor: blue.withValues(
@@ -897,6 +907,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     onTap: () {
                                       setState(() {
                                         ispReports = false;
+                                        ispCardSystem = false;
                                         ispDashboard = dashboard;
                                       });
                                       if (Scaffold.of(context).isDrawerOpen) {
@@ -908,7 +919,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                             if (pages[i] == 'ISP Card' &&
                                 page == i &&
                                 !ispDashboard &&
-                                !ispReports)
+                                !ispReports &&
+                                !ispCardSystem)
                               for (final online in [false, true])
                                 Padding(
                                   padding: const EdgeInsets.only(
@@ -944,6 +956,39 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     },
                                   ),
                                 ),
+                            if (pages[i] == 'ISP Card' &&
+                                page == i &&
+                                owner &&
+                                hasSection(api.user!, 'card_system'))
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 24,
+                                  top: 3,
+                                ),
+                                child: ListTile(
+                                  key: const ValueKey('isp-card-system'),
+                                  dense: true,
+                                  selected: ispCardSystem,
+                                  selectedColor: blue,
+                                  selectedTileColor: blue.withValues(
+                                    alpha: .15,
+                                  ),
+                                  leading: const Icon(
+                                    Icons.credit_card_outlined,
+                                    size: 18,
+                                  ),
+                                  title: const AppText('Card System'),
+                                  onTap: () {
+                                    setState(() {
+                                      ispCardSystem = true;
+                                      ispReports = false;
+                                    });
+                                    if (Scaffold.of(context).isDrawerOpen) {
+                                      Navigator.pop(context);
+                                    }
+                                  },
+                                ),
+                              ),
                             if (pages[i] == 'ISP Card' && page == i)
                               Padding(
                                 padding: const EdgeInsets.only(
@@ -964,7 +1009,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   ),
                                   title: const AppText('Reports'),
                                   onTap: () {
-                                    setState(() => ispReports = true);
+                                    setState(() {
+                                      ispReports = true;
+                                      ispCardSystem = false;
+                                    });
                                     if (Scaffold.of(context).isDrawerOpen) {
                                       Navigator.pop(context);
                                     }
@@ -2845,7 +2893,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
-  Widget clients() => ispReports
+  Widget clients() =>
+      ispCardSystem && owner && hasSection(api.user!, 'card_system')
+      ? CardSystem(key: ValueKey('cards-$accountRevision'), api: api)
+      : ispReports
       ? Sas4Reports(key: ValueKey('reports-$accountRevision'), api: api)
       : Sas4Clients(
           key: ValueKey('$accountRevision-$ispDashboard-$ispOnline'),
@@ -3185,6 +3236,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       if (owner) 'Backups': Icons.cloud_upload_outlined,
       if (owner) 'Payment gateways': Icons.payments_outlined,
       if (owner) 'Device API logins': Icons.router_outlined,
+      if (owner) 'VPN': Icons.vpn_key_outlined,
       'Network': Icons.settings_ethernet,
       'Audit log': Icons.history,
     },
@@ -3287,6 +3339,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         );
       case 'Network':
         return NetworkSettings(api: api);
+      case 'VPN':
+        return owner ? VpnSettings(api: api) : const SizedBox.shrink();
       case 'Audit log':
         return section(
           'Audit trail',

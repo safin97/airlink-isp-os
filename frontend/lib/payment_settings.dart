@@ -101,6 +101,30 @@ class _PaymentSettingsState extends State<PaymentSettings>
     }
   }
 
+  Future<void> testFib() async {
+    if (!canEdit || busy) return;
+    setState(() {
+      busy = true;
+      message = null;
+    });
+    try {
+      final result = await widget.api.request(
+        '/payments/gateways/fib/test',
+        method: 'POST',
+        retry: false,
+      );
+      if (mounted) {
+        setState(
+          () => message = '${result['environment']}: ${result['detail']}',
+        );
+      }
+    } catch (e) {
+      if (mounted) setState(() => message = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => !canEdit
       ? const SizedBox.shrink()
@@ -209,6 +233,18 @@ class _PaymentSettingsState extends State<PaymentSettings>
                 onPressed: busy || !canEdit ? null : () => save(provider),
                 child: const AppText('Save merchant settings'),
               ),
+              if (provider == 'fib') ...[
+                TextButton.icon(
+                  onPressed: busy || configured[provider] != true
+                      ? null
+                      : testFib,
+                  icon: const Icon(Icons.network_check),
+                  label: const AppText('Test saved FIB connection'),
+                ),
+                const AppText(
+                  'Save changes first. This test checks your FIB credentials without creating a payment.',
+                ),
+              ],
             ],
           ),
         ),

@@ -59,6 +59,11 @@ mega_backups = MegaBackupService(local_root, archive=local_archive, enabled=args
                                 restore_validate=local_restore.validate, restore_apply=local_restore.stage)
 
 def preview_broker(action, payload=None):
+    if action.startswith('vpn.'):
+        reason = 'VPN connections run on the installed AirLink Linux PC. This local preview cannot connect a VPN.'
+        if action == 'vpn.status':
+            return {'supported': False, 'configured': False, 'status': 'unavailable', 'reason': reason}
+        raise HTTPException(409, reason)
     if action.startswith('backups.mega.'):
         try:
             return mega_backups.action(action.removeprefix('backups.mega.'), payload or {})
@@ -110,8 +115,10 @@ async def preview_lifespan(app):
     alert_task = None
     customer_messages = None
     whatsapp_messages = None
+    pin_payments = None
     api.system_stats_service.start()
     if args.live:
+        pin_payments = asyncio.create_task(api.payments.payment_worker(saved_pin_only=True))
         mega_backups.start()
         customer_messages = asyncio.create_task(api.customer_telegram.worker())
         whatsapp_messages = asyncio.create_task(api.whatsapp.worker())
@@ -144,6 +151,10 @@ async def preview_lifespan(app):
     try:
         yield
     finally:
+        if pin_payments:
+            pin_payments.cancel()
+            with suppress(asyncio.CancelledError):
+                await pin_payments
         mega_backups.stop()
         if whatsapp_messages:
             whatsapp_messages.cancel()
@@ -189,6 +200,10 @@ if 'telegram_settings' in inspect(engine).get_table_names() and 'user_id' not in
 Base.metadata.create_all(engine)
 # The local preview retains an existing SQLite database between starts.
 from sqlalchemy import inspect, text
+if 'profile_id' not in {column['name'] for column in inspect(engine).get_columns('saved_recharge_cards')}:
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE saved_recharge_cards ADD COLUMN profile_id INTEGER'))
+        connection.execute(text('ALTER TABLE saved_recharge_cards ADD COLUMN price_iqd VARCHAR(40)'))
 if 'phone_verified_at' not in {column['name'] for column in inspect(engine).get_columns('customer_telegram_links')}:
     import sqlite3
     import importlib.util
@@ -289,4 +304,4 @@ if not args.live:
     sas4.fetch_dashboard = preview_fetch_dashboard
     sas4.customer_probe_service.enrich = preview_enrich
 api.app.mount('/',StaticFiles(directory=ROOT/'frontend/build/web',html=True),name='dashboard')
-uvicorn.run(api.app,host='127.0.0.1',port=args.port)
+uvicorn.run(api.app,host='127.0.0.1',port=args.port,proxy_headers=False)

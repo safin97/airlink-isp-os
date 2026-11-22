@@ -186,7 +186,7 @@ class SectionAccessInput(Strict):
 
 
 class OwnerVisibilityInput(Strict):
-    visible_sections: list[str] = Field(max_length=17)
+    visible_sections: list[str] = Field(max_length=32)
 
     @field_validator('visible_sections')
     @classmethod

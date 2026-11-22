@@ -65,3 +65,28 @@ def test_missing_tool_timeout_and_driver_failure_are_nonfatal(monkeypatch):
     assert gpu.command(['nvidia-smi']) == ''
     monkeypatch.setattr(gpu.subprocess, 'run', lambda *a, **k: subprocess.CompletedProcess(a, 1, '', 'No devices'))
     assert gpu.command(['nvidia-smi']) == ''
+
+
+def test_sampler_caches_names_but_refreshes_driver_and_utilization(tmp_path, monkeypatch):
+    path = device(tmp_path, '0000:01:00.0')
+    stamp = [0]
+    utilization = [10]
+    calls = []
+    def command(args):
+        calls.append(args[0])
+        if args[0] == 'lspci':
+            return '0000:01:00.0 "VGA compatible controller" "NVIDIA" "RTX"\n'
+        return f'00000000:01:00.0, NVIDIA RTX, 610.57.04, 8192, 10, {utilization[0]}, 32\n'
+    monkeypatch.setattr(gpu, 'command', command)
+    monkeypatch.setattr(gpu.time, 'monotonic', lambda: stamp[0])
+    sampler = gpu.Sampler(tmp_path)
+    assert sampler.read()[0]['utilization_percent'] == 10
+    stamp[0] = 3; utilization[0] = 25
+    assert sampler.read()[0]['utilization_percent'] == 25
+    assert calls.count('lspci') == 1 and calls.count('nvidia-smi') == 2
+    stamp[0] = 60
+    sampler.read()
+    assert calls.count('lspci') == 2
+    (path / 'driver').unlink()
+    reading = sampler.read()[0]
+    assert reading['status'] == 'not_loaded' and reading['utilization_percent'] is None

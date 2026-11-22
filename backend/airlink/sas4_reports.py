@@ -21,6 +21,11 @@ REPORTS = {
     'money-transfers': ('Money Transfers', 'report/depodrawal', 'created_at', [
         ('created_at', 'Date'), ('operation', 'Operation'), ('cr_manager', 'Credit manager'),
         ('dr_manager', 'Debit manager'), ('amount', 'Amount'), ('comment', 'Comment')]),
+    'system-cards': ('System Cards', 'index/series', 'series_date', [
+        ('series', 'Series'), ('series_date', 'Date Added'), ('type', 'Type'),
+        ('value', 'Value'), ('qty', 'Quantity'), ('used', 'Used'),
+        ('owner_details.username', 'Owner'), ('profile_details.name', 'Service profile'),
+        ('addon_details.name', 'Addon'), ('expiration', 'Expiration'), ('suspended', 'Suspended')]),
 }
 
 
@@ -42,11 +47,15 @@ def fetch_report(connection, password, report, page=1, search='', date_start=Non
     if report == 'activation-statistics':
         return fetch_statistics(connection, password, period, year, month, page, transport, manager_id)
     payload = {'page': page, 'count': 25, 'sortBy': sort, 'direction': 'desc', 'search': search, 'manager_id': manager_id}
+    if report == 'system-cards':
+        # SAS4 card series use parent_id for the owner filter, not manager_id.
+        payload.pop('manager_id')
+        payload.update(parent_id=manager_id, type=-1, profile_id=-1)
     if report == 'money-transfers':
         payload.update(operation=operation)
-    if date_start:
+    if date_start and report != 'system-cards':
         payload['date_start'] = date_start.isoformat()
-    if date_end:
+    if date_end and report != 'system-cards':
         payload['date_end'] = date_end.isoformat()
     with sas4.sas4_session(connection, password, transport) as (client, headers):
         result = sas4.response_json(client.post(sas4.DEFAULT_SERVER + sas4.API_PATH + route,

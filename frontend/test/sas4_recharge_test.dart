@@ -37,6 +37,9 @@ void main() {
                   'username': 'customer',
                   'profile': '20 Mbps',
                   'expiration': '2026-11-01',
+                  'methods': {'credit': true},
+                  'manager_cost': '2000',
+                  'profile_id': 3,
                   'transaction_id': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
                 }),
                 200,
@@ -94,10 +97,6 @@ void main() {
         );
         expect(find.text('User: customer'), findsOneWidget);
         expect(writes, isEmpty);
-        final input = find.byWidgetPredicate(
-          (w) => w is TextField && w.decoration?.labelText == 'Card PIN',
-        );
-        await tester.enterText(input, 'TEST-CARD-PIN');
         final button = find.widgetWithText(FilledButton, 'Recharge card');
         await tester.tap(button);
         await tester.pump();
@@ -111,8 +110,10 @@ void main() {
           isNull,
         );
         expect(jsonDecode(writes.single.body), {
-          'method': 'card',
-          'pin': 'TEST-CARD-PIN',
+          'method': 'credit',
+          'expected_cost': '2000',
+          'expected_profile_id': 3,
+          'expected_expiration': '2026-11-01',
           'transaction_id': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         });
         expect(

@@ -29,6 +29,7 @@ const ownerSections = <String, String>{
   'my_account': 'My account',
   'device_login': 'Device login',
   'towers_api': 'Towers API',
+  'card_system': 'Card System',
 };
 const pinnedOwnerSections = {'access_roles', 'my_account'};
 

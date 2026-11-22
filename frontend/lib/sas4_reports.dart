@@ -23,6 +23,9 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
   String operation = 'deposit', period = 'monthly';
   int year = DateTime.now().year, month = DateTime.now().month;
   bool get statistics => selected == 'activation-statistics';
+  bool get systemCards => selected == 'system-cards';
+  bool get hasDates => !statistics && !systemCards;
+  bool get hasSearch => selected == 'activations' || systemCards;
   String appliedSearch = '';
   DateTime? start, end, appliedStart, appliedEnd;
   Map<String, dynamic>? result;
@@ -127,7 +130,7 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
     searchTimer?.cancel();
     final version = ++requestVersion;
     if (apply &&
-        !statistics &&
+        hasDates &&
         start != null &&
         end != null &&
         start!.isAfter(end!)) {
@@ -154,17 +157,16 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
       queryParameters: {
         'page': '$page',
         'manager_id': '$managerId',
-        if (selected == 'activations') 'search': appliedSearch,
+        if (hasSearch) 'search': appliedSearch,
         if (selected == 'money-transfers') 'operation': operation,
         if (statistics) ...{
           'period': period,
           'year': '$year',
           'month': '$month',
         },
-        if (!statistics && appliedStart != null)
+        if (hasDates && appliedStart != null)
           'date_start': dateText(appliedStart!),
-        if (!statistics && appliedEnd != null)
-          'date_end': dateText(appliedEnd!),
+        if (hasDates && appliedEnd != null) 'date_end': dateText(appliedEnd!),
       },
     ).query;
     try {
@@ -196,7 +198,15 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
 
   String display(dynamic value, String key) {
     if (value == null) return '—';
-    if (key == 'paid' || key == 'refunded') {
+    if (systemCards && key == 'type') {
+      return switch ('$value') {
+        '0' => tr('Refill Card'),
+        '1' => tr('Prepaid User'),
+        '2' => tr('Service Card'),
+        _ => '$value',
+      };
+    }
+    if (key == 'paid' || key == 'refunded' || key == 'suspended') {
       if (value == true || value == 1 || value == '1') return tr('Yes');
       if (value == false || value == 0 || value == '0') return tr('No');
     }
@@ -251,7 +261,7 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
                       },
               ),
             ),
-            if (selected == 'activations')
+            if (hasSearch)
               SizedBox(
                 width: 230,
                 child: TextField(
@@ -268,7 +278,7 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
                   onSubmitted: (_) => load(apply: true),
                 ),
               ),
-            if (!statistics)
+            if (hasDates)
               OutlinedButton.icon(
                 onPressed: busy ? null : () => chooseDate(true),
                 icon: const Icon(Icons.calendar_today, size: 16),
@@ -278,7 +288,7 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
                       : '${tr('From date')}: ${dateText(start!)}',
                 ),
               ),
-            if (!statistics)
+            if (hasDates)
               OutlinedButton.icon(
                 onPressed: busy ? null : () => chooseDate(false),
                 icon: const Icon(Icons.calendar_today, size: 16),
@@ -288,7 +298,7 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
                       : '${tr('To date')}: ${dateText(end!)}',
                 ),
               ),
-            if (!statistics && (start != null || end != null))
+            if (hasDates && (start != null || end != null))
               IconButton(
                 tooltip: tr('Clear dates'),
                 onPressed: busy
@@ -456,6 +466,13 @@ class _Sas4ReportsState extends State<Sas4Reports> with LanguageRebuild {
           ],
         ),
         const SizedBox(height: 16),
+        if (systemCards)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: AppText(
+              'Live card series from SAS4 Radius. Filter by owner using SAS4 manager.',
+            ),
+          ),
         if (busy) const LinearProgressIndicator(),
         if (error != null)
           Padding(

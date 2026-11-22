@@ -1,4 +1,5 @@
 import json
+from urllib.parse import parse_qs
 from types import SimpleNamespace
 import httpx
 import pytest
@@ -21,6 +22,32 @@ def encrypted():
 def order(provider='fib', environment='production'):
     return SimpleNamespace(id='a' * 32, provider=provider, environment=environment, encrypted_credentials=encrypted(),
         amount='2500', currency='IQD', provider_id='provider-123')
+
+
+def test_fib_creates_qr_for_exact_customer_recharge_amount():
+    qr = 'data:image/png;base64,cHJvdmlkZXItcXI='
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        assert request.url.host == 'fib-stage.fib.iq'
+        if request.url.path.endswith('/token'):
+            assert parse_qs(request.content.decode()) == {
+                'grant_type': ['client_credentials'],
+                'client_id': [CREDENTIALS['merchant_id']],
+                'client_secret': [CREDENTIALS['secret']],
+            }
+            return httpx.Response(200, json={'access_token': 'test-token'})
+        assert request.headers['Authorization'] == 'Bearer test-token'
+        assert json.loads(request.content)['monetaryValue'] == {'amount': '2500', 'currency': 'IQD'}
+        assert json.loads(request.content)['expiresIn'] == 'PT5M'
+        return httpx.Response(201, json={'paymentId': 'provider-123', 'qrCode': qr,
+            'readableCode': 'TEST-CODE', 'validUntil': '2026-12-01T00:00:00Z'})
+
+    payment_id, checkout = payments.create_provider_payment(order(environment='sandbox'), httpx.MockTransport(handler))
+    assert payment_id == 'provider-123'
+    assert checkout == {'qr_data': qr, 'code': 'TEST-CODE', 'valid_until': '2026-12-01T00:00:00Z'}
+    assert paths == ['/auth/realms/fib-online-shop/protocol/openid-connect/token', '/protected/v1/payments']
 
 
 def test_gateway_credentials_are_encrypted_and_scoped(client, owner):
@@ -75,16 +102,16 @@ def test_fastpay_requires_validation_after_paid_status():
     assert paths == ['/api/v1/public/vending/status', '/api/v1/public/vending/validate']
 
 
-def setup_checkout(client, owner, monkeypatch, environment='production'):
+def setup_checkout(client, owner, monkeypatch, environment='production', provider='fastpay'):
     client.put('/api/integrations/sas4', headers=owner, json=SETTINGS)
-    client.put('/api/payments/gateways/fib', headers=owner, json={**CREDENTIALS, 'environment': environment})
+    client.put('/api/payments/gateways/' + provider, headers=owner, json={**CREDENTIALS, 'environment': environment})
     monkeypatch.setattr(sas4, 'fetch_recharge', lambda *a, **k: dict(QUOTE))
     creates = []
     def create(row):
         creates.append(row.id)
         return 'provider-123', {'code': 'payment-code'}
     monkeypatch.setattr(payments, 'create_provider_payment', create)
-    body = {'provider': 'fib', 'transaction_id': 'b' * 32, 'expected_amount': '2500', 'expected_cost': '2000',
+    body = {'provider': provider, 'transaction_id': 'b' * 32, 'expected_amount': '2500', 'expected_cost': '2000',
         'expected_profile_id': 3, 'expected_expiration': QUOTE['expiration']}
     return body, creates
 
@@ -140,3 +167,31 @@ def test_price_change_cannot_create_payment(client, owner, monkeypatch):
     body, creates = setup_checkout(client, owner, monkeypatch)
     response = client.post('/api/payments/users/7', headers=owner, json={**body, 'expected_amount': '1'})
     assert response.status_code == 409 and not creates
+
+
+@pytest.mark.parametrize('environment,host', [('sandbox', 'personal.stage.first-iraqi-bank.co'), ('production', 'personal.first-iraqi-bank.co')])
+def test_fib_keeps_customer_payment_links(environment, host):
+    link = f'https://{host}/?link=payment-code'
+    def handler(request):
+        if request.url.path.endswith('/token'):
+            return httpx.Response(200, json={'access_token': 'test-token'})
+        return httpx.Response(201, json={'paymentId': 'provider-123', 'qrCode': 'data:image/png;base64,cXI=',
+            'personalAppLink': link, 'businessAppLink': 'https://attacker.example/pay',
+            'corporateAppLink': 'javascript:alert(1)'})
+    _, checkout = payments.create_provider_payment(order(environment=environment), httpx.MockTransport(handler))
+    assert checkout['app_links'] == {'personal': link}
+
+
+@pytest.mark.parametrize('url', ['http://personal.first-iraqi-bank.co/', 'https://personal.first-iraqi-bank.co.attacker.example/',
+    'https://user:secret@personal.first-iraqi-bank.co/', 'https://personal.first-iraqi-bank.co:8443/',
+    'https://personal.stage.first-iraqi-bank.co/', 'https://personal.first-iraqi-bank.co:bad/'])
+def test_fib_rejects_unsafe_or_wrong_environment_links(url):
+    assert payments.fib_app_links({'personalAppLink': url}, 'production') == {}
+
+
+@pytest.mark.parametrize('kind,prefix', [('personal', 'p'), ('business', 'b'), ('corporate', 'c')])
+def test_fib_accepts_current_staging_app_hosts_only_in_sandbox(kind, prefix):
+    link = f'https://{prefix}-stage.fib.iq/onlinePayment?identifier=test-code'
+    assert payments.fib_app_links({kind + 'AppLink': link}, 'sandbox') == {kind: link}
+    assert payments.fib_app_links({kind + 'AppLink': link}, 'production') == {}
+    assert payments.fib_app_links({kind + 'AppLink': link.replace('.fib.iq/', '.fib.iq.attacker.example/')}, 'sandbox') == {}

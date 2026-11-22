@@ -12,6 +12,7 @@ from pathlib import Path
 import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from network.configure import action as network_action
+from network.vpn import action as vpn_action
 from updates.update import action as update_action, restart_system
 from updates.pc import action as pc_update_action
 from console.gpu import detect as detect_gpus
@@ -108,6 +109,8 @@ class Handler(socketserver.StreamRequestHandler):
                 result = mega_backup_service.action(name.removeprefix("backups.mega."), payload)
             elif name.startswith("network."):
                 result = network_action(name.split(".", 1)[1], payload)
+            elif name.startswith("vpn."):
+                result = vpn_action(name.split(".", 1)[1], payload)
             elif name.startswith("updates."):
                 result = update_action(name.split(".", 1)[1], payload)
             else:

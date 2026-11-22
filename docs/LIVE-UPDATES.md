@@ -22,3 +22,11 @@ Connected device panels read again every 15 seconds while not editing. Quiet rea
 WhatsApp account/customer status and notification history update every five seconds without overwriting unsaved account settings or re-enabling customer notifications. Deye, MEGA backup, wireless clients and update-progress panels keep their existing quiet polling/live updates.
 
 Intervals describe refresh attempts, not guaranteed source freshness. Devices and external services may update more slowly or be temporarily unreachable. The local preview must be rebuilt and restarted to load these changes; no published software update is required for local testing.
+
+## Server CPU efficiency
+
+Tower inventory reads batch place membership, sector counts, device status and owner-only API settings. Device inventory reads tower API configurations in one scoped query. The number of queries no longer grows once per tower: a controlled 50-tower/200-device SQLite benchmark reduced tower reads from 201 queries to 3 and device reads from 51 to 2, with about 70% less combined CPU time for those two readers. This measures the local fixture, not total CPU usage on an installed server.
+
+Dashboard sector counts are calculated in SQL with the same technician/manager scope as the sector list. Credentials stay server-side; no cross-account response cache is introduced. Freshness rules, session revocation checks and the two-second live stream interval remain unchanged.
+
+Host sampling reuses its GPU detector and refreshes static PCI display names at most once a minute instead of launching `lspci` on every sample. PCI presence, loaded-driver state and available utilization readings are still read on every sample. Monitoring, SQL and networking remain CPU work; this change reduces repeated work rather than moving it to a GPU.

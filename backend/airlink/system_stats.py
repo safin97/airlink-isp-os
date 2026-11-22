@@ -10,6 +10,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from functools import lru_cache
 
 import psutil
 from .connection_latency import service as latency_service
@@ -30,13 +31,18 @@ def rate(current, previous, elapsed):
     return (current - previous) / elapsed
 
 
-def gpu_readings():
+@lru_cache(maxsize=1)
+def gpu_sampler():
     # Reuse the installed console's PCI/NVIDIA detector without importing its root broker.
     path = Path(__file__).resolve().parents[2] / 'os' / 'console' / 'gpu.py'
     spec = importlib.util.spec_from_file_location('airlink_host_gpu', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.detect()
+    return module.Sampler()
+
+
+def gpu_readings():
+    return gpu_sampler().read()
 
 
 def ethernet_ports(names):

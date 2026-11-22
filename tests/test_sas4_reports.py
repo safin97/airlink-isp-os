@@ -47,6 +47,42 @@ def test_money_transfer_operation_and_route(monkeypatch):
     assert result['rows'][0]['cr_manager'] == 'a'
 
 
+def test_system_cards_use_live_series_owner_filter_and_safe_fields(monkeypatch):
+    calls = []
+    transport = transport_for(monkeypatch, {'data': [{'series': 'SERIES-A', 'type': 0,
+        'series_date': '2026-11-22', 'value': '20000', 'qty': 100, 'used': 12,
+        'owner_details': {'username': 'branch', 'password': 'private'},
+        'profile_details': {'name': 'Home'}, 'expiration': '2027-11-22',
+        'suspended': 0, 'pin': 'private'}], 'total': 51, 'current_page': 2, 'per_page': 25}, calls)
+    result = reports.fetch_report(SimpleNamespace(username='manager'), 'password', 'system-cards',
+        manager_id=8, page=2, search='SERIES', date_start=date(2026, 11, 1), transport=transport)
+    assert calls == [(sas4.API_PATH + 'index/series', {'page': 2, 'count': 25,
+        'sortBy': 'series_date', 'direction': 'desc', 'search': 'SERIES',
+        'parent_id': 8, 'type': -1, 'profile_id': -1})]
+    assert result['title'] == 'System Cards'
+    assert result['rows'][0]['qty'] == 100 and result['rows'][0]['used'] == 12
+    assert result['rows'][0]['owner_details.username'] == 'branch'
+    assert result['rows'][0]['profile_details.name'] == 'Home'
+    assert result['last_page'] == 3
+    assert 'private' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('report', ['activations', 'system-cards'])
+def test_report_account_scope(client, owner, monkeypatch, report):
+    _, manager = user(client, owner, 'manager', 'scoped-report')
+    path = '/api/integrations/sas4/reports/' + report
+    assert client.get(path, headers=manager).status_code == 409
+    client.put('/api/integrations/sas4', headers=manager,
+               json={'username': 'scoped-sas', 'password': 'private'})
+    def fetch(connection, password, selected, *args, **kwargs):
+        assert connection.username == 'scoped-sas' and password == 'private'
+        assert selected == report
+        return {'rows': []}
+    monkeypatch.setattr(reports, 'fetch_report', fetch)
+    assert client.get(path, headers=manager).status_code == 200
+    assert client.get(path, headers=owner).status_code == 409
+
+
 @pytest.mark.parametrize('period,bucket', [('daily', 'day'), ('monthly', 'month')])
 def test_statistics_use_sas_counts_without_double_counting(monkeypatch, period, bucket):
     calls = []
