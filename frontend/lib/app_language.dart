@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'language_storage.dart';
 import 'translations.dart';
+import 'client_badini.dart';
 import 'app_theme.dart';
 
 enum AppLanguage {
@@ -30,7 +31,10 @@ void setAppLanguage(AppLanguage language) {
 String tr(String text) {
   final language = appLanguage.value;
   if (language == AppLanguage.english) return text;
-  return translations[text]?[language == AppLanguage.badini ? 0 : 1] ?? text;
+  if (language == AppLanguage.badini) {
+    return translations[text]?[0] ?? clientBadini[text] ?? text;
+  }
+  return translations[text]?[1] ?? text;
 }
 
 /// Rebuild language and style without recreating controllers or loading data.

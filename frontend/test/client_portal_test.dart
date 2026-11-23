@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/link.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:url_launcher/link.dart';
 import 'package:airlink_isp_os/api.dart';
 import 'package:airlink_isp_os/client_portal.dart';
 
@@ -127,8 +127,14 @@ void main() {
         await tester.pumpWidget(MaterialApp(home: ClientPortal(api: api)));
         await tester.pumpAndSettle();
         if (!automatic) {
+          await tester.ensureVisible(find.text('Use username instead'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Use username instead'));
+          await tester.pumpAndSettle();
           await tester.enterText(find.byType(TextField).at(0), 'subscriber');
           await tester.enterText(find.byType(TextField).at(1), 'secret');
+          await tester.ensureVisible(find.text('Sign in'));
+          await tester.pumpAndSettle();
           await tester.tap(find.text('Sign in'));
           await tester.pumpAndSettle();
         }
@@ -137,7 +143,7 @@ void main() {
         expect(find.text('30000 IQD'), findsOneWidget);
         expect(find.text('Manager balance'), findsNothing);
         expect(find.text('FastPay'), findsNothing);
-        expect(find.text('Start speed test'), findsOneWidget);
+        expect(find.text('Start speed test'), findsNothing);
         expect(
           requests.where((r) => r.url.path == '/api/client/connection'),
           isEmpty,
@@ -146,16 +152,12 @@ void main() {
         expect(find.text('Our Cards'), findsOneWidget);
         expect(find.text('Recharge'), findsOneWidget);
         expect(find.text('SpeedTest'), findsOneWidget);
-        final speedLink = tester
-            .widgetList<Link>(find.byType(Link))
-            .singleWhere((link) => link.uri?.host == 'www.speedtest.net');
-        expect(speedLink.uri.toString(), 'https://www.speedtest.net/');
-        expect(speedLink.target, LinkTarget.blank);
+        expect(find.text('Internet speed'), findsNothing);
         await tester.tap(find.text('Our Cards'));
         await tester.pumpAndSettle();
         expect(
           find.text('AirLink plans synced from SAS4 Radius.'),
-          findsOneWidget,
+          findsNothing,
         );
         expect(find.text('AirLink Basic'), findsOneWidget);
         expect(find.text('20,000 IQD'), findsOneWidget);
@@ -179,6 +181,38 @@ void main() {
         expect(find.text('Recharge my account'), findsNothing);
         await tester.tap(find.byType(NavigationDestination).at(3));
         await tester.pumpAndSettle();
+        expect(find.text('NOC Center'), findsOneWidget);
+        expect(find.text('07501033002'), findsOneWidget);
+        expect(find.text('07501033004'), findsOneWidget);
+        expect(find.text('Call'), findsNWidgets(2));
+        expect(find.text('WhatsApp'), findsNWidgets(2));
+        expect(find.text('Viber'), findsNWidgets(2));
+        final contactLinks = tester
+            .widgetList<Link>(find.byType(Link))
+            .map((link) => link.uri.toString())
+            .toList();
+        expect(
+          contactLinks,
+          containsAll([
+            'tel:+9647501033002',
+            'tel:+9647501033004',
+            'https://wa.me/9647501033002',
+            'https://wa.me/9647501033004',
+            'viber://chat?number=%2B9647501033002',
+            'viber://chat?number=%2B9647501033004',
+          ]),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(
+          find.text('Telecommunication company'),
+          250,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const PageStorageKey('client-about')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
         expect(find.text('Telecommunication company'), findsOneWidget);
         expect(find.text('Start speed test'), findsNothing);
         await tester.tap(find.byType(NavigationDestination).at(1));
@@ -187,7 +221,7 @@ void main() {
         expect(find.text('Recharge my account'), findsNothing);
         await tester.tap(find.byType(NavigationDestination).at(0));
         await tester.pumpAndSettle();
-        expect(find.text('Start speed test'), findsOneWidget);
+        expect(find.text('Start speed test'), findsNothing);
         expect(find.text('subscriber'), findsNWidgets(2));
         expect(
           tester.widget<TextField>(find.byType(TextField)).controller!.text,

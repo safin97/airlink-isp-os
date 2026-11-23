@@ -328,3 +328,218 @@ def test_auto_login_redacts_remote_failure_and_keeps_password_login_available(cl
     assert 'PRIVATE' not in response.text and 'set-cookie' not in response.headers
     response, _ = login(client)
     assert response.json()['authenticated'] is True
+
+
+@pytest.mark.parametrize('address,reason,eligible,internet', [
+    ('10.1.2.3', None, True, None),
+    ('172.19.3.10', 'outside_subscriber_ranges', False, None),
+    ('127.0.0.1', 'local_connection', False, None),
+    ('8.8.8.8', 'outside_subscriber_ranges', False, '8.8.8.8'),
+])
+def test_connection_check_reports_only_observed_ip_without_identity_or_password(client, owner, configured, monkeypatch, address, reason, eligible, internet):
+    monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address(address))
+    monkeypatch.setattr(sas4, 'sas4_session', lambda *a, **k: pytest.fail('A connection check must not fetch customer data'))
+    result = client.get('/api/client/connection-check', headers={
+        'X-Forwarded-For': '10.1.2.3', 'CF-Connecting-IP': '10.1.2.3',
+        'X-Real-IP': '10.1.2.3'})
+    assert result.status_code == 200
+    assert result.json() == {'source_ip': address, 'internet_ip': internet,
+        'internet_ip_source': 'direct_connection' if internet else None,
+        'auto_login_enabled': True, 'subscriber_range_match': eligible,
+        'auto_login_eligible': eligible, 'reason': reason}
+    assert 'set-cookie' not in result.headers
+    assert client.get('/api/auth/me').status_code == 401
+
+
+def test_connection_check_does_not_enable_disabled_ip_login(client, owner, configured, monkeypatch):
+    assert client.put('/api/client-portal', headers=owner, json={'enabled': True, 'subscriber_networks': []}).status_code == 200
+    monkeypatch.setattr(portal, 'peer_ip', lambda request: ipaddress.ip_address('10.1.2.3'))
+    result = client.get('/api/client/connection-check')
+    assert result.json()['auto_login_enabled'] is False
+    assert result.json()['auto_login_eligible'] is False
+    assert result.json()['reason'] == 'auto_login_disabled'
+    assert client.post('/api/client/auto-login', headers=HEADERS).json()['authenticated'] is False
+
+
+def phone_directory(monkeypatch, rows):
+    @contextmanager
+    def session(*args):
+        with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
+                'data': rows, 'total': len(rows), 'per_page': 100, 'current_page': 1}))) as remote:
+            yield remote, {}
+    monkeypatch.setattr(sas4, 'sas4_session', session)
+
+
+@pytest.mark.parametrize('phone', ['07500000000', '+9647500000000', '009647500000000', '٠٧٥٠٠٠٠٠٠٠٠', '0750 000 0000'])
+def test_phone_login_uses_existing_sas4_password_and_private_native_session(client, owner, configured, monkeypatch, phone):
+    phone_directory(monkeypatch, [{'id': 7, 'username': 'subscriber', 'phone': '07500000000'}])
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'phone': phone, 'password': 'PPPOE-PASSWORD', 'challenge_id': challenge})
+    assert result.status_code == 200, result.text
+    assert result.json() == {'authenticated': True}
+    assert client.get('/api/client/account').json()['username'] == 'subscriber'
+    assert client.get('/api/auth/me').status_code == 401
+    assert 'PPPOE-PASSWORD' not in result.text and 'PRIVATE' not in result.text
+    assert client.post('/api/client/login', headers=HEADERS, json={
+        'phone': phone, 'password': 'PPPOE-PASSWORD', 'challenge_id': challenge}).status_code == 401
+
+
+@pytest.mark.parametrize('kind', ['unknown', 'duplicate', 'wrong_password', 'wrong_identity', 'phone_changed'])
+def test_phone_login_rejects_unverified_or_ambiguous_accounts(client, owner, configured, monkeypatch, kind):
+    rows = [{'id': 7, 'username': 'subscriber', 'phone': '07500000000'}]
+    if kind == 'unknown': rows = []
+    if kind == 'duplicate': rows.append({'id': 8, 'username': 'other', 'phone': '+9647500000000'})
+    if kind == 'wrong_password': configured['valid'] = False
+    if kind == 'wrong_identity': configured['id'] = 8
+    if kind == 'phone_changed':
+        monkeypatch.setattr(portal, 'validate_customer', lambda *a: {'username': 'subscriber', 'phone': '07500000001'})
+    phone_directory(monkeypatch, rows)
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'phone': '07500000000', 'password': 'PPPOE-PASSWORD', 'challenge_id': challenge})
+    assert result.status_code == 401, result.text
+    assert result.json()['detail'] == 'Invalid phone number, username, password or verification code.'
+    assert 'set-cookie' not in result.headers
+    assert 'PRIVATE' not in result.text and 'subscriber' not in result.text
+    assert client.get('/api/client/account').status_code == 401
+
+
+def test_shared_123_is_not_an_authentication_bypass(client, owner, configured, monkeypatch):
+    phone_directory(monkeypatch, [{'id': 7, 'username': 'subscriber', 'phone': '07500000000'}])
+    original = portal.ucp
+    def ucp(remote, route, token=None, body=None):
+        if route == 'auth/login':
+            assert body['password'] == '123'
+            raise sas4.SAS4Error('Password rejected')
+        return original(remote, route, token, body)
+    monkeypatch.setattr(portal, 'ucp', ucp)
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'phone': '07500000000', 'password': '123', 'challenge_id': challenge})
+    assert result.status_code == 401 and 'set-cookie' not in result.headers
+
+
+@pytest.mark.parametrize('identifier', [{}, {'phone': 'bad'}, {'phone': '07500000000', 'username': 'subscriber'}])
+def test_phone_login_requires_exactly_one_valid_identifier(client, owner, configured, identifier):
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        **identifier, 'password': 'DO-NOT-ECHO', 'challenge_id': challenge})
+    assert result.status_code == 422 and 'DO-NOT-ECHO' not in result.text
+
+
+@pytest.mark.parametrize('kind', ['duplicate_next_page', 'incomplete', 'wrong_page', 'partial_phone'])
+def test_phone_lookup_fails_closed_on_incomplete_or_nonunique_results(client, owner, configured, monkeypatch, kind):
+    calls = []
+    @contextmanager
+    def session(*args):
+        def response(request):
+            calls.append(request)
+            row = {'id': 7, 'username': 'subscriber', 'phone': '07500000000'}
+            if kind == 'partial_phone': row['phone'] = '07500000001'
+            if kind == 'duplicate_next_page' and len(calls) == 2:
+                row = {'id': 8, 'username': 'other', 'phone': '+9647500000000'}
+            result = {'data': [row], 'total': 2 if kind in ('duplicate_next_page', 'incomplete') else 1,
+                      'per_page': 1 if kind == 'duplicate_next_page' else 100,
+                      'current_page': 2 if kind == 'wrong_page' else len(calls)}
+            return httpx.Response(200, json=result)
+        with httpx.Client(transport=httpx.MockTransport(response)) as remote:
+            yield remote, {}
+    monkeypatch.setattr(sas4, 'sas4_session', session)
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'phone': '07500000000', 'password': 'PPPOE-PASSWORD', 'challenge_id': challenge})
+    assert result.status_code == 401 and 'set-cookie' not in result.headers
+    assert len(calls) == (2 if kind == 'duplicate_next_page' else 1)
+
+
+@pytest.fixture
+def shared_phone_password(monkeypatch):
+    from dataclasses import replace
+    configured_settings = replace(portal.settings, client_phone_password='123')
+    monkeypatch.setattr(portal, 'settings', configured_settings)
+    return configured_settings
+
+
+def shared_phone_login(client):
+    options = client.get('/api/client/login-options').json()
+    assert options['shared_phone_password'] is True
+    assert '123' not in options.values()
+    return client.post('/api/client/login', headers=HEADERS, json={
+        'phone': '07500000000', 'password': '123', 'challenge_id': options['challenge_id']})
+
+
+def test_shared_phone_password_is_portal_only_and_session_stays_customer_scoped(client, owner, configured, monkeypatch, shared_phone_password):
+    phone_directory(monkeypatch, [{'id': 7, 'username': 'subscriber', 'phone': '07500000000'}])
+    native_calls = []
+    original = portal.ucp
+    def ucp(remote, route, token=None, body=None):
+        native_calls.append(route)
+        return original(remote, route, token, body)
+    monkeypatch.setattr(portal, 'ucp', ucp)
+    result = shared_phone_login(client)
+    assert result.status_code == 200 and result.json() == {'authenticated': True}
+    account = client.get('/api/client/account')
+    assert account.status_code == 200 and account.json()['username'] == 'subscriber'
+    assert account.json()['can_recharge'] is True
+    assert native_calls == ['resources/config']
+    assert 'PRIVATE' not in account.text
+    assert client.get('/api/auth/me').status_code == 401
+    assert client.get('/api/users').status_code == 401
+    with SessionLocal() as db:
+        session = db.query(ClientPortalSession).one()
+        assert '07500000000' not in session.encrypted_token
+        assert portal.PHONE_SESSION_PREFIX not in session.encrypted_token
+    assert client.post('/api/client/logout', headers=HEADERS).status_code == 200
+    assert client.get('/api/client/account').status_code == 401
+
+
+@pytest.mark.parametrize('change', ['disabled', 'rotated', 'phone_changed', 'account_disabled'])
+def test_shared_phone_sessions_expire_when_operator_access_or_customer_changes(client, owner, configured, monkeypatch, shared_phone_password, change):
+    from dataclasses import replace
+    phone_directory(monkeypatch, [{'id': 7, 'username': 'subscriber', 'phone': '07500000000'}])
+    assert shared_phone_login(client).status_code == 200
+    if change in ('disabled', 'rotated'):
+        monkeypatch.setattr(portal, 'settings', replace(shared_phone_password, client_phone_password='' if change == 'disabled' else '456'))
+    elif change == 'phone_changed':
+        monkeypatch.setattr(portal, 'validate_customer', lambda *a: {'phone': '07500000001'})
+    else:
+        configured['enabled'] = False
+    assert client.get('/api/client/account').status_code == 401
+
+
+def test_wrong_shared_password_does_not_lookup_customers(client, owner, configured, monkeypatch, shared_phone_password):
+    monkeypatch.setattr(portal, 'phone_login_identity', lambda *a: pytest.fail('Wrong password must not query customer identities'))
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'phone': '07500000000', 'password': '456', 'challenge_id': challenge})
+    assert result.status_code == 401 and 'set-cookie' not in result.headers
+
+
+def test_username_login_still_uses_sas4_password_when_shared_phone_login_is_enabled(client, owner, configured, shared_phone_password):
+    response, _ = login(client)
+    assert response.status_code == 200
+    assert client.get('/api/client/account').status_code == 200
+
+
+def test_native_sas4_token_cannot_masquerade_as_local_phone_session(client, owner, configured, monkeypatch, shared_phone_password):
+    original = portal.ucp
+    def ucp(remote, route, token=None, body=None):
+        if route == 'auth/login':
+            return {'status': 200, 'token': portal.PHONE_SESSION_PREFIX + '{}'}
+        return original(remote, route, token, body)
+    monkeypatch.setattr(portal, 'ucp', ucp)
+    challenge = client.get('/api/client/login-options').json()['challenge_id']
+    result = client.post('/api/client/login', headers=HEADERS, json={
+        'username': 'subscriber', 'password': 'PPPOE-PASSWORD', 'challenge_id': challenge})
+    assert result.status_code == 401 and 'set-cookie' not in result.headers
+
+
+@pytest.mark.parametrize('value,prefill', [('', False), ('123', True), ('another-portal-code', False)])
+def test_only_the_explicit_fixed_123_code_is_prefilled(client, owner, configured, monkeypatch, value, prefill):
+    from dataclasses import replace
+    monkeypatch.setattr(portal, 'settings', replace(portal.settings, client_phone_password=value))
+    options = client.get('/api/client/login-options').json()
+    assert options['prefill_phone_password'] is prefill
+    assert options['shared_phone_password'] is bool(value)
+    assert value not in options.values()

@@ -1,7 +1,7 @@
 name: airlink_isp_os
 description: AirLink ISP OS network operations dashboard
 publish_to: none
-version: 0.1.42+43
+version: 0.1.43+44
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -14,6 +14,11 @@ dependencies:
   latlong2: ^0.9.1
   web: ^1.1.1
   url_launcher: ^6.3.2
+  ttlock_flutter:
+    path: vendor/ttlock_flutter
+  permission_handler: ^13.0.2
+  flutter_secure_storage: ^11.2.0
+  lucide_icons_flutter: ^4.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'live_socket.dart';
 import 'dart:convert';
+import 'api_client.dart';
+import 'mobile_session.dart';
 
 import 'package:http/http.dart' as http;
 
@@ -28,7 +30,7 @@ class Api {
   bool _liveWanted = false;
   int _liveGeneration = 0;
   Api({http.Client? client, LiveConnector? liveConnector})
-    : client = client ?? http.Client(),
+    : client = client ?? createApiClient(),
       liveConnector = liveConnector ?? connectLiveSocket;
 
   void startLive() {
@@ -112,7 +114,9 @@ class Api {
     }
   }
 
-  static const base = String.fromEnvironment('API_BASE', defaultValue: '');
+  static String get base =>
+      mobileServer ??
+      const String.fromEnvironment('API_BASE', defaultValue: '');
 
   Future<dynamic> request(
     String path, {
@@ -120,9 +124,11 @@ class Api {
     Object? body,
     bool retry = true,
     bool binary = false,
+    Map<String, String> headers = const {},
   }) async {
     final request = http.Request(method, Uri.parse('$base/api$path'));
     request.headers.addAll({
+      ...headers,
       'Content-Type': 'application/json',
       'X-AirLink-Request': '1',
       if (token != null) 'Authorization': 'Bearer $token',
@@ -143,6 +149,7 @@ class Api {
         body: body,
         retry: false,
         binary: binary,
+        headers: headers,
       );
     }
     if (response.statusCode >= 400) {
@@ -201,6 +208,7 @@ class Api {
     } finally {
       token = null;
       user = null;
+      await clearNativeSession();
     }
   }
 }

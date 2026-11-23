@@ -7,6 +7,7 @@ import 'app_language.dart';
 import 'branding.dart';
 import 'client_dashboard.dart';
 import 'client_plan_card.dart';
+import 'client_support.dart';
 
 class ClientPortal extends StatefulWidget {
   final Api? api;
@@ -22,8 +23,10 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       captcha = TextEditingController(),
       pin = TextEditingController();
   Map<String, dynamic>? account, options, card, order, selectedPackage;
-  String? error, message, autoLoginNotice;
+  Map<String, dynamic>? connectionInfo;
+  String? error, message, autoLoginNotice, loginStage;
   bool busy = true, polling = false, fib = false, signedOut = false;
+  bool phoneLogin = true;
   Timer? timer;
   int selectedTab = 0;
   bool viewingCards = false;
@@ -32,6 +35,12 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
   String? catalogSyncedAt;
   final rechargeSectionKey = GlobalKey();
   final dashboardKey = GlobalKey<ClientDashboardState>();
+
+  // Brand customer-facing errors without changing API data or staff screens.
+  String clientErrorMessage(Object error) => error.toString().replaceAll(
+    RegExp(r'\bSAS4\b', caseSensitive: false),
+    'AirLink',
+  );
 
   Future<dynamic> request(String path, {String method = 'GET', Object? body}) =>
       api.request('/client$path', method: method, body: body, retry: false);
@@ -53,7 +62,21 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
 
   Future<void> loginOptions() async {
     final result = await request('/login-options');
-    if (mounted) setState(() => options = Map<String, dynamic>.from(result));
+    if (mounted) {
+      setState(() {
+        options = Map<String, dynamic>.from(result);
+        prefillPhonePassword();
+      });
+    }
+  }
+
+  bool get fixedPhonePassword =>
+      phoneLogin &&
+      options?['shared_phone_password'] == true &&
+      options?['prefill_phone_password'] == true;
+
+  void prefillPhonePassword() {
+    if (fixedPhonePassword && password.text.isEmpty) password.text = '123';
   }
 
   String automaticLoginExplanation(Map<String, dynamic> result) {
@@ -65,22 +88,22 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       'auto_login_disabled' =>
         'Automatic login is not configured. Sign in with your PPPoE username and password.',
       'stale_session' =>
-        'Your SAS4 connection record is more than two minutes old. Ask your provider to check RADIUS accounting updates.',
+        'Your AirLink connection record is more than two minutes old. Ask your provider to check RADIUS accounting updates.',
       'ambiguous_session' =>
-        'This IP matches more than one SAS4 session. Sign in with your username and password.',
+        'This IP matches more than one AirLink session. Sign in with your username and password.',
       'accounting_clock_mismatch' =>
-        'The SAS4 accounting time does not match the server clock. Ask your provider to check the server times.',
+        'The AirLink accounting time does not match the server clock. Ask your provider to check the server times.',
       'accounting_unavailable' || 'verification_unavailable' =>
         'Automatic login could not be verified. You can still try signing in with your username and password.',
       'account_unavailable' =>
         'Your account could not be verified for automatic login. Contact your provider or sign in manually.',
       'session_not_found' =>
-        'No matching online SAS4 session was found for your connection. Sign in manually, or ask your provider to check the subscriber IP and accounting.',
+        'No matching online AirLink session was found for your connection. Sign in manually, or ask your provider to check the subscriber IP and accounting.',
       _ =>
         'Automatic login is unavailable for this connection. Sign in with your PPPoE username and password.',
     };
     final ip = result['source_ip'];
-    return '${tr(explanation)}${ip is String && ip.isNotEmpty ? '\n${tr('Connection IP seen by AirLink')}: $ip' : ''}';
+    return '${tr(explanation)}${connectionInfo == null && ip is String && ip.isNotEmpty ? '\n${tr('Connection IP seen by AirLink')}: $ip' : ''}';
   }
 
   Future<void> restore() async {
@@ -88,6 +111,8 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       busy = true;
       error = null;
       autoLoginNotice = null;
+      connectionInfo = null;
+      loginStage = 'Restoring your session…';
     });
     try {
       try {
@@ -96,6 +121,20 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         if (e.status != 401) rethrow;
         Map<String, dynamic> result = {'authenticated': false};
         if (!signedOut) {
+          if (mounted) {
+            setState(() => loginStage = 'Checking your connection IP…');
+          }
+          try {
+            final info = Map<String, dynamic>.from(
+              await request('/connection-check'),
+            );
+            if (mounted) setState(() => connectionInfo = info);
+          } catch (_) {
+            // Older servers or a failed diagnostic must not block sign-in.
+          }
+          if (mounted) {
+            setState(() => loginStage = 'Identifying your AirLink account…');
+          }
           try {
             result = Map<String, dynamic>.from(
               await request('/auto-login', method: 'POST'),
@@ -117,9 +156,14 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         }
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          loginStage = null;
+        });
+      }
     }
   }
 
@@ -165,7 +209,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         '/login',
         method: 'POST',
         body: {
-          'username': username.text.trim(),
+          (phoneLogin ? 'phone' : 'username'): username.text.trim(),
           'password': password.text,
           'challenge_id': options!['challenge_id'],
           'captcha_text': captcha.text.trim(),
@@ -177,7 +221,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
     } catch (e) {
       password.clear();
       captcha.clear();
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
       try {
         await loginOptions();
       } catch (_) {
@@ -205,6 +249,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         viewingCards = false;
         selectedPackage = null;
         autoLoginNotice = null;
+        connectionInfo = null;
         catalog = [];
         catalogSyncedAt = null;
         error = null;
@@ -213,7 +258,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       pin.clear();
       await loginOptions();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -238,7 +283,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -267,7 +312,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         );
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       if (mounted) {
         setState(() {
@@ -325,7 +370,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         await loadAccount();
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -358,7 +403,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         if (order!['status'] == 'completed') await loadAccount();
       }
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       polling = false;
     }
@@ -622,8 +667,6 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(tr('Our Cards'), style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 8),
-        const AppText('AirLink plans synced from SAS4 Radius.'),
         const SizedBox(height: 20),
         if (!busy && error == null && catalog.isEmpty)
           const AppText(
@@ -642,7 +685,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
           ),
         if (catalog.isNotEmpty)
           const AppText(
-            'Tap Pay to choose a package. Your SAS4 service changes only after FIB confirms payment. FIB charges the available card value shown at checkout.',
+            'Slide to the right to choose a package. Your AirLink service changes only after FIB confirms payment. FIB charges the available card value shown at checkout.',
           ),
         if (catalogSyncedAt != null)
           Padding(
@@ -669,7 +712,15 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           children: [
             if (account == null) ...[
-              const Center(child: AirLinkLogo(width: 220)),
+              LayoutBuilder(
+                builder: (context, constraints) => Center(
+                  child: AirLinkLogo(
+                    width: constraints.maxWidth < 360
+                        ? constraints.maxWidth
+                        : 360,
+                  ),
+                ),
+              ),
               const SizedBox(height: 24),
             ],
             Text(
@@ -712,6 +763,34 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                         child: Text(message!),
                       ),
                     if (account == null) ...[
+                      if (loginStage != null) ...[
+                        const SizedBox(height: 12),
+                        Text(tr(loginStage!)),
+                      ],
+                      if (connectionInfo != null && !fixedPhonePassword) ...[
+                        const SizedBox(height: 16),
+                        const AppText('Connected to AirLink'),
+                        Text(
+                          '${tr('Connection IP seen by AirLink')}: ${connectionInfo!['source_ip'] ?? '—'}',
+                        ),
+                        if (connectionInfo!['internet_ip'] is String) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '${tr('Public internet IP')}: ${connectionInfo!['internet_ip']}',
+                          ),
+                          if (connectionInfo!['internet_ip_source'] ==
+                              'cloudflare')
+                            const AppText(
+                              'Reported by Cloudflare. This address is not used as proof of your PPPoE account.',
+                            ),
+                        ],
+                        const SizedBox(height: 6),
+                        AppText(
+                          connectionInfo!['auto_login_eligible'] == true
+                              ? 'Your connection can be checked against AirLink. A matching active session is still required.'
+                              : 'This connection does not provide an eligible PPPoE address for automatic login.',
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       AutofillGroup(
                         child: Column(
@@ -719,31 +798,83 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                             TextField(
                               controller: username,
                               enabled: !busy,
-                              autofillHints: const [AutofillHints.username],
+                              keyboardType: phoneLogin
+                                  ? TextInputType.phone
+                                  : TextInputType.text,
+                              autofillHints: phoneLogin
+                                  ? const [AutofillHints.telephoneNumber]
+                                  : const [AutofillHints.username],
                               decoration: InputDecoration(
-                                labelText: tr('PPPoE username'),
+                                labelText: tr(
+                                  phoneLogin
+                                      ? 'Phone number'
+                                      : 'PPPoE username',
+                                ),
+                                helperText: phoneLogin && !fixedPhonePassword
+                                    ? tr(
+                                        'Use the phone number saved on your AirLink account.',
+                                      )
+                                    : null,
+                                helperMaxLines: 2,
                                 border: const OutlineInputBorder(),
                               ),
-                              textInputAction: TextInputAction.next,
+                              textInputAction: fixedPhonePassword
+                                  ? TextInputAction.done
+                                  : TextInputAction.next,
+                              onSubmitted: (_) {
+                                if (fixedPhonePassword) signIn();
+                              },
                             ),
-                            const SizedBox(height: 16),
-                            TextField(
-                              controller: password,
-                              enabled: !busy,
-                              obscureText: true,
-                              enableSuggestions: false,
-                              autocorrect: false,
-                              autofillHints: const [AutofillHints.password],
-                              decoration: InputDecoration(
-                                labelText: tr('Password'),
-                                border: const OutlineInputBorder(),
+                            if (!fixedPhonePassword) ...[
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: password,
+                                enabled: !busy,
+                                readOnly: fixedPhonePassword,
+                                obscureText: !fixedPhonePassword,
+                                enableSuggestions: false,
+                                autocorrect: false,
+                                autofillHints: fixedPhonePassword
+                                    ? null
+                                    : const [AutofillHints.password],
+                                decoration: InputDecoration(
+                                  labelText: tr('Password'),
+                                  border: const OutlineInputBorder(),
+                                ),
+                                onSubmitted: (_) => signIn(),
                               ),
-                              onSubmitted: (_) => signIn(),
-                            ),
+                            ],
                           ],
                         ),
                       ),
-                      if (options?['captcha_image'] != null) ...[
+                      if (!fixedPhonePassword) ...[
+                        const SizedBox(height: 8),
+                        AppText(
+                          phoneLogin &&
+                                  options?['shared_phone_password'] == true
+                              ? 'Use the client portal password provided by your ISP.'
+                              : 'Use your existing AirLink account password.',
+                        ),
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => setState(() {
+                                  phoneLogin = !phoneLogin;
+                                  username.clear();
+                                  password.clear();
+                                  prefillPhonePassword();
+                                  error = null;
+                                }),
+                          child: AppText(
+                            phoneLogin
+                                ? 'Use username instead'
+                                : 'Use phone number instead',
+                          ),
+                        ),
+                      ],
+                      if (options?['captcha_image'] != null &&
+                          !(phoneLogin &&
+                              options?['shared_phone_password'] == true)) ...[
                         const SizedBox(height: 16),
                         Center(
                           child: imageData(
@@ -768,15 +899,30 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                           onPressed: restore,
                           child: const AppText('Retry connection'),
                         ),
-                      if (autoLoginNotice != null) ...[
+                      if (autoLoginNotice != null && !fixedPhonePassword) ...[
                         const SizedBox(height: 16),
                         Text(autoLoginNotice!),
                       ],
-                      const SizedBox(height: 16),
-                      const AppText(
-                        'On your ISP connection, we can sign you in automatically when your account is identified. On mobile data, use your username and password.',
-                        textAlign: TextAlign.center,
-                      ),
+                      if (!fixedPhonePassword) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () {
+                                  signedOut = false;
+                                  restore();
+                                },
+                          icon: const Icon(Icons.network_check),
+                          label: const AppText(
+                            'Check IP and sign in automatically',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const AppText(
+                          'On your ISP connection, we can sign you in automatically when your account is identified. On mobile data, use your username and password.',
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                     ] else ...[
                       const SizedBox(height: 16),
                       const AppText('Username'),
@@ -829,7 +975,9 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                         if (fib && checkingPin)
                           const Padding(
                             padding: EdgeInsets.only(bottom: 16),
-                            child: AppText('Checking SAS4 for an unused PIN…'),
+                            child: AppText(
+                              'Checking AirLink for an unused PIN…',
+                            ),
                           ),
                         if (!fib)
                           TextField(
@@ -858,7 +1006,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
                           ),
                           const SizedBox(height: 8),
                           const AppText(
-                            'An unused SAS4 card will recharge your account after FIB confirms your payment.',
+                            'An unused AirLink card will recharge your account after FIB confirms your payment.',
                           ),
                         ],
                         if (fib && card == null && !busy && error == null)
@@ -959,7 +1107,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
         if (fib && checkingPin)
           const Padding(
             padding: EdgeInsets.only(bottom: 16),
-            child: AppText('Checking SAS4 for an unused PIN…'),
+            child: AppText('Checking AirLink for an unused PIN…'),
           ),
         if (!fib)
           TextField(
@@ -988,7 +1136,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
           ),
           const SizedBox(height: 8),
           const AppText(
-            'An unused SAS4 card will recharge your account after FIB confirms your payment.',
+            'An unused AirLink card will recharge your account after FIB confirms your payment.',
           ),
         ],
         if (fib && card == null && !busy && error == null)
@@ -1036,7 +1184,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
       await loadAccount();
       if (selectedTab == 2) await loadCatalog();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = clientErrorMessage(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -1129,63 +1277,7 @@ class _ClientPortalState extends State<ClientPortal> with LanguageRebuild {
     ),
   ]);
 
-  Widget aboutPage(BuildContext context) => pageBody('client-about', [
-    Card.outlined(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Center(child: AirLinkLogo(width: 200)),
-            const SizedBox(height: 24),
-            Text(
-              'AirLink',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            const AppText(
-              'Telecommunication company',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            const AppText(
-              'Welcome to your AirLink customer portal. Manage your internet service and check your connection in one place.',
-            ),
-            const SizedBox(height: 20),
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.home_outlined),
-              title: AppText('Recharge your service'),
-              subtitle: AppText(
-                'Use a recharge PIN or pay with FIB Bank from Home.',
-              ),
-            ),
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.wifi),
-              title: AppText('Check your connection'),
-              subtitle: AppText(
-                'Open Usage for wireless signal and internet checks, or start a speed test from Home.',
-              ),
-            ),
-            const ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.person_outline),
-              title: AppText('Your account details'),
-              subtitle: AppText(
-                'View your service and contact details in Profile.',
-              ),
-            ),
-            const Divider(height: 32),
-            const AppText(
-              'For account or service support, contact your internet provider.',
-            ),
-          ],
-        ),
-      ),
-    ),
-  ]);
+  Widget aboutPage(BuildContext context) => const ClientSupport();
 
   @override
   Widget build(BuildContext context) => account == null

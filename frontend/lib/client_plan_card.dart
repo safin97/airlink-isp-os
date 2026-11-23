@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_language.dart';
 import 'branding.dart';
+import 'client_slide_to_pay.dart';
 
 class ClientPlanCard extends StatelessWidget {
   final Map<String, dynamic> plan;
@@ -78,6 +79,13 @@ class ClientPlanCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: ClientSlideToPay(onConfirmed: onRecharge),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 Text(
                   priceText,
                   style: const TextStyle(
@@ -98,6 +106,18 @@ class ClientPlanCard extends StatelessWidget {
                     style: const TextStyle(color: Colors.white, fontSize: 14),
                   ),
                 ],
+                const SizedBox(height: 12),
+                const Align(
+                  alignment: Alignment.bottomRight,
+                  child: AppText(
+                    'Unlimited',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -107,10 +127,6 @@ class ClientPlanCard extends StatelessWidget {
             'no_cards' => 'No recharge cards listed yet',
             _ => 'Availability confirmed at checkout',
           }),
-          ...[
-            const SizedBox(height: 8),
-            OutlinedButton(onPressed: onRecharge, child: const AppText('Pay')),
-          ],
         ],
       ),
     );

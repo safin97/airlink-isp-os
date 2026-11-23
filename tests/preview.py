@@ -32,6 +32,10 @@ from airlink.local_restore import LocalRestore
 local_restore = LocalRestore(local_root, Path('/tmp/airlink-browser-qa.sqlite'))
 os.environ['AIRLINK_ENCRYPTION_KEY'] = local_restore.apply_pending(os.environ['AIRLINK_ENCRYPTION_KEY'])
 os.environ['AIRLINK_SECURE_COOKIES']='false'
+# Explicit local operator setting; ignored .local data is never packaged or published.
+phone_password_file = ROOT/'.local/client-portal-phone-password'
+if args.live and phone_password_file.is_file():
+    os.environ.setdefault('AIRLINK_CLIENT_PHONE_PASSWORD', phone_password_file.read_text().strip())
 from airlink import api
 from airlink.db import Base,engine,SessionLocal
 from airlink.models import (Role, User, Initialization, SAS4UserConnection,

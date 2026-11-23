@@ -83,6 +83,10 @@ void main() {
       if (failure != 'server_error') {
         expect(find.textContaining('172.20.5.10'), findsOneWidget);
       }
+      await tester.ensureVisible(find.text('Use username instead'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Use username instead'));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).at(0), 'subscriber');
       await tester.enterText(find.byType(TextField).at(1), 'test-password');
       await tester.ensureVisible(find.text('Sign in'));

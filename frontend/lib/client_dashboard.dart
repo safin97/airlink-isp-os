@@ -47,7 +47,6 @@ class ClientDashboard extends StatefulWidget {
 }
 
 class ClientDashboardState extends State<ClientDashboard> {
-  final speedKey = GlobalKey<ClientSpeedGaugeState>();
   final rechargeKey = GlobalKey();
   Timer? ticker;
   @override
@@ -77,7 +76,7 @@ class ClientDashboardState extends State<ClientDashboard> {
   String get remaining {
     if (expiry == null) return '—';
     final duration = expiry!.difference(DateTime.now());
-    if (duration.isNegative) return 'Expired';
+    if (duration.isNegative) return tr('Expired');
     return '${duration.inDays}d ${duration.inHours % 24}h ${duration.inMinutes % 60}m';
   }
 
@@ -101,6 +100,38 @@ class ClientDashboardState extends State<ClientDashboard> {
         curve: Curves.easeOutCubic,
       );
     }
+  }
+
+  void showSpeedTest(BuildContext context) {
+    final speedKey = GlobalKey<ClientSpeedGaugeState>();
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    tooltip: tr('Close'),
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close),
+                  ),
+                ),
+                ClientSpeedGauge(key: speedKey),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      speedKey.currentState?.start();
+    });
   }
 
   void notices(BuildContext context) => showModalBottomSheet<void>(
@@ -134,7 +165,7 @@ class ClientDashboardState extends State<ClientDashboard> {
                   in (widget.account['payments'] as List? ?? []).take(5))
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.receipt_long_outlined),
+                  leading: Icon(Icons.receipt_long_outlined),
                   title: Text(
                     '${detail(payment['amount'])} ${detail(payment['currency'])}',
                   ),
@@ -151,49 +182,66 @@ class ClientDashboardState extends State<ClientDashboard> {
 
   Widget header(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const AirLinkLogo(width: 115),
-              const SizedBox(height: 14),
-              Text(
-                tr('Welcome back'),
-                style: const TextStyle(color: clientMuted, fontSize: 14),
+        const Wrap(
+          alignment: WrapAlignment.end,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [LanguageSelector(), ThemeToggle()],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  LayoutBuilder(
+                    builder: (context, constraints) => AirLinkLogo(
+                      width: constraints.maxWidth < 160
+                          ? constraints.maxWidth
+                          : 160,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    tr('Welcome back'),
+                    style: TextStyle(color: clientMuted, fontSize: 14),
+                  ),
+                  Text(
+                    detail(widget.account['username']),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                ],
               ),
-              Text(
-                detail(widget.account['username']),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-            ],
-          ),
-        ),
-        IconButton(
-          tooltip: tr('Refresh account'),
-          onPressed: widget.busy ? null : widget.onRefresh,
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-        IconButton(
-          tooltip: tr('Notifications'),
-          onPressed: () => notices(context),
-          icon: const Icon(Icons.notifications_none_rounded),
-        ),
-        IconButton(
-          tooltip: tr('Open profile'),
-          onPressed: () => widget.onTab(4),
-          icon: const CircleAvatar(
-            radius: 18,
-            backgroundColor: Color(0xff234568),
-            child: Icon(
-              Icons.person_outline_rounded,
-              color: clientCyan,
-              size: 22,
             ),
-          ),
+            IconButton(
+              tooltip: tr('Refresh account'),
+              onPressed: widget.busy ? null : widget.onRefresh,
+              icon: Icon(Icons.refresh_rounded),
+            ),
+            IconButton(
+              tooltip: tr('Notifications'),
+              onPressed: () => notices(context),
+              icon: Icon(Icons.notifications_none_rounded),
+            ),
+            IconButton(
+              tooltip: tr('Open profile'),
+              onPressed: () => widget.onTab(4),
+              icon: CircleAvatar(
+                radius: 18,
+                backgroundColor: clientColor(0xff234568, 0xffdceafb),
+                child: Icon(
+                  Icons.person_outline_rounded,
+                  color: clientCyan,
+                  size: 22,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     ),
@@ -204,8 +252,8 @@ class ClientDashboardState extends State<ClientDashboard> {
         child: OutlinedButton(
           onPressed: action,
           style: OutlinedButton.styleFrom(
-            backgroundColor: const Color(0xff102b47),
-            side: const BorderSide(color: Color(0xff2c5076)),
+            backgroundColor: clientColor(0xff102b47, 0xffe6f0fc),
+            side: BorderSide(color: clientColor(0xff2c5076, 0xffbbd2e7)),
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
           ),
           child: Column(
@@ -215,7 +263,10 @@ class ClientDashboardState extends State<ClientDashboard> {
               Text(
                 tr(label),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Colors.white),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: clientColor(0xffffffff, 0xff163456),
+                ),
               ),
             ],
           ),
@@ -228,7 +279,7 @@ class ClientDashboardState extends State<ClientDashboard> {
       children: [
         Row(
           children: [
-            const Icon(Icons.wifi_rounded, color: clientCyan),
+            Icon(Icons.wifi_rounded, color: clientCyan),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -246,10 +297,10 @@ class ClientDashboardState extends State<ClientDashboard> {
             decoration: BoxDecoration(
               color:
                   (expired
-                          ? const Color(0xffff667d)
+                          ? clientColor(0xffff667d, 0xffb4233d)
                           : expiry == null
                           ? clientMuted
-                          : const Color(0xff69efc5))
+                          : clientColor(0xff69efc5, 0xff087858))
                       .withValues(alpha: .12),
               borderRadius: BorderRadius.circular(30),
             ),
@@ -258,10 +309,10 @@ class ClientDashboardState extends State<ClientDashboard> {
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: expired
-                    ? const Color(0xffff8294)
+                    ? clientColor(0xffff8294, 0xffb4233d)
                     : expiry == null
                     ? clientMuted
-                    : const Color(0xff69efc5),
+                    : clientColor(0xff69efc5, 0xff087858),
               ),
             ),
           ),
@@ -285,15 +336,12 @@ class ClientDashboardState extends State<ClientDashboard> {
               children: [
                 Text(
                   tr(field.$1),
-                  style: const TextStyle(color: clientMuted, fontSize: 14),
+                  style: TextStyle(color: clientMuted, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   field.$2,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -301,7 +349,7 @@ class ClientDashboardState extends State<ClientDashboard> {
         if (expired)
           FilledButton.icon(
             onPressed: () => reveal(rechargeKey),
-            icon: const Icon(Icons.add_card),
+            icon: Icon(Icons.add_card),
             label: const AppText('Recharge now'),
           ),
       ],
@@ -327,7 +375,6 @@ class ClientDashboardState extends State<ClientDashboard> {
           ],
         ),
       );
-      final speed = ClientSpeedGauge(key: speedKey);
       return SingleChildScrollView(
         key: const PageStorageKey('dashboard-home'),
         physics: const AlwaysScrollableScrollPhysics(),
@@ -340,12 +387,15 @@ class ClientDashboardState extends State<ClientDashboard> {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xff3d1c2c),
+                    color: clientColor(0xff3d1c2c, 0xffffe8ed),
                     borderRadius: BorderRadius.circular(18),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: Color(0xffff8294)),
+                      Icon(
+                        Icons.error_outline,
+                        color: clientColor(0xffff8294, 0xffb4233d),
+                      ),
                       const SizedBox(width: 12),
                       const Expanded(
                         child: AppText(
@@ -358,10 +408,11 @@ class ClientDashboardState extends State<ClientDashboard> {
               ),
             Row(
               children: [
-                quickAction(Icons.speed_rounded, 'SpeedTest', () {
-                  reveal(speedKey);
-                  speedKey.currentState?.start();
-                }),
+                quickAction(
+                  Icons.speed_rounded,
+                  'SpeedTest',
+                  () => showSpeedTest(context),
+                ),
                 const SizedBox(width: 10),
                 quickAction(
                   Icons.add_card_rounded,
@@ -381,28 +432,18 @@ class ClientDashboardState extends State<ClientDashboard> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: speed),
+                  Expanded(child: subscription(context)),
                   const SizedBox(width: 22),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        subscription(context),
-                        const SizedBox(height: 22),
-                        recharge,
-                      ],
-                    ),
-                  ),
+                  Expanded(child: recharge),
                 ],
               )
             else ...[
-              speed,
-              const SizedBox(height: 22),
               subscription(context),
               const SizedBox(height: 22),
               recharge,
             ],
             const SizedBox(height: 24),
-            const Text(
+            AppText(
               'AirLink • Customer self-service',
               style: TextStyle(color: clientMuted),
             ),
@@ -418,11 +459,11 @@ class ClientDashboardState extends State<ClientDashboard> {
     child: Builder(
       builder: (context) => Scaffold(
         body: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: RadialGradient(
               center: Alignment.topRight,
               radius: 1.4,
-              colors: [Color(0xff13375d), clientNavy],
+              colors: [clientColor(0xff13375d, 0xffe0efff), clientNavy],
               stops: [0, .75],
             ),
           ),
@@ -445,7 +486,7 @@ class ClientDashboardState extends State<ClientDashboard> {
                           widget.error ?? widget.message!,
                           style: TextStyle(
                             color: widget.error != null
-                                ? const Color(0xffff8294)
+                                ? clientColor(0xffff8294, 0xffb4233d)
                                 : clientCyan,
                           ),
                         ),
@@ -490,8 +531,10 @@ class ClientDashboardState extends State<ClientDashboard> {
           ),
         ),
         bottomNavigationBar: DecoratedBox(
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: Color(0xff234563))),
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: clientColor(0xff234563, 0xffcddce9)),
+            ),
           ),
           child: NavigationBarTheme(
             data: const NavigationBarThemeData(
@@ -500,8 +543,8 @@ class ClientDashboardState extends State<ClientDashboard> {
               ),
             ),
             child: NavigationBar(
-              backgroundColor: const Color(0xff091a2d),
-              indicatorColor: const Color(0xff1d466c),
+              backgroundColor: clientColor(0xff091a2d, 0xffffffff),
+              indicatorColor: clientColor(0xff1d466c, 0xffd4e8fc),
               selectedIndex: widget.selectedTab,
               onDestinationSelected: widget.onTab,
               labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,

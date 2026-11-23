@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:airlink_isp_os/api.dart';
 import 'package:airlink_isp_os/client_portal.dart';
 import 'package:airlink_isp_os/client_plan_card.dart';
+import 'package:airlink_isp_os/client_slide_to_pay.dart';
 
 void main() {
   testWidgets(
@@ -104,14 +105,17 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byType(NavigationDestination).at(2));
       await tester.pumpAndSettle();
-      expect(find.text('Pay'), findsNWidgets(5));
+      expect(find.byType(ClientSlideToPay), findsNWidgets(5));
       final plusPay = find.descendant(
         of: find.byType(ClientPlanCard).at(1),
-        matching: find.text('Pay'),
+        matching: find.byType(ClientSlideToPay),
       );
       await tester.ensureVisible(plusPay);
       await tester.pumpAndSettle();
-      await tester.tap(plusPay);
+      await tester.dragFrom(
+        tester.getTopLeft(plusPay) + const Offset(26, 30),
+        Offset(tester.getSize(plusPay).width - 26, 0),
+      );
       await tester.pumpAndSettle();
       expect(quotes, 1);
       expect(payments, 0);
@@ -136,11 +140,14 @@ void main() {
       await tester.pumpAndSettle();
       final basicPay = find.descendant(
         of: find.byType(ClientPlanCard).first,
-        matching: find.text('Pay'),
+        matching: find.byType(ClientSlideToPay),
       );
       await tester.ensureVisible(basicPay);
       await tester.pumpAndSettle();
-      await tester.tap(basicPay);
+      await tester.dragFrom(
+        tester.getTopLeft(basicPay) + const Offset(26, 30),
+        Offset(tester.getSize(basicPay).width - 26, 0),
+      );
       await tester.pumpAndSettle();
       expect(quotes, 1);
       expect(payments, 1);

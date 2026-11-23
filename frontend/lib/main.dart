@@ -38,6 +38,7 @@ import 'device_api_access_panel.dart';
 import 'online_device_dialog.dart';
 import 'diagnostics_screen.dart';
 import 'deye_solar.dart';
+import 'ttlock.dart';
 import 'vpn_settings.dart';
 import 'client_portal.dart';
 
@@ -366,6 +367,7 @@ const pages = [
   'Device login',
   'Towers API',
   'Deye Solar',
+  'TTLock',
 ];
 const icons = [
   Icons.space_dashboard_outlined,
@@ -385,6 +387,7 @@ const icons = [
   Icons.password_outlined,
   Icons.key_outlined,
   Icons.solar_power_outlined,
+  Icons.lock_outline,
 ];
 
 class Operations extends StatefulWidget {
@@ -452,6 +455,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               .firstWhere((entry) => entry.value == pages[index])
               .key,
         )
+      : pages[index] == 'TTLock'
+      ? false
       : pages[index] == 'My account'
       ? true
       : pages[index] == 'Deye Solar'
@@ -1132,6 +1137,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   Expanded(
                     child: pages[page] == 'Network Map' && canPage(page)
                         ? networkMap()
+                        // TTLock owns its scroll view and needs the bounded
+                        // height from Expanded, not an outer scroll view.
+                        : pages[page] == 'TTLock' && canPage(page)
+                        ? content()
                         : SingleChildScrollView(
                             padding: EdgeInsets.all(wide ? 28 : 16),
                             child: content(),
@@ -1217,6 +1226,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               );
       case 'Diagnostics':
         return DiagnosticsScreen(api: api);
+      case 'TTLock':
+        return TTLockPage(api: api);
       case 'Deye Solar':
         return DeyeSolar(api: api);
       default:

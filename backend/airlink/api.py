@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, whatsapp
+from . import ttlock, ttlock_mobile, ttlock_bridge, towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, whatsapp
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from . import card_system, client_portal
@@ -85,6 +85,9 @@ app.include_router(file_restore.router)
 app.include_router(download_backups.router)
 app.include_router(mega_backups.router)
 app.include_router(deye.router)
+app.include_router(ttlock.router)
+app.include_router(ttlock_mobile.router)
+app.include_router(ttlock_bridge.router)
 app.include_router(customer_telegram.router)
 app.include_router(telegram_account.router)
 app.include_router(recharge_telegram.router)
@@ -118,6 +121,9 @@ async def safe_device_login_validation(request, exc):
         return JSONResponse(status_code=422, content={'detail': 'Check the Telegram API ID, API hash, phone, code or password.'})
     if request.url.path.startswith('/api/integrations/customer-telegram'):
         return JSONResponse(status_code=422, content={'detail': 'Check the bot token, timezone and notification language.'})
+    if request.url.path.startswith('/api/integrations/ttlock'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the TTLock region, app account, Client ID, Client Secret and requested action.'},
+                            headers={'Cache-Control': 'no-store'})
     if request.url.path.startswith('/api/integrations/deye'):
         return JSONResponse(status_code=422, content={'detail': 'Check the Deye Cloud account, region and application credentials.'},
                             headers={'Cache-Control': 'no-store'})

@@ -1,27 +1,33 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'app_theme.dart';
 
-const clientNavy = Color(0xff061322);
+Color get clientNavy => themeColor(0xff061322, 0xfff1f6fc);
 const clientBlue = Color(0xff3478ff);
-const clientCyan = Color(0xff56e5ff);
-const clientMuted = Color(0xffa9bdd3);
+Color get clientCyan => themeColor(0xff56e5ff, 0xff006c9c);
+Color get clientMuted => themeColor(0xffa9bdd3, 0xff52677c);
+
+Color clientColor(int dark, int light) => themeColor(dark, light);
 
 ThemeData clientDashboardTheme() {
+  final brightness = appThemeMode.value == ThemeMode.light
+      ? Brightness.light
+      : Brightness.dark;
   final scheme =
       ColorScheme.fromSeed(
         seedColor: clientBlue,
-        brightness: Brightness.dark,
+        brightness: brightness,
       ).copyWith(
         primary: clientCyan,
-        onPrimary: const Color(0xff052237),
+        onPrimary: clientColor(0xff052237, 0xffffffff),
         secondary: clientBlue,
-        surface: const Color(0xff10243a),
-        onSurface: const Color(0xffedf5ff),
-        outline: const Color(0xff48637e),
+        surface: clientColor(0xff10243a, 0xffffffff),
+        onSurface: clientColor(0xffedf5ff, 0xff102a43),
+        outline: clientColor(0xff48637e, 0xff8298ae),
       );
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: brightness,
     colorScheme: scheme,
     fontFamily: 'sans-serif',
     scaffoldBackgroundColor: clientNavy,
@@ -43,16 +49,16 @@ ThemeData clientDashboardTheme() {
       labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
     ).apply(bodyColor: scheme.onSurface, displayColor: scheme.onSurface),
     cardTheme: CardThemeData(
-      color: const Color(0xff10243a),
+      color: clientColor(0xff10243a, 0xffffffff),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: const BorderSide(color: Color(0xff29435f)),
+        side: BorderSide(color: Color(0xff29435f)),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: const Color(0xff081b2e),
+      fillColor: clientColor(0xff081b2e, 0xfff3f7fc),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
       contentPadding: const EdgeInsets.all(18),
     ),
@@ -68,7 +74,7 @@ ThemeData clientDashboardTheme() {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     ),
-    dividerColor: const Color(0xff29435f),
+    dividerColor: clientColor(0xff29435f, 0xffcddce9),
   );
 }
 
@@ -89,12 +95,15 @@ class ClientGlass extends StatelessWidget {
         padding: padding,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(26),
-          gradient: const LinearGradient(
+          gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xe51a3551), Color(0xe50b2035)],
+            colors: [
+              clientColor(0xe51a3551, 0xfaffffff),
+              clientColor(0xe50b2035, 0xf2eaf3fc),
+            ],
           ),
-          border: Border.all(color: const Color(0xff294b68)),
+          border: Border.all(color: clientColor(0xff294b68, 0xffcfdfed)),
         ),
         child: child,
       ),

@@ -86,12 +86,12 @@ class ClientSpeedGaugeState extends State<ClientSpeedGauge> {
       const SizedBox(height: 8),
       Text(
         measurements[key] == null ? '—' : measurements[key]!.toStringAsFixed(1),
-        style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+        style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
       ),
       const SizedBox(height: 2),
       Text(
         '$label · $unit',
-        style: const TextStyle(fontSize: 14, color: clientMuted),
+        style: TextStyle(fontSize: 14, color: clientMuted),
         textAlign: TextAlign.center,
       ),
     ],
@@ -107,7 +107,7 @@ class ClientSpeedGaugeState extends State<ClientSpeedGauge> {
         children: [
           Row(
             children: [
-              const Icon(Icons.speed_rounded, color: clientCyan),
+              Icon(Icons.speed_rounded, color: clientCyan),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -141,13 +141,13 @@ class ClientSpeedGaugeState extends State<ClientSpeedGauge> {
                         children: [
                           Text(
                             value == null ? '—' : speed.toStringAsFixed(1),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 48,
                               fontWeight: FontWeight.w700,
                               letterSpacing: -2,
                             ),
                           ),
-                          const Text(
+                          Text(
                             'Mbps',
                             style: TextStyle(color: clientCyan, fontSize: 16),
                           ),
@@ -158,10 +158,7 @@ class ClientSpeedGaugeState extends State<ClientSpeedGauge> {
                                   ? 'Upload'
                                   : 'Download',
                             ),
-                            style: const TextStyle(
-                              color: clientMuted,
-                              fontSize: 14,
-                            ),
+                            style: TextStyle(color: clientMuted, fontSize: 14),
                           ),
                         ],
                       ),
@@ -174,7 +171,7 @@ class ClientSpeedGaugeState extends State<ClientSpeedGauge> {
           Text(
             tr(stage),
             textAlign: TextAlign.center,
-            style: const TextStyle(color: clientMuted, fontSize: 14),
+            style: TextStyle(color: clientMuted, fontSize: 14),
           ),
           const SizedBox(height: 20),
           FilledButton.icon(
@@ -262,7 +259,7 @@ class _SpeedArc extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
-      ..shader = const SweepGradient(
+      ..shader = SweepGradient(
         startAngle: start,
         endAngle: start + sweep,
         colors: [clientBlue, clientCyan],

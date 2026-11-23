@@ -1,0 +1,26 @@
+group 'com.ttlock.ttlock_flutter'
+version '0.3.8-airlink.1'
+apply plugin: 'com.android.library'
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        flatDir { dirs project(':ttlock_flutter').file('libs') }
+    }
+}
+android {
+    namespace 'com.ttlock.ttlock_flutter'
+    compileSdk 37
+    defaultConfig { minSdk 24 }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'com.google.code.gson:gson:2.6.2'
+    implementation(name: 'ttlock-release', ext: 'aar')
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}

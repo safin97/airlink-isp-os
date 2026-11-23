@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from sqlalchemy import select, delete
 from redis.exceptions import RedisError
 from cryptography.fernet import InvalidToken
@@ -21,6 +21,7 @@ router = APIRouter(prefix='/api/client', tags=['Client portal'])
 settings_router = APIRouter(prefix='/api/client-portal', tags=['Client portal settings'])
 COOKIE = 'airlink_client'
 UCP_PATH = '/user/api/index.php/api/'
+PHONE_SESSION_PREFIX = 'airlink-phone-session-v1:'
 
 
 class PortalSettingsInput(BaseModel):
@@ -92,6 +93,27 @@ def peer_ip(request):
         return ipaddress.ip_address(request.client.host)
     except ValueError:
         return None
+
+
+def connection_check_data(config, ip):
+    enabled = bool(config.subscriber_networks)
+    matches = bool(ip and any(ip in ipaddress.ip_network(net) for net in config.subscriber_networks))
+    reason = ('local_connection' if not ip or ip.is_loopback else
+              'auto_login_disabled' if not enabled else
+              'outside_subscriber_ranges' if not matches else None)
+    return {'source_ip': str(ip) if ip else None,
+            'internet_ip': str(ip) if ip and ip.is_global else None,
+            'internet_ip_source': 'direct_connection' if ip and ip.is_global else None,
+            'auto_login_enabled': enabled, 'subscriber_range_match': matches,
+            'auto_login_eligible': reason is None, 'reason': reason}
+
+
+@router.get('/connection-check')
+def connection_check(request: Request, db=Depends(get_db)):
+    """Report only this request's address; no customer lookup or session creation."""
+    rate(request, 'connection-check')
+    config, _ = configured(db)
+    return connection_check_data(config, peer_ip(request))
 
 
 def rate(request, action, username=None):
@@ -185,10 +207,64 @@ def automatic_identity(db, actor, ip, diagnostics=None):
 
 class CustomerLogin(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    username: str = Field(min_length=1, max_length=128)
+    username: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    phone: Optional[str] = Field(default=None, min_length=1, max_length=64)
     password: SecretStr = Field(min_length=1, max_length=1024)
     challenge_id: str = Field(pattern=r'^[a-f0-9-]{36}$')
     captcha_text: str = Field(default='', max_length=100)
+
+    @model_validator(mode='after')
+    def login_identifier(self):
+        from .customer_telegram import normalized_phone
+        if (self.username is None) == (self.phone is None):
+            raise ValueError('Supply one sign-in identifier')
+        if self.phone is not None:
+            self.phone = normalized_phone(self.phone)
+            if not self.phone:
+                raise ValueError('Invalid phone number')
+        return self
+
+
+def phone_login_identity(db, actor, phone):
+    """Resolve one exact normalized phone within the portal owner's SAS4 scope."""
+    from .customer_telegram import normalized_phone
+    connection, password = sas4.local_user_connection(db, actor)
+    # SAS4 searches stored text: the national digits match both 07... and +9647... .
+    search = phone[3:] if phone.startswith('9647') else phone
+    matches, expected_total = {}, None
+    with sas4.sas4_session(connection, password) as (remote, headers):
+        for page in range(1, 6):
+            result = sas4.response_json(remote.post(sas4.DEFAULT_SERVER + sas4.API_PATH + 'index/user',
+                headers=headers, json=sas4.wire_payload({'page': page, 'count': 100,
+                    'sortBy': 'username', 'direction': 'asc', 'search': search})))
+            rows = result.get('data')
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise sas4.SAS4Error('Invalid phone lookup')
+            try:
+                total, size = int(result['total']), int(result.get('per_page', 100))
+                if (total < 0 or not 1 <= size <= 100 or int(result.get('current_page', page)) != page
+                        or len(rows) != min(size, max(0, total - (page - 1) * size))
+                        or (expected_total is not None and total != expected_total)):
+                    raise ValueError()
+                expected_total = total
+                for row in rows:
+                    if normalized_phone(row.get('phone')) != phone:
+                        continue
+                    customer_id, username = int(row['id']), row['username']
+                    if customer_id < 1 or not isinstance(username, str) or not 1 <= len(username) <= 128:
+                        raise ValueError()
+                    matches[customer_id] = username
+                if len(matches) > 1:
+                    raise ValueError()
+            except (ValueError, TypeError, KeyError, OverflowError):
+                raise sas4.SAS4Error('Phone lookup unavailable or ambiguous') from None
+            if total <= page * size:
+                break
+        else:
+            raise sas4.SAS4Error('Incomplete phone lookup')
+    if len(matches) != 1:
+        raise sas4.SAS4Error('Phone not available')
+    return next(iter(matches.items()))
 
 
 @router.get('/login-options')
@@ -207,7 +283,9 @@ def login_options(request: Request, db=Depends(get_db)):
         cache.set('client:challenge:' + challenge, config.version, ex=300)
     except (sas4.SAS4Error, sas4.httpx.HTTPError, RedisError):
         raise HTTPException(503, 'Customer sign-in is temporarily unavailable. Please try again.') from None
-    return {'challenge_id': challenge, 'captcha_image': captcha, 'auto_login': bool(config.subscriber_networks)}
+    return {'challenge_id': challenge, 'captcha_image': captcha, 'auto_login': bool(config.subscriber_networks),
+            'shared_phone_password': bool(settings.client_phone_password),
+            'prefill_phone_password': settings.client_phone_password == '123'}
 
 
 def create_session(db, config, customer_id, username, response, token=None, ip=None):
@@ -226,23 +304,49 @@ def create_session(db, config, customer_id, username, response, token=None, ip=N
 @router.post('/login')
 def login(data: CustomerLogin, request: Request, response: Response, db=Depends(get_db)):
     request_guard(request)
-    rate(request, 'login', data.username)
+    rate(request, 'login', data.username or 'phone:' + data.phone)
     config, actor = configured(db)
     from .api import cache
     try:
         if cache.getdel('client:challenge:' + data.challenge_id) != config.version:
             raise HTTPException(401, 'Sign-in expired. Refresh and try again.')
+        shared_phone_login = bool(data.phone and settings.client_phone_password)
+        if shared_phone_login and not secrets.compare_digest(
+                data.password.get_secret_value().encode(), settings.client_phone_password.encode()):
+            raise ValueError()
+        resolved = phone_login_identity(db, actor, data.phone) if data.phone else None
+        login_username = resolved[1] if resolved else data.username
+        if resolved:
+            from .api import limited
+            limited('client:username:' + digest(login_username.casefold()), 10)
+        if shared_phone_login:
+            from .customer_telegram import normalized_phone
+            customer_id, username = resolved
+            record = validate_customer(db, actor, customer_id, username)
+            if normalized_phone(record.get('phone')) != data.phone:
+                raise ValueError()
+            # Explicit operator-enabled shared portal access, not a SAS4 password.
+            # This proof is encrypted in the existing session column and never sent to SAS4.
+            token = PHONE_SESSION_PREFIX + json.dumps({'phone': data.phone,
+                'password_digest': digest(settings.client_phone_password)})
+            return create_session(db, config, customer_id, username, response, token=token)
         with sas4.httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as remote:
-            result = ucp(remote, 'auth/login', body={'username': data.username, 'password': data.password.get_secret_value(),
+            result = ucp(remote, 'auth/login', body={'username': login_username, 'password': data.password.get_secret_value(),
                 'language': 'en', 'session_id': data.challenge_id, 'captcha_text': data.captcha_text or None})
             token = result.get('token')
-            if not isinstance(token, str) or not 1 <= len(token) <= 16384:
+            if not isinstance(token, str) or not 1 <= len(token) <= 16384 or token.startswith(PHONE_SESSION_PREFIX):
                 raise sas4.SAS4Error('Missing customer token')
             identity = ucp(remote, 'user', token)['data']
             customer_id, username = int(identity['id']), identity['username']
-        validate_customer(db, actor, customer_id, username)
+        if resolved and (customer_id, username) != resolved:
+            raise ValueError()
+        record = validate_customer(db, actor, customer_id, username)
+        if data.phone:
+            from .customer_telegram import normalized_phone
+            if normalized_phone(record.get('phone')) != data.phone:
+                raise ValueError()
     except (sas4.SAS4Error, sas4.httpx.HTTPError, ValueError, TypeError, KeyError):
-        raise HTTPException(401, 'Invalid username, password or verification code.') from None
+        raise HTTPException(401, 'Invalid phone number, username, password or verification code.') from None
     except RedisError:
         raise HTTPException(503, 'Sign-in is temporarily unavailable.') from None
     return create_session(db, config, customer_id, username, response, token=token)
@@ -258,12 +362,9 @@ def auto_login(request: Request, response: Response, db=Depends(get_db)):
     def unavailable(reason):
         return {'authenticated': False, 'reason': reason, 'source_ip': str(ip) if ip else None}
 
-    if not ip or ip.is_loopback:
-        return unavailable('local_connection')
-    if not config.subscriber_networks:
-        return unavailable('auto_login_disabled')
-    if not any(ip in ipaddress.ip_network(net) for net in config.subscriber_networks):
-        return unavailable('outside_subscriber_ranges')
+    check = connection_check_data(config, ip)
+    if not check['auto_login_eligible']:
+        return unavailable(check['reason'])
     try:
         diagnostics = {}
         identity = automatic_identity(db, actor, ip, diagnostics=diagnostics)
@@ -286,18 +387,34 @@ def current(request: Request, db=Depends(get_db)):
     from .api import limited
     limited('client:session:' + session.digest, 180)
     try:
+        phone_proof = None
         if session.encrypted_token:
-            with sas4.httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as remote:
-                data = ucp(remote, 'user', cipher().decrypt(session.encrypted_token.encode()).decode())
-            if int(data['data']['id']) != session.customer_id or data['data']['username'] != session.username:
-                raise ValueError()
-            can_recharge = 'prm_ucp_activate' in (data.get('permissions') or [])
+            token = cipher().decrypt(session.encrypted_token.encode()).decode()
+            if token.startswith(PHONE_SESSION_PREFIX):
+                phone_proof = json.loads(token[len(PHONE_SESSION_PREFIX):])
+                if (not settings.client_phone_password or not isinstance(phone_proof, dict)
+                        or set(phone_proof) != {'phone', 'password_digest'}
+                        or not isinstance(phone_proof['phone'], str)
+                        or not isinstance(phone_proof['password_digest'], str)
+                        or not secrets.compare_digest(phone_proof['password_digest'], digest(settings.client_phone_password))):
+                    raise ValueError()
+                can_recharge = True
+            else:
+                with sas4.httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as remote:
+                    data = ucp(remote, 'user', token)
+                if int(data['data']['id']) != session.customer_id or data['data']['username'] != session.username:
+                    raise ValueError()
+                can_recharge = 'prm_ucp_activate' in (data.get('permissions') or [])
         else:
             ip = peer_ip(request)
             if str(ip) != session.source_ip or automatic_identity(db, actor, ip) != (session.customer_id, session.username):
                 raise ValueError()
             can_recharge = True
         record = validate_customer(db, actor, session.customer_id, session.username)
+        if phone_proof is not None:
+            from .customer_telegram import normalized_phone
+            if normalized_phone(record.get('phone')) != phone_proof['phone']:
+                raise ValueError()
     except (sas4.SAS4Error, sas4.httpx.HTTPError, ValueError, TypeError, KeyError, InvalidToken):
         raise HTTPException(401, 'Your session expired. Please sign in again.') from None
     return config, actor, session, record, can_recharge

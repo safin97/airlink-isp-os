@@ -76,7 +76,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Active'), findsOneWidget);
       expect(find.byType(NavigationDestination), findsNWidgets(5));
-      expect(find.text('—'), findsWidgets); // Never invent speed measurements.
+      expect(find.byType(ClientSpeedGauge), findsNothing);
+      expect(find.text('Internet speed'), findsNothing);
       expired = true;
       await tester.tap(find.byTooltip('Refresh account'));
       await tester.pumpAndSettle();
@@ -93,6 +94,15 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Account notifications'), findsOneWidget);
       expect(find.text('No recent payment updates.'), findsOneWidget);
+      Navigator.of(tester.element(find.text('Account notifications'))).pop();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(NavigationDestination).at(3));
+      await tester.pumpAndSettle();
+      expect(find.text('NOC Center'), findsOneWidget);
+      expect(find.text('07501033002'), findsOneWidget);
+      expect(find.text('07501033004'), findsOneWidget);
+      expect(find.text('Quick help'), findsNothing);
+      expect(find.text('Helpful answers'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     });

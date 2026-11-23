@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,7 @@ class Settings:
     testing: bool = os.getenv("AIRLINK_TESTING", "false") == "true"
     broker_socket: str = os.getenv("AIRLINK_BROKER_SOCKET", "/run/airlink/control.sock")
     access_seconds: int = 900
+    client_phone_password: str = field(default_factory=lambda: os.getenv("AIRLINK_CLIENT_PHONE_PASSWORD", ""), repr=False)
 
     def validate(self):
         if len(self.secret) < 48:

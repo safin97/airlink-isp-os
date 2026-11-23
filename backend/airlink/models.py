@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, JSON, Text, UniqueConstraint, CheckConstraint, Index
+from sqlalchemy import Column, String, Integer, BigInteger, Float, Boolean, DateTime, ForeignKey, JSON, Text, UniqueConstraint, CheckConstraint, Index
 from .db import Base
 
 
@@ -614,3 +614,65 @@ class DeyeGridHistory(Base):
     user_id = Column(String(36), ForeignKey('deye_connections.user_id', ondelete='CASCADE'), primary_key=True)
     station_id = Column(String(20), primary_key=True)
     history = Column(JSON, nullable=False, default=dict)
+
+
+class TTLockConnection(Base):
+    __tablename__ = 'ttlock_connections'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    region = Column(String(8), nullable=False)
+    encrypted_credentials = Column(Text, nullable=False)
+    encrypted_token = Column(Text, nullable=False)
+    token_expires = Column(DateTime(timezone=True), nullable=False)
+
+
+class TTLockCommand(Base):
+    __tablename__ = 'ttlock_commands'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    request_id = Column(String(32), primary_key=True)
+    lock_id = Column(BigInteger, nullable=False)
+    action = Column(String(8), nullable=False)
+    status = Column(String(20), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class TTLockApplication(Base):
+    __tablename__ = 'ttlock_applications'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    region = Column(String(8), nullable=False)
+    encrypted_credentials = Column(Text, nullable=False)
+
+
+class TTLockMobileOperation(Base):
+    __tablename__ = 'ttlock_mobile_operations'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    request_id = Column(String(32), primary_key=True)
+    lock_id = Column(BigInteger, nullable=True)
+    action = Column(String(24), nullable=False)
+    status = Column(String(24), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    encrypted_result = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class TTLockBridge(Base):
+    __tablename__ = 'ttlock_bridges'
+    id = Column(String(32), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(80), nullable=False)
+    token_hash = Column(String(64), nullable=False)
+    encrypted_binding = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    active_job_id = Column(String(32), nullable=True)
+
+
+class TTLockBridgeJob(Base):
+    __tablename__ = 'ttlock_bridge_jobs'
+    id = Column(String(32), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    bridge_id = Column(String(32), ForeignKey('ttlock_bridges.id'), nullable=False)
+    status = Column(String(16), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    encrypted_result = Column(Text, nullable=True)
+    claim_hash = Column(String(64), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)

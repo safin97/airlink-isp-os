@@ -54,7 +54,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
       expect(checks, 1);
-      expect(find.text('Checking SAS4 for an unused PIN…'), findsOneWidget);
+      expect(find.text('Checking AirLink for an unused PIN…'), findsOneWidget);
       expect(
         tester
             .widget<FilledButton>(
@@ -111,7 +111,8 @@ void main() {
       quote.complete(http.Response('{"detail":"SAS4 unavailable"}', 502));
       await tester.pumpAndSettle();
       expect(checks, 3);
-      expect(find.text('SAS4 unavailable'), findsOneWidget);
+      expect(find.text('AirLink unavailable'), findsOneWidget);
+      expect(find.text('SAS4 unavailable'), findsNothing);
       expect(
         tester
             .widget<FilledButton>(
