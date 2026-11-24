@@ -95,6 +95,8 @@ def collect(gpus=(), sys_root=Path('/sys')):
             if module and read(root / 'module' / module / 'initstate') in ('coming', 'going'):
                 state, detail = 'warning', 'Driver module is loading or unloading. Refresh to check again.'
             gpu = gpu_by_id.get(path.name, {}) if bus.name == 'pci' else {}
+            if gpu.get('name'):
+                name = gpu['name']
             metrics = []
             if driver == 'nvidia' and gpu.get('status') != 'ready':
                 state, detail = 'unknown', 'NVIDIA driver is bound, but telemetry is unavailable. Graphics performance is unverified.'

@@ -8,7 +8,7 @@ RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin
     network-manager network-manager-l2tp strongswan iproute2 iputils-ping dnsutils nftables curl ca-certificates openssl \
     postgresql redis-server nginx python3 python3-venv python3-pip python3-pyqt6 python3-dbus \
     python3-psutil python3-cryptography xserver-xorg xinit openbox xterm fonts-dejavu \
-    firmware-linux-free firmware-realtek firmware-iwlwifi sudo less locales rsync procps && \
+    firmware-linux-free firmware-realtek firmware-iwlwifi pciutils pci.ids sudo less locales rsync procps && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --home-dir /var/lib/airlink --create-home --shell /usr/sbin/nologin airlink && \
     mkdir -p /etc/airlink /var/lib/airlink /var/backups/airlink /opt/airlink && \

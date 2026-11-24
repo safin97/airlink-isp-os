@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'app_language.dart';
 
 import 'package:flutter/material.dart';
@@ -8,19 +9,26 @@ import 'client_portal_settings.dart';
 import 'customer_device_access.dart';
 import 'customer_telegram.dart';
 import 'telegram_account.dart';
+import 'telegram_settings.dart';
 import 'whatsapp.dart';
 
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
   'Change password': Icons.lock_outline,
-  if (user['role'] == 'owner') ...{
+  if (hasSection(user, 'telegram_notifications'))
+    'Telegram notifications': Icons.notifications_outlined,
+  if (hasSection(user, 'customer_device_access'))
     'Customer device access': Icons.router_outlined,
+  if (hasSection(user, 'payment_gateways'))
     'Payment setup': Icons.payments_outlined,
+  if (hasSection(user, 'client_portal'))
     'Client portal': Icons.person_pin_circle_outlined,
+  if (hasSection(user, 'telegram_bot'))
     'Telegram bot token': Icons.send_outlined,
+  if (hasSection(user, 'telegram_account'))
     'Telegram account lookup': Icons.person_search_outlined,
+  if (hasSection(user, 'whatsapp'))
     'WhatsApp notifications': Icons.chat_outlined,
-  },
 };
 
 class AccountPanel extends StatefulWidget {
@@ -105,6 +113,7 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
             const SizedBox(height: 20),
             switch (selectedPage) {
               'Change password' => passwordSettings(),
+              'Telegram notifications' => TelegramSettings(api: widget.api),
               'Customer device access' => CustomerDeviceAccess(
                 api: widget.api,
                 embedded: true,

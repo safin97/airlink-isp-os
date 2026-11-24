@@ -6,7 +6,7 @@ class TTLockDashboard extends StatefulWidget {
   final List<Map<String, dynamic>> locks;
   final Map<int, Map<String, dynamic>> states;
   final int total, page, pages;
-  final bool busy, loading, native;
+  final bool busy, loading, native, canEdit, canDelete;
   final String account;
   final String? synced;
   final VoidCallback refresh,
@@ -29,6 +29,8 @@ class TTLockDashboard extends StatefulWidget {
     required this.busy,
     required this.loading,
     required this.native,
+    this.canEdit = true,
+    this.canDelete = true,
     required this.account,
     required this.synced,
     required this.refresh,
@@ -238,7 +240,7 @@ class _TTLockDashboardState extends State<TTLockDashboard> {
                   label: const Text('Gateway Management'),
                 ),
                 FilledButton.icon(
-                  onPressed: disabled ? null : widget.add,
+                  onPressed: !widget.canEdit || disabled ? null : widget.add,
                   icon: const Icon(LucideIcons.plus, size: 18),
                   label: const Text('Add Lock'),
                 ),
@@ -353,6 +355,8 @@ class _TTLockDashboardState extends State<TTLockDashboard> {
                         compact: !grid,
                         disabled: disabled,
                         native: widget.native,
+                        canEdit: widget.canEdit,
+                        canDelete: widget.canDelete,
                         onOpen: (tab) => widget.open(lock, tab),
                         onCheck: () => widget.check(lock),
                         onOperate: (action) => widget.operate(lock, action),
@@ -403,16 +407,16 @@ class _TTLockDashboardState extends State<TTLockDashboard> {
                 style: TextStyle(color: ttMuted(context), fontSize: 12),
               ),
               TextButton(
-                onPressed: disabled ? null : widget.reconnect,
+                onPressed: !widget.canEdit || disabled ? null : widget.reconnect,
                 child: const Text('Reconnect'),
               ),
               TextButton(
-                onPressed: disabled ? null : widget.disconnect,
+                onPressed: !widget.canDelete || disabled ? null : widget.disconnect,
                 child: const Text('Disconnect'),
               ),
               if (widget.share != null)
                 TextButton.icon(
-                  onPressed: disabled ? null : widget.share,
+                  onPressed: !widget.canEdit || disabled ? null : widget.share,
                   icon: const Icon(LucideIcons.smartphone, size: 16),
                   label: const Text('Share Bluetooth with website'),
                 ),
@@ -428,7 +432,7 @@ class TTLockTile extends StatelessWidget {
   final Map<String, dynamic> lock;
   final Map<String, dynamic>? state;
   final String? synced;
-  final bool compact, disabled, native;
+  final bool compact, disabled, native, canEdit, canDelete;
   final void Function(String) onOpen, onOperate;
   final VoidCallback onCheck, onPhone, onEdit, onRemove;
   const TTLockTile({
@@ -439,6 +443,8 @@ class TTLockTile extends StatelessWidget {
     this.compact = false,
     required this.disabled,
     required this.native,
+    this.canEdit = true,
+    this.canDelete = true,
     required this.onOpen,
     required this.onOperate,
     required this.onCheck,
@@ -448,7 +454,7 @@ class TTLockTile extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    final canControl = native || lock['has_gateway'] == true;
+    final canControl = canEdit && (native || lock['has_gateway'] == true);
     final locked = state?['state'] == 'locked',
         unlocked = state?['state'] == 'unlocked';
     final label = locked
@@ -505,9 +511,9 @@ class TTLockTile extends StatelessWidget {
                     onRemove();
                   }
                 },
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Edit name')),
-                  PopupMenuItem(value: 'remove', child: Text('Remove in app')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(enabled: canEdit, value: 'edit', child: Text('Edit name')),
+                  PopupMenuItem(enabled: canDelete, value: 'remove', child: Text('Remove in app')),
                 ],
               ),
             ],

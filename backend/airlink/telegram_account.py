@@ -1,3 +1,4 @@
+from .section_access import has_capability
 """Owner-only Telegram phone lookup and explicit customer test messages."""
 import asyncio
 import hashlib
@@ -22,7 +23,7 @@ router = APIRouter(prefix='/api/integrations/telegram-account', tags=['Telegram 
 
 
 def owner(user=Depends(current_user)):
-    if not user.active or user.role != 'owner':
+    if not user.active or not has_capability(user, 'telegram_account'):
         raise HTTPException(403, 'Only an owner can use Telegram account lookup.')
     return user
 

@@ -1,3 +1,4 @@
+from .section_access import require_feature
 """Owner-scoped, foreground phone relay. No server-side Bluetooth execution."""
 import hashlib
 import json
@@ -98,6 +99,7 @@ def poll(bridge_id: str, x_airlink_bridge: str = Header(min_length=64, max_lengt
             if job.status == 'queued':
                 payload = t.decrypt(job.encrypted_payload)
                 params = payload['parameters']
+                require_feature(user, 'ttlock', 'POST', '/api/integrations/ttlock/mobile/prepare', body=params)
                 # Do not deliver passcodes or hardware credentials until explicit claim.
                 result = {'id': job.id, 'lock_name': payload['lock_name'],
                     'action': params['action'], 'name': params.get('name'),
@@ -216,6 +218,7 @@ def claim(job_id: str, x_airlink_bridge: str = Header(min_length=64, max_length=
             raise HTTPException(409, 'Resume Bluetooth sharing before approving.')
         payload = t.decrypt(job.encrypted_payload)
         params = payload['parameters']
+        require_feature(user, 'ttlock', 'POST', '/api/integrations/ttlock/mobile/prepare', body=params)
         mobile.raw_lock(db, t.connection(db, user), params['lock_id'], params['lock_page'])
         token = secrets.token_hex(32)
         live_phone = select(TTLockBridge.id).where(TTLockBridge.id == bridge.id,

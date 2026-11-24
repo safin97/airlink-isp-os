@@ -1,3 +1,4 @@
+from .section_access import has_capability
 """Automatic receipts for confirmed recharges, sent through the selected owner account."""
 import hashlib
 import json
@@ -84,7 +85,7 @@ def configure_expiry(data: ExpiryInput, user=Depends(accounts.owner), db=Depends
                 sender = db.get(User, selection.user_id)
                 state = accounts.read(db.get(TelegramAccount, selection.user_id))
                 connection = db.get(SAS4UserConnection, selection.user_id)
-                if (not sender or not sender.active or sender.role != 'owner' or not connection
+                if (not sender or not sender.active or not has_capability(sender, 'telegram_bot', db, write=True) or not connection
                         or connection.username != selection.sas4_username
                         or accounts.public(state)['stage'] != 'connected' or state['profile']['id'] != selection.sender_id):
                     raise HTTPException(409, 'Reconnect the selected owner Telegram and SAS4 accounts first.')
@@ -383,7 +384,7 @@ def deliver(db, event):
     sender, actor = db.get(User, event.user_id), db.get(User, event.actor_id) if event.actor_id else None
     if (not selection or not (expiry_enabled(db) if event.kind in EXPIRY_KINDS else selection.enabled)
             or (event.kind not in EXPIRY_KINDS and selection.version != event.version) or selection.user_id != event.user_id
-            or not sender or not sender.active or sender.role != 'owner' or not customers.allowed(db, actor, True)):
+            or not sender or not sender.active or not has_capability(sender, 'telegram_bot', db, write=True) or not customers.allowed(db, actor, True)):
         cancel(event, 'Notification settings or account access changed.')
         db.commit()
         return
@@ -535,7 +536,7 @@ def scan_expiry(db):
         sender = db.get(User, selection.user_id)
         connection = db.get(SAS4UserConnection, selection.user_id)
         state = accounts.read(db.get(TelegramAccount, selection.user_id))
-        if (not sender or not sender.active or sender.role != 'owner' or not connection
+        if (not sender or not sender.active or not has_capability(sender, 'telegram_bot', db, write=True) or not connection
                 or connection.username != selection.sas4_username or accounts.public(state)['stage'] != 'connected'
                 or state['profile']['id'] != selection.sender_id):
             raise ValueError()

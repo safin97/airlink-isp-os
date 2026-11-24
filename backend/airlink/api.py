@@ -34,7 +34,7 @@ from .vendor_identity import VENDOR_LABELS
 from .config import settings
 from .db import get_db, SessionLocal
 from .models import (User, Role, Initialization, LoginSession, RefreshToken, Tower, Place, TowerPlace, ManagerPlace, Sector, Device, DeviceOutage,
-                     UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, UserAccessRole, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
+                     AccessRole, UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, UserAccessRole, DeviceAssignment, SNMPProfile, Metric, Alert, Interface, NetworkLink, UpdateHistory, AuditLog, now, audit)
 from .security import (hasher, dummy_hash, verify_password, digest, aware, access_token, issue_refresh,
                        current_user, owner, settings_access, updates_access, resolve_user, cipher, bearer)
 from .schemas import WirelessSSIDInput, SNMPDiscoveryProfileInput, Login, Setup, UserInput, PlaceInput, TowerInput, SectorInput, DeviceInput, ProfileInput, LinkInput, DiscoveryInput, ManagerUpdate, PasswordChange, SectionAccessInput
@@ -161,8 +161,9 @@ def public(obj):
         from . import deye_access
         result['show_deye_solar'] = deye_access.visible(obj)
         result['show_snmp_profiles'] = snmp_visibility.visible(obj)
-        if obj.role == 'owner':
+        if section_access.has_capability(obj, 'snmp_sharing'):
             result['default_snmp_profile_visibility'] = snmp_visibility.new_account_default(obj)
+        if obj.role == 'owner':
             result['visible_sections'] = section_access.owner_visibility(obj)
         result['sections'] = section_access.effective(obj)
         result['editable_sections'] = section_access.editable(obj)
@@ -335,21 +336,53 @@ def change_password(data: PasswordChange, credentials=Depends(bearer), user=Depe
     return {"ok": True}
 
 
+def manageable_account(db, actor, target):
+    """Delegated administrators cannot take over more privileged accounts."""
+    if actor.role == 'owner':
+        return True
+    if actor.id == target.id or target.role != 'manager':
+        return False
+    from types import SimpleNamespace
+    policy = SimpleNamespace(sections=section_access.effective(target, db),
+        editable_sections=section_access.editable(target, db),
+        deletable_sections=section_access.deletable(target, db))
+    return (access_roles.grantable(db, actor, policy)
+            and set(manager_places.public_places(target)).issubset(manager_places.public_places(actor))
+            and set(db.scalars(tower_ids(db, target))).issubset(db.scalars(tower_ids(db, actor))))
+
+
+def require_manageable_account(db, actor, target):
+    if not manageable_account(db, actor, target):
+        raise HTTPException(403, 'You can manage only other managers within your permissions and inventory scope')
+
+
 @app.get("/api/users")
 def users(user=Depends(owner), db=Depends(get_db)):
-    return [public(x) for x in db.scalars(select(User).order_by(User.username))]
+    return [{**public(x), "can_manage": manageable_account(db, user, x)} for x in db.scalars(select(User).order_by(User.username))
+            if user.role == "owner" or manageable_account(db, user, x)]
+
+
+@app.get('/api/users/access-options')
+def assignable_account_roles(user=Depends(owner), db=Depends(get_db)):
+    return [access_roles.public(db, row, user) for row in db.scalars(select(AccessRole).order_by(AccessRole.name))
+            if access_roles.grantable(db, user, row)]
 
 
 @app.post("/api/users", status_code=201)
 def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
     manager_parents.lock(db)
+    if user.role != 'owner' and (data.role != 'manager' or not (data.access_role_id or data.manager_role_id)):
+        raise HTTPException(403, 'Choose a manager account with an explicit access role within your permissions')
     obj = User(username=data.username, password_hash=hasher.hash(data.password), role=data.role)
     db.add(obj)
     db.flush()
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
     manager_parents.save(db, obj, data)
+    if user.role != 'owner' and data.show_snmp_profiles is not None:
+        section_access.require_any(user, ('snmp_sharing',), db, write=True)
     snmp_visibility.save(db, obj, data.show_snmp_profiles)
+    require_manageable_account(db, user, obj)
     commit(db, user, "user.create", obj.id)
     return public(obj)
 
@@ -358,6 +391,7 @@ def add_user(data: UserInput, user=Depends(owner), db=Depends(get_db)):
 def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depends(get_db)):
     manager_parents.lock(db)
     obj = get(db, User, user_id)
+    require_manageable_account(db, user, obj)
     if obj.role == "owner":
         raise HTTPException(409, "Owner accounts cannot be edited here")
     next_role = data.role or obj.role
@@ -378,12 +412,15 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
     manager_places.save(db, obj, data.place_ids)
     access_roles.assign_input(db, obj, data)
     manager_parents.save(db, obj, data)
+    if user.role != 'owner' and data.show_snmp_profiles is not None:
+        section_access.require_any(user, ('snmp_sharing',), db, write=True)
     snmp_visibility.save(db, obj, data.show_snmp_profiles)
     obj.username = data.username
     if data.password is not None:
         obj.password_hash = hasher.hash(data.password)
     if changed:
         db.execute(update(LoginSession).where(LoginSession.user_id == obj.id).values(revoked=True))
+    require_manageable_account(db, user, obj)
     commit(db, user, "user.update", obj.id)
     return public(obj)
 
@@ -391,6 +428,7 @@ def edit_account(user_id: str, data: ManagerUpdate, user=Depends(owner), db=Depe
 @app.put("/api/users/{user_id}/sections")
 def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner), db=Depends(get_db)):
     obj = get(db, User, user_id)
+    require_manageable_account(db, user, obj)
     if obj.role == 'owner':
         raise HTTPException(409, 'Owner accounts always have full access')
     if obj.role != 'manager':
@@ -418,6 +456,8 @@ def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner
         deletes.sections = [key for key in row.sections if key in data.deletable_sections]
     elif deletes is not None:
         deletes.sections = [key for key in row.sections if key in deletes.sections]
+    db.flush()
+    require_manageable_account(db, user, obj)
     commit(db, user, 'user.sections', obj.id + ':view=' + ','.join(row.sections)
            + ';edit=' + ','.join(edits.sections if edits is not None else row.sections)
            + ';delete=' + ','.join(deletes.sections if deletes is not None else (edits.sections if edits is not None else row.sections)))
@@ -428,6 +468,7 @@ def set_user_sections(user_id: str, data: SectionAccessInput, user=Depends(owner
 def delete_account(user_id: str, user=Depends(owner), db=Depends(get_db)):
     manager_parents.lock(db)
     obj = get(db, User, user_id)
+    require_manageable_account(db, user, obj)
     if obj.role == "owner":
         raise HTTPException(409, "Owner accounts cannot be deleted here")
     # Preserve inventory and audit history while removing credentials and sessions.
@@ -446,6 +487,7 @@ def delete_account(user_id: str, user=Depends(owner), db=Depends(get_db)):
 def disable_user(user_id: str, user=Depends(owner), db=Depends(get_db)):
     manager_parents.lock(db)
     obj = get(db, User, user_id)
+    require_manageable_account(db, user, obj)
     if obj.id == user.id or obj.role == "owner":
         raise HTTPException(409, "Cannot disable owner accounts")
     obj.active = False
@@ -458,6 +500,7 @@ def disable_user(user_id: str, user=Depends(owner), db=Depends(get_db)):
 @app.put("/api/users/{user_id}/devices/{device_id}")
 def assign_device(user_id: str, device_id: str, user=Depends(owner), db=Depends(get_db)):
     technician = get(db, User, user_id)
+    require_manageable_account(db, user, technician)
     get(db, Device, device_id)
     if technician.role != "technician":
         raise HTTPException(422, "Device assignments apply to technicians")
@@ -484,6 +527,8 @@ def add_place(data: PlaceInput, user=Depends(owner), db=Depends(get_db)):
     obj = Place(name=data.name)
     db.add(obj)
     db.flush()
+    if user.role != 'owner':
+        db.add(ManagerPlace(user_id=user.id, place_id=obj.id))
     commit(db, user, 'place.create', obj.id)
     return {**public(obj), 'tower_count': 0}
 
@@ -491,6 +536,8 @@ def add_place(data: PlaceInput, user=Depends(owner), db=Depends(get_db)):
 @app.put("/api/places/{place_id}")
 def edit_place(place_id: str, data: PlaceInput, user=Depends(owner), db=Depends(get_db)):
     obj = get(db, Place, place_id)
+    if user.role != 'owner' and place_id not in manager_places.public_places(user):
+        raise HTTPException(404, 'Place not found')
     obj.name = data.name
     commit(db, user, 'place.update', obj.id)
     return public(obj)
@@ -499,6 +546,8 @@ def edit_place(place_id: str, data: PlaceInput, user=Depends(owner), db=Depends(
 @app.delete("/api/places/{place_id}", status_code=204)
 def delete_place(place_id: str, user=Depends(owner), db=Depends(get_db)):
     obj = get(db, Place, place_id)
+    if user.role != 'owner' and place_id not in manager_places.public_places(user):
+        raise HTTPException(404, 'Place not found')
     if db.scalar(select(TowerPlace.tower_id).where(TowerPlace.place_id == place_id).limit(1)):
         raise HTTPException(409, 'Move or remove the towers in this place first')
     db.delete(obj)
@@ -517,8 +566,9 @@ def save_tower_place(db, tower_id, data, user):
     previous = membership.place_id if membership else None
     if previous == data.place_id:
         return
-    if user.role != 'owner':
-        raise HTTPException(403, 'Only owner can move towers between places')
+    section_access.require_any(user, ('inventory_admin',), db, write=True)
+    if user.role != 'owner' and data.place_id and data.place_id not in manager_places.public_places(user):
+        raise HTTPException(403, 'Choose one of your assigned places')
     if data.place_id:
         get(db, Place, data.place_id)
         if membership:
@@ -547,11 +597,11 @@ def towers(user=Depends(current_user), db=Depends(get_db)):
         online = bool(enabled and polled and status == 'online' and
                       (stamp - aware(polled)).total_seconds() <= interval * 3 + 30)
         statuses[tid] = statuses.get(tid, True) and online
-    configs = tower_api.configurations(db, scope) if user.role == 'owner' else {}
+    configs = tower_api.configurations(db, scope) if section_access.has_capability(user, 'towers_api', db) else {}
     return [{**public(tower), 'place_id': place, 'sector_count': count or 0,
              'status': 'online' if statuses.get(tower.id, False) else 'offline',
              **(tower_api.public_configuration(configs.get(tower.id, tower_api.DEFAULTS))
-                if user.role == 'owner' else {})}
+                if section_access.has_capability(user, 'towers_api', db) else {})}
             for tower, place, count in db.execute(query)]
 
 
@@ -565,6 +615,8 @@ def manager_check(db, manager_id):
 @app.post("/api/towers", status_code=201)
 def add_tower(data: TowerInput, user=Depends(owner), db=Depends(get_db)):
     manager_check(db, data.manager_id)
+    if user.role != 'owner' and data.manager_id != user.id:
+        raise HTTPException(403, 'New towers must be assigned to your account')
     obj = Tower(**data.model_dump(exclude=tower_api.FIELDS | {"place_id"}))
     db.add(obj)
     db.flush()
@@ -784,7 +836,7 @@ def device_validate(db, user, data, existing=None):
     check_tower(db, user, data.tower_id, write=True)
     if data.sector_id and get(db, Sector, data.sector_id).tower_id != data.tower_id:
         raise HTTPException(422, "Sector must belong to device tower")
-    if user.role != "owner":
+    if not section_access.has_capability(user, 'inventory_admin', db, write=True):
         expected = (existing.snmp_profile_id, existing.poll_interval, existing.connection_timeout, existing.retries, existing.failure_threshold, existing.cpu_threshold) if existing else (None, 60, 2, 2, 3, 90)
         if (data.snmp_profile_id, data.poll_interval, data.connection_timeout, data.retries, data.failure_threshold, data.cpu_threshold) != expected:
             raise HTTPException(403, "Only owner configures monitoring credentials and thresholds")
@@ -1076,8 +1128,8 @@ def links(user=Depends(current_user), db=Depends(get_db)):
 
 @app.post("/api/links", status_code=201)
 def add_link(data: LinkInput, user=Depends(owner), db=Depends(get_db)):
-    get(db, Tower, data.source_id)
-    get(db, Tower, data.target_id)
+    check_tower(db, user, data.source_id, write=True)
+    check_tower(db, user, data.target_id, write=True)
     if data.source_id == data.target_id:
         raise HTTPException(422, "A link needs two distinct towers")
     obj = NetworkLink(**data.model_dump(), verified_by=user.id)

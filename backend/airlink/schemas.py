@@ -170,11 +170,16 @@ class SNMPDiscoveryProfileInput(SNMPPublicProfileInput):
     source_profile_id: str = Field(min_length=1, max_length=36)
 
 
-class SectionAccessInput(Strict):
-    sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
-    editable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']]] = Field(default=None, max_length=13)
+from .section_access import ASSIGNABLE
 
-    deletable_sections: Optional[list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']]] = Field(default=None, max_length=13)
+SectionKey = Literal[ASSIGNABLE]
+
+
+class SectionAccessInput(Strict):
+    sections: list[SectionKey] = Field(max_length=len(ASSIGNABLE))
+    editable_sections: Optional[list[SectionKey]] = Field(default=None, max_length=len(ASSIGNABLE))
+
+    deletable_sections: Optional[list[SectionKey]] = Field(default=None, max_length=len(ASSIGNABLE))
 
     @model_validator(mode='after')
     def edits_require_visibility(self):
@@ -228,8 +233,8 @@ class PasswordChange(Strict):
 
 class AccessRoleInput(SectionAccessInput):
     name: str = Field(min_length=1, max_length=64)
-    editable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
-    deletable_sections: list[Literal['dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports', 'software_updates', 'settings', 'roles', 'access_roles', 'deye']] = Field(max_length=13)
+    editable_sections: list[SectionKey] = Field(max_length=len(ASSIGNABLE))
+    deletable_sections: list[SectionKey] = Field(max_length=len(ASSIGNABLE))
 
     @field_validator('name')
     @classmethod

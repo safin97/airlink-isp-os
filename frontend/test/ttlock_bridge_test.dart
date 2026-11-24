@@ -163,6 +163,8 @@ void main() {
         }),
       )..user = {'id': 'owner'};
       final hardware = BridgeHardware(api);
+      api.user ??= {};
+      api.user!.putIfAbsent('role', () => 'owner');
       await tester.pumpWidget(
         MaterialApp(
           home: TTLockBridgePage(api: api, service: hardware),
@@ -198,6 +200,8 @@ void main() {
       final api = Api(
         client: MockClient((_) async => http.Response('{"items":[]}', 200)),
       );
+      api.user ??= {};
+      api.user!.putIfAbsent('role', () => 'owner');
       await tester.pumpWidget(
         MaterialApp(
           home: TTLockPhonePicker(

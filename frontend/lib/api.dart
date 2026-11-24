@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'live_socket.dart';
 import 'dart:convert';
@@ -126,6 +127,12 @@ class Api {
     bool binary = false,
     Map<String, String> headers = const {},
   }) async {
+    if (user != null && !canFeatureRequest(user!, path, method, body)) {
+      throw ApiException(
+        'This action is not enabled in your Access Role.',
+        403,
+      );
+    }
     final request = http.Request(method, Uri.parse('$base/api$path'));
     request.headers.addAll({
       ...headers,

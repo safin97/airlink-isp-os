@@ -118,15 +118,20 @@ def test_customer_id_and_provider_cannot_be_supplied_and_only_own_payment_visibl
     monkeypatch.setattr(payments, 'begin_payment', begin)
     assert client.post('/api/client/payments', headers=HEADERS, json=body).status_code == 200
     assert seen == [(7, 'fib', 'radius_pin', 'owner')]
+    staff_id, _ = user(client, owner, 'manager', 'customer-payment-staff')
     with SessionLocal() as db:
         session = db.query(ClientPortalSession).one()
         for index, customer_id in enumerate([7, 8]):
             db.add(RechargePayment(id=str(index)*32, user_id=session.owner_id, sas4_user_id=customer_id,
                 sas4_username=SETTINGS['username'], provider='fib', environment='sandbox', encrypted_credentials=encrypted(),
                 status='pending', amount='25000', currency='IQD', quote={}))
+        db.add(RechargePayment(id='2'*32, user_id=staff_id, sas4_user_id=7,
+            sas4_username='staff-radius', provider='fib', environment='sandbox', encrypted_credentials=encrypted(),
+            status='pending', amount='25000', currency='IQD', quote={'merchant_owner_id': session.owner_id}))
         db.commit()
     assert client.get('/api/client/payments/'+'0'*32).status_code == 200
     assert client.get('/api/client/payments/'+'1'*32).status_code == 404
+    assert client.get('/api/client/payments/'+'2'*32).status_code == 404
     assert len(client.get('/api/client/payments').json()) == 1
 
 

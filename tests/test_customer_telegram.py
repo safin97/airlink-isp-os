@@ -331,6 +331,10 @@ def test_manager_activation_uses_existing_owner_link_and_owner_token(client, own
     actor, record, calls, _ = customer
     start(client, owner, customer)
     mid, manager = user(client, owner, 'manager', 'shared-bot-manager')
+    if method == 'fib':
+        assert client.put('/api/users/' + mid + '/sections', headers=owner, json={
+            'sections': ['isp_card', 'fib_recharge'],
+            'editable_sections': ['isp_card', 'fib_recharge'], 'deletable_sections': []}).status_code == 200
     assert client.put('/api/integrations/sas4', headers=manager, json=SETTINGS).status_code == 200
     status = client.get(PATH + '/users/7', headers=manager)
     assert status.status_code == 200 and status.json()['linked']

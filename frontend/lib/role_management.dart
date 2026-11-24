@@ -305,7 +305,15 @@ class _RoleEditorState extends State<RoleEditor> {
     key: ValueKey('$action-$key'),
     value: values.contains(key),
     onChanged:
-        widget.readOnly || busy || (action != 'read' && !read.contains(key))
+        widget.readOnly ||
+            busy ||
+            (widget.api.user?['role'] != 'owner' &&
+                !(action == 'read'
+                    ? hasSection(widget.api.user ?? {}, key)
+                    : action == 'edit'
+                    ? canEditSection(widget.api.user ?? {}, key)
+                    : canDeleteSection(widget.api.user ?? {}, key))) ||
+            (action != 'read' && !read.contains(key))
         ? null
         : (value) => setState(() {
             if (value == true) {
@@ -368,16 +376,20 @@ class _RoleEditorState extends State<RoleEditor> {
                   const Text('Create an access group in Access Roles first.'),
               ] else ...[
                 const Text(
-                  'Read shows a section. Edit allows changes and creation. Delete is separate from Edit. Permissions apply to supported actions within assigned places. Account administration and place management remain owner-only. Managers can grant only permissions they already have.',
+                  'View shows a section. Edit allows changes and creation. Delete is separate from Edit. Permissions apply to supported actions within assigned places. New administrative features are off until explicitly enabled. Managers can grant only permissions they already have.',
                 ),
                 const SizedBox(height: 12),
+                const Text(
+                  'FIB Bank recharge requires Read and Edit for both ISP Card and FIB Bank recharge. Bank setup requires a separate Payment setup permission.',
+                ),
+                const SizedBox(height: 8),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
                     columnSpacing: 18,
                     columns: const [
                       DataColumn(label: Text('Section')),
-                      DataColumn(label: Text('Read')),
+                      DataColumn(label: Text('View')),
                       DataColumn(label: Text('Edit')),
                       DataColumn(label: Text('Delete')),
                     ],
@@ -385,7 +397,9 @@ class _RoleEditorState extends State<RoleEditor> {
                         .map(
                           (s) => DataRow(
                             cells: [
-                              DataCell(Text(s.value)),
+                              DataCell(
+                                SizedBox(width: 230, child: Text(s.value)),
+                              ),
                               DataCell(permission(s.key, 'read', read)),
                               DataCell(permission(s.key, 'edit', edit)),
                               DataCell(permission(s.key, 'delete', delete)),
@@ -397,7 +411,7 @@ class _RoleEditorState extends State<RoleEditor> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Deye Solar is managed by the owner in Deye Solar → Show solar readings. Shared accounts can view readings without configuring a connection.',
+                  'Deye configuration enables an account’s own connection. To share readings only, use Deye Solar → Show solar readings.',
                 ),
                 const SizedBox(height: 8),
                 const Text(

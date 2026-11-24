@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -48,6 +49,8 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
       : 'Fingerprints';
   List<Map<String, dynamic>> cards = [], pending = [];
   String get path => '/integrations/ttlock/locks/${widget.lock['id']}';
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'ttlock');
+  bool get canDelete => canDeleteSection(widget.api.user ?? {}, 'ttlock');
   bool get mobile => service.bluetooth.available || service.remote;
   @override
   void initState() {
@@ -648,7 +651,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
                         ),
                         const SizedBox(height: 16),
                         OutlinedButton.icon(
-                          onPressed: busy || loading ? null : renameLock,
+                          onPressed: !canEdit || busy || loading ? null : renameLock,
                           icon: const Icon(LucideIcons.pencil, size: 16),
                           label: const Text('Edit name'),
                         ),
@@ -697,7 +700,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
                     ),
                     const SizedBox(height: 16),
                     IconButton.filled(
-                      onPressed: busy || loading || !canControl
+                      onPressed: !canEdit || busy || loading || !canControl
                           ? null
                           : () => command(
                               lockState == 'locked'
@@ -769,7 +772,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
                           ('status', 'Check status', LucideIcons.refreshCw),
                         ])
                           OutlinedButton.icon(
-                            onPressed: busy || loading || !canControl
+                            onPressed: !canEdit || busy || loading || !canControl
                                 ? null
                                 : () => command(item.$1, item.$2),
                             icon: Icon(item.$3, size: 16),
@@ -816,7 +819,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
                 runSpacing: 8,
                 children: [
                   FilledButton.icon(
-                    onPressed: busy || loading ? null : connectBluetooth,
+                    onPressed: !canEdit || busy || loading ? null : connectBluetooth,
                     icon: const Icon(LucideIcons.bluetoothConnected, size: 18),
                     label: Text(
                       service.remote
@@ -864,7 +867,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
           ),
         ),
         FilledButton.icon(
-          onPressed: !mobile || busy || loading
+          onPressed: !canEdit || !mobile || busy || loading
               ? null
               : () => cardAction('${kind}_add'),
           icon: const Icon(Icons.add_card),
@@ -918,18 +921,18 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
                 spacing: 8,
                 children: [
                   TextButton(
-                    onPressed: busy || loading ? null : () => rename(card),
+                    onPressed: !canEdit || busy || loading ? null : () => rename(card),
                     child: const Text('Rename'),
                   ),
                   TextButton(
                     onPressed:
-                        !mobile || busy || loading || card['cyclic'] == true
+                        !canEdit || !mobile || busy || loading || card['cyclic'] == true
                         ? null
                         : () => cardAction('${kind}_period', card),
                     child: const Text('Change validity'),
                   ),
                   TextButton(
-                    onPressed: !mobile || busy || loading
+                    onPressed: !canDelete || !mobile || busy || loading
                         ? null
                         : () => cardAction('${kind}_delete', card),
                     child: Text('Remove $credentialLabel'),
@@ -1007,7 +1010,7 @@ class _TTLockDevicePageState extends State<TTLockDevicePage> {
       Padding(
         padding: const EdgeInsets.only(top: 24),
         child: TextButton.icon(
-          onPressed: busy || loading ? null : reset,
+          onPressed: !canDelete || busy || loading ? null : reset,
           icon: const Icon(Icons.delete_outline),
           label: const Text('Reset and remove device'),
         ),

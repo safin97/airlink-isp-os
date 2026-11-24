@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
@@ -26,7 +27,8 @@ class _CustomerTelegramState extends State<CustomerTelegram> {
   String? error, link, message;
   bool busy = true, enabled = true;
   bool get canManageBot =>
-      widget.api.user?['role'] == 'owner' && bot?['can_manage'] != false;
+      canEditSection(widget.api.user ?? {}, 'telegram_bot') &&
+      bot?['can_manage'] != false;
   String get customerPath => '$path/users/${widget.customerId}';
   bool get testReady =>
       (customer?['test_ready'] ?? customer?['linked']) == true;
@@ -241,9 +243,7 @@ class _CustomerTelegramState extends State<CustomerTelegram> {
                     child: Column(
                       children: [
                         const ListTile(
-                          title: Text(
-                            'Notifications from owner account',
-                          ),
+                          title: Text('Notifications from owner account'),
                         ),
                         for (final event in customer!['account_recharges'])
                           ListTile(
@@ -257,7 +257,7 @@ class _CustomerTelegramState extends State<CustomerTelegram> {
                       ],
                     ),
                   ),
-                if (widget.api.user?['role'] == 'owner')
+                if (hasSection(widget.api.user ?? {}, 'telegram_account'))
                   TelegramPhoneLookup(
                     key: ValueKey(widget.customerId),
                     api: widget.api,

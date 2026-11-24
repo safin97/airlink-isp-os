@@ -23,7 +23,7 @@ def test_owner_full_access_and_owner_only_permission_control(client, owner):
         assert client.put('/api/users/'+mid+'/sections', headers=actor, json={'sections':[]}).status_code == 403
     assert client.put('/api/users/'+own['id']+'/sections', headers=owner, json={'sections':[]}).status_code == 409
     assert client.put('/api/users/'+vid+'/sections', headers=owner, json={'sections':[]}).status_code == 422
-    for key in ('managers','unknown'):
+    for key in ('owner','unknown'):
         assert client.put('/api/users/'+mid+'/sections', headers=owner, json={'sections':[key]}).status_code == 422
     assert client.get('/api/auth/me', headers=owner).json()['sections'] == list(ALL)
 
@@ -149,10 +149,7 @@ def test_readonly_manager_cannot_write_through_direct_requests(client, owner, me
     readonly_grant(client, owner, mid, list(ASSIGNABLE))
     response = client.request(method, path, headers=manager, json={})
     assert response.status_code == 403, response.text
-    if path in ('/api/integrations/sas4/device-access', '/api/payments/gateways/fib'):
-        assert response.json()['detail'] == 'Owner access required'
-    else:
-        assert 'Read-only' in response.json()['detail']
+    assert 'Read-only' in response.json()['detail']
 
 
 def test_view_and_edit_grants_are_independent_and_immediate(client, owner, monkeypatch):
@@ -190,7 +187,7 @@ def test_view_and_edit_grants_are_independent_and_immediate(client, owner, monke
 
 @pytest.mark.parametrize('role', ['manager', 'technician', 'viewer'])
 @pytest.mark.parametrize('custom_access', [False, True])
-def test_owner_configuration_cannot_be_delegated(client, owner, role, custom_access):
+def test_administrative_configuration_requires_explicit_grants(client, owner, role, custom_access):
     from airlink.models import AccessRole, UserAccessRole
     uid, actor = user(client, owner, role)
     if custom_access:
@@ -219,8 +216,10 @@ def test_owner_configuration_cannot_be_delegated(client, owner, role, custom_acc
     ]
     for method, path in paths:
         response = client.request(method, path, headers=actor)
-        assert response.status_code == 403, (method, path, response.text)
-        assert response.json()['detail'] == 'Owner access required'
+        if custom_access:
+            assert response.status_code != 403, (method, path, response.text)
+        else:
+            assert response.status_code == 403, (method, path, response.text)
     # Authentication remains available even though Account profile is hidden.
     assert client.get('/api/auth/me', headers=actor).status_code == 200
     for path in ('/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
@@ -236,7 +235,7 @@ def test_full_manager_permissions_preserve_the_complete_audit_record(client, own
     result = client.put('/api/users/'+mid+'/sections', headers=owner, json={
         'sections': grants, 'editable_sections': grants, 'deletable_sections': grants})
     assert result.status_code == 200, result.text
-    assert client.get('/api/auth/me', headers=manager).json()['sections'] == [key for key in grants if key != 'deye']
+    assert client.get('/api/auth/me', headers=manager).json()['sections'] == [key for key in grants if key != 'deye'] + ['deye']
     expected = mid + ':view=' + ','.join(grants) + ';edit=' + ','.join(grants) + ';delete=' + ','.join(grants)
     assert len(expected) > 120
     with SessionLocal() as db:

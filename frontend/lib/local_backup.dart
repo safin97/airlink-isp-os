@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -119,7 +120,9 @@ class _LocalBackupState extends State<LocalBackup> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.api.user?['role'] != 'owner') return const SizedBox.shrink();
+    if (!hasSection(widget.api.user ?? {}, 'backups')) {
+      return const SizedBox.shrink();
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -174,12 +177,20 @@ class _LocalBackupState extends State<LocalBackup> {
                 runSpacing: 12,
                 children: [
                   FilledButton.icon(
-                    onPressed: busy || creating ? null : create,
+                    onPressed:
+                        !canEditSection(widget.api.user ?? {}, 'backups') ||
+                            busy ||
+                            creating
+                        ? null
+                        : create,
                     icon: const Icon(Icons.backup_outlined),
                     label: const Text('Create backup'),
                   ),
                   OutlinedButton.icon(
-                    onPressed: busy || creating
+                    onPressed:
+                        !canEditSection(widget.api.user ?? {}, 'backups') ||
+                            busy ||
+                            creating
                         ? null
                         : () => showDialog<void>(
                             context: context,
@@ -200,7 +211,9 @@ class _LocalBackupState extends State<LocalBackup> {
                     ),
                 ],
               ),
-              if (busy || creating) ...[
+              if (!canEditSection(widget.api.user ?? {}, 'backups') ||
+                  busy ||
+                  creating) ...[
                 const SizedBox(height: 12),
                 const LinearProgressIndicator(),
                 Text(

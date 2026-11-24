@@ -239,6 +239,10 @@ def test_changed_config_requires_recheck_disconnect_cancels_pending(client, owne
 @pytest.mark.parametrize('method', ['card', 'credit', 'extend', 'fib', 'fastpay'])
 def test_actual_confirmed_recharge_hooks_queue_from_managers(client, owner, setup, monkeypatch, method):
     mid, manager = user(client, owner, 'manager', name='wa-recharge-manager')
+    if method == 'fib':
+        assert client.put('/api/users/' + mid + '/sections', headers=owner, json={
+            'sections': ['isp_card', 'fib_recharge'],
+            'editable_sections': ['isp_card', 'fib_recharge'], 'deletable_sections': []}).status_code == 200
     client.put('/api/integrations/sas4', headers=manager, json=SAS_SETTINGS)
     calls = []
     def redeem(*args, **kwargs):

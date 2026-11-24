@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -119,8 +120,10 @@ class _Sas4CardsState extends State<Sas4Cards> with LanguageRebuild {
     'delete': 'Delete series',
   };
 
+  bool allowedAction(String action) => actions[action] == true && (action == 'delete' ? canDeleteSection(widget.api.user ?? {}, 'card_system') : canEditSection(widget.api.user ?? {}, 'card_system'));
+
   Future<void> change(Map row, String action) async {
-    if (changing || busy || actions[action] != true) return;
+    if (changing || busy || !allowedAction(action)) return;
     final id = '${row['series']}';
     int? newOwner;
     DateTime? newExpiry;
@@ -408,12 +411,12 @@ class _Sas4CardsState extends State<Sas4Cards> with LanguageRebuild {
                                 !busy &&
                                 !changing &&
                                 actionLabels.keys.any(
-                                  (key) => actions[key] == true,
+                                  (key) => allowedAction(key),
                                 ),
                             onSelected: (action) => change(row as Map, action),
                             itemBuilder: (_) => [
                               for (final action in actionLabels.entries)
-                                if (actions[action.key] == true)
+                                if (allowedAction(action.key))
                                   PopupMenuItem(
                                     value: action.key,
                                     child: AppText(action.value),

@@ -28,6 +28,10 @@ void main() {
   Future<void> mount(WidgetTester tester, Widget child) async {
     await tester.binding.setSurfaceSize(const Size(1000, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    if (child is WhatsAppSettings) {
+      child.api.user ??= {};
+      child.api.user!.putIfAbsent('role', () => 'owner');
+    }
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: SingleChildScrollView(child: child)),
@@ -157,6 +161,8 @@ void main() {
         );
       }),
     );
+    api.user ??= {};
+    api.user!.putIfAbsent('role', () => 'owner');
     await tester.pumpWidget(
       MaterialApp(home: CustomerWhatsApp(api: api, customerId: 7)),
     );
@@ -185,6 +191,8 @@ void main() {
         );
       }),
     );
+    api.user ??= {};
+    api.user!.putIfAbsent('role', () => 'owner');
     await tester.pumpWidget(
       MaterialApp(home: CustomerWhatsApp(api: api, customerId: 7)),
     );

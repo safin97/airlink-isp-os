@@ -90,7 +90,7 @@ def configured(db, user_id=None):
         bot = owners[0] if len(owners) == 1 else None
     owner = db.get(User, bot.user_id) if bot else None
     connection = db.get(SAS4UserConnection, bot.user_id) if bot else None
-    if bot and owner and owner.active and owner.role == 'owner' and connection and bot.sas4_username == connection.username:
+    if bot and owner and owner.active and section_access.has_capability(owner, 'telegram_bot', db, write=True) and connection and bot.sas4_username == connection.username:
         return bot
     return None
 
@@ -151,13 +151,12 @@ def public_bot(bot):
 
 @router.get('')
 def status(user=Depends(access), db=Depends(get_db)):
-    return {**public_bot(configured(db)), 'can_manage': user.role == 'owner', 'sender': 'owner'}
+    return {**public_bot(configured(db)), 'can_manage': section_access.has_capability(user, 'telegram_bot', db, write=True), 'sender': 'owner'}
 
 
 @router.put('')
 def save_bot(data: BotInput, user=Depends(editor), db=Depends(get_db)):
-    if user.role != 'owner':
-        raise HTTPException(403, 'Only an owner can configure the shared customer Telegram bot')
+    section_access.require_any(user, ('telegram_bot',), db, write=True)
     sender = configured(db)
     if sender and sender.user_id != user.id and not data.bot_token:
         raise HTTPException(409, 'Another owner configured the shared sender. Enter your bot token to replace it.')

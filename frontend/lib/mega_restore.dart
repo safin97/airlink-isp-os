@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -41,7 +42,7 @@ class _MegaRestoreDialogState extends State<MegaRestoreDialog> {
   @override
   void initState() {
     super.initState();
-    if (widget.api.user?['role'] == 'owner') {
+    if (hasSection(widget.api.user ?? {}, 'backups')) {
       initialize();
       timer = Timer.periodic(const Duration(seconds: 3), (_) => poll());
     }
@@ -218,8 +219,14 @@ class _MegaRestoreDialogState extends State<MegaRestoreDialog> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.api.user?['role'] != 'owner') return const SizedBox.shrink();
-    final locked = busy || working || pending;
+    if (!hasSection(widget.api.user ?? {}, 'backups')) {
+      return const SizedBox.shrink();
+    }
+    final locked =
+        !canEditSection(widget.api.user ?? {}, 'backups') ||
+        busy ||
+        working ||
+        pending;
     return PopScope(
       canPop: !uploading,
       child: AlertDialog(
@@ -294,7 +301,10 @@ class _MegaRestoreDialogState extends State<MegaRestoreDialog> {
                     'An upload is in progress or was interrupted. Cancel it before selecting another backup.',
                   ),
                   TextButton(
-                    onPressed: busy || state['token'] == null
+                    onPressed:
+                        !canEditSection(widget.api.user ?? {}, 'backups') ||
+                            busy ||
+                            state['token'] == null
                         ? null
                         : () => action('cancel'),
                     child: const Text('Cancel file upload'),
@@ -303,7 +313,11 @@ class _MegaRestoreDialogState extends State<MegaRestoreDialog> {
                   const SizedBox(height: 12),
                   if (widget.fromComputer) ...[
                     OutlinedButton.icon(
-                      onPressed: busy ? null : browse,
+                      onPressed:
+                          !canEditSection(widget.api.user ?? {}, 'backups') ||
+                              busy
+                          ? null
+                          : browse,
                       icon: const Icon(Icons.folder_open),
                       label: const Text('Browse backup file'),
                     ),

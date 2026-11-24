@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -257,11 +258,11 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
         runSpacing: 12,
         children: [
           FilledButton(
-            onPressed: busy ? null : () => run(save),
+            onPressed: !canEditSection(widget.api.user ?? {}, 'whatsapp') || busy ? null : () => run(save),
             child: const Text('Save WhatsApp settings'),
           ),
           OutlinedButton(
-            onPressed: busy || dirty || data['token_saved'] != true
+            onPressed: !canEditSection(widget.api.user ?? {}, 'whatsapp') || busy || dirty || data['token_saved'] != true
                 ? null
                 : () => run(() async {
                     await widget.api.request(
@@ -281,7 +282,7 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
             child: const Text('Refresh status'),
           ),
           TextButton(
-            onPressed: busy || data['token_saved'] != true
+            onPressed: !canDeleteSection(widget.api.user ?? {}, 'whatsapp') || busy || data['token_saved'] != true
                 ? null
                 : () async {
                     final confirmed = await showDialog<bool>(

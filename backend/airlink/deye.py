@@ -253,7 +253,7 @@ def settings(user=Depends(access), db=Depends(get_db)):
     source = reading_owner(user, db)
     with lock_for(source):
         row = db.get(DeyeConnection, source.id)
-        if user.role == 'owner':
+        if source.id == user.id:
             return public(row)
         return {'configured': row is not None, 'shared': True,
                 'dashboard_station': row.dashboard_station if row is not None else None}

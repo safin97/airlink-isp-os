@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .config import settings
-from .section_access import enforce_request, require_any, role_policy
+from .section_access import enforce_request, require_any, role_policy, administrative_feature, require_feature
 from .db import get_db
 from .models import User, LoginSession, RefreshToken, now
 
@@ -66,17 +66,37 @@ def resolve_user(token, db):
         raise HTTPException(401, "Session expired; sign in again")
 
 
-def current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(bearer), db=Depends(get_db)):
+async def current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(bearer), db=Depends(get_db)):
     if not credentials:
         raise HTTPException(401, "Sign in required")
     user = resolve_user(credentials.credentials, db)
-    enforce_request(user, request.method, request.url.path)
+    body = None
+    if request.method not in ('GET', 'HEAD', 'OPTIONS') and request.url.path.rstrip('/') in (
+            '/api/card-system/radius/action', '/api/integrations/ttlock/mobile/prepare',
+            '/api/integrations/ttlock/bridge/jobs'):
+        try:
+            body = await request.json()
+        except ValueError:
+            pass  # Endpoint validation reports malformed JSON.
+    enforce_request(user, request.method, request.url.path, body)
     return user
 
 
-def owner(user=Depends(current_user)):
-    if user.role != "owner":
-        raise HTTPException(403, "Owner access required")
+def owner(request: Request, user=Depends(current_user)):
+    """Privileged feature access; caller identity is never changed to the owner."""
+    if user.role == 'owner':
+        return user
+    path = request.url.path.rstrip('/')
+    feature = administrative_feature(path)
+    if path.startswith('/api/integrations/deye'):
+        feature = 'deye_management'
+    if feature is None and path.startswith(('/api/places', '/api/towers', '/api/devices', '/api/discovery', '/api/links')):
+        feature = 'inventory_admin'
+    if feature is None:
+        raise HTTPException(403, 'Owner access required')
+    # current_user already checked the method and JSON action for registered features.
+    if administrative_feature(path) is None:
+        require_feature(user, feature, request.method, path)
     return user
 
 

@@ -8,6 +8,7 @@ from updates import pc, update
 
 @pytest.fixture
 def system(tmp_path, monkeypatch):
+    monkeypatch.setattr(pc.gpu_driver, 'detect', lambda: [])
     monkeypatch.setattr(pc, 'ROOT', tmp_path / 'pc-updates')
     monkeypatch.setattr(update, 'ROOT', tmp_path / 'updates')
     monkeypatch.setattr(pc, 'DPKG_STATUS', tmp_path / 'dpkg-status')
@@ -190,3 +191,59 @@ def test_failed_online_check_hides_previous_plan(system, monkeypatch):
         pc.worker('check')
     assert pc.status()['plan'] is None
     assert pc.status()['state']['status'] == 'rejected'
+
+
+def test_missing_gpu_driver_enters_reviewed_plan(system, monkeypatch):
+    monkeypatch.setattr(pc.gpu_driver, 'missing_driver_plan', lambda run: {
+        'targets': ['nvidia-open=610.1'], 'kernel': '6.12-amd64', 'message': 'Install GTX driver, then restart.'})
+    original = pc.run
+    def run(command, **kwargs):
+        if '--simulate' in command and 'install' in command:
+            assert 'nvidia-open=610.1' in command
+            return 'Inst linux-image-amd64 [6.1] (6.2 repo)\nInst nvidia-open (610.1 repo)'
+        return original(command, **kwargs)
+    monkeypatch.setattr(pc, 'run', run)
+    pc.action('check', {})
+    pc.worker('check')
+    plan = pc.status()['plan']
+    assert plan['gpu']['kernel'] == '6.12-amd64'
+    assert {'name': 'nvidia-open', 'installed': None, 'candidate': '610.1', 'category': 'GPU driver'} in plan['packages']
+    assert not any('--assume-yes' in command for command in system[1])
+
+
+@pytest.mark.parametrize('module_built', [True, False])
+def test_driver_install_checks_module_build_before_claiming_success(system, monkeypatch, module_built):
+    plan, calls = system
+    plan['gpu'] = {'kernel': '6.12-amd64', 'targets': ['nvidia-open=610.1']}
+    update.atomic(pc.ROOT / 'plan.json', plan)
+    monkeypatch.setattr(pc.gpu_driver.platform, 'release', lambda: '6.12-amd64')
+    original = pc.run
+    def run(command, **kwargs):
+        if command[0] == 'modinfo':
+            calls.append(command)
+            return '610.1' if module_built else ''
+        return original(command, **kwargs)
+    monkeypatch.setattr(pc, 'run', run)
+    pc.action('install', {'confirm': True, 'plan_id': plan['id']})
+    if module_built:
+        pc.worker('install')
+        assert pc.status()['state']['status'] == 'installed'
+        assert 'After restarting, verify' in pc.status()['gpu_message']
+    else:
+        with pytest.raises(RuntimeError, match='module was not built'):
+            pc.worker('install')
+        assert pc.status()['state']['recovery_required'] is True
+    module = next(c for c in calls if c[0] == 'modinfo')
+    installation = next(c for c in calls if '--no-download' in c)
+    assert calls.index(module) > calls.index(installation)
+
+
+def test_kernel_change_invalidates_gpu_plan_before_install(system, monkeypatch):
+    plan, calls = system
+    plan['gpu'] = {'kernel': '6.12-amd64'}
+    update.atomic(pc.ROOT / 'plan.json', plan)
+    monkeypatch.setattr(pc.gpu_driver.platform, 'release', lambda: '6.13-amd64')
+    pc.action('install', {'confirm': True, 'plan_id': plan['id']})
+    with pytest.raises(ValueError, match='running kernel changed'):
+        pc.worker('install')
+    assert not any('--download-only' in command or '--no-download' in command for command in calls)

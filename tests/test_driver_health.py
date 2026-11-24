@@ -43,6 +43,17 @@ def test_bound_missing_optional_and_nvidia_telemetry(tmp_path, monkeypatch):
     assert health.collect([], tmp_path)['counts']['loaded'] == 0
 
 
+def test_diagnostics_uses_resolved_gpu_model_without_claiming_driver_loaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(health, 'pci_names', lambda: {'0000:01:00.0': 'NVIDIA Device 2191'})
+    device(tmp_path, 'pci', '0000:01:00.0', **{'class': '0x030000'})
+    result = health.collect([{'pci_address': '0000:01:00.0',
+                             'name': 'NVIDIA GeForce GTX 1660 Ti (laptop)',
+                             'status': 'not_loaded'}], tmp_path)
+    row = result['devices'][0]
+    assert row['name'] == 'NVIDIA GeForce GTX 1660 Ti (laptop)'
+    assert row['status'] == 'warning' and row['driver'] is None
+
+
 def test_usb_platform_builtin_cpu_and_module_transition(tmp_path, monkeypatch):
     monkeypatch.setattr(health, 'pci_names', lambda: {})
     device(tmp_path, 'usb', '1-1', 'usb', authorized='0', product='USB device')

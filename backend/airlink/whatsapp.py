@@ -1,3 +1,4 @@
+from .section_access import has_capability
 """Owner-selected WhatsApp Cloud API notifications; never performs a recharge."""
 import asyncio
 import hashlib
@@ -80,7 +81,7 @@ def configured(db):
     row = db.get(Settings, 1)
     user = db.get(User, row.user_id) if row else None
     connection = db.get(SAS4UserConnection, row.user_id) if row else None
-    return row if (user and user.active and user.role == 'owner' and connection
+    return row if (user and user.active and has_capability(user, 'whatsapp', db, write=True) and connection
                    and connection.username == row.sas4_username) else None
 
 

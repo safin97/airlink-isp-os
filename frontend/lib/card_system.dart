@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'api.dart';
@@ -15,7 +16,7 @@ class _CardSystemState extends State<CardSystem> with LanguageRebuild {
   bool saved = false;
   @override
   Widget build(BuildContext context) {
-    if (widget.api.user?['role'] != 'owner') {
+    if (!hasSection(widget.api.user ?? {}, 'card_system')) {
       return const AppText('Owner access required');
     }
     return Column(
@@ -74,7 +75,7 @@ class _SavedCardInventoryState extends State<SavedCardInventory>
   bool busy = false;
   bool showPin = false;
   String? error;
-  bool get owner => widget.api.user?['role'] == 'owner';
+  bool get owner => hasSection(widget.api.user ?? {}, 'card_system');
 
   @override
   void initState() {
@@ -407,7 +408,11 @@ class _SavedCardInventoryState extends State<SavedCardInventory>
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
-                    onPressed: busy ? null : save,
+                    onPressed:
+                        !canEditSection(widget.api.user ?? {}, 'card_system') ||
+                            busy
+                        ? null
+                        : save,
                     icon: const Icon(Icons.add_card),
                     label: const AppText('Add PIN code'),
                   ),
@@ -460,7 +465,7 @@ class _SavedCardInventoryState extends State<SavedCardInventory>
                 children: [
                   IconButton(
                     tooltip: tr('Card profile and price'),
-                    onPressed: busy || card['state'] != 'available'
+                    onPressed: !canEditSection(widget.api.user ?? {}, 'card_system') || busy || card['state'] != 'available'
                         ? null
                         : () => editProfile(card),
                     icon: const Icon(Icons.edit_outlined),
@@ -475,7 +480,7 @@ class _SavedCardInventoryState extends State<SavedCardInventory>
                   ),
                   IconButton(
                     tooltip: tr('Remove saved card'),
-                    onPressed: busy || card['state'] != 'available'
+                    onPressed: !canDeleteSection(widget.api.user ?? {}, 'card_system') || busy || card['state'] != 'available'
                         ? null
                         : () => remove(card),
                     icon: const Icon(Icons.delete_outline),

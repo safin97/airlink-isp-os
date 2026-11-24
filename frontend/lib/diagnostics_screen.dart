@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -150,7 +151,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           loading: loading,
         ),
         const SizedBox(height: 16),
-        if (widget.api.user?['role'] == 'owner') ...[
+        if (hasSection(widget.api.user ?? {}, 'pc_updates')) ...[
           PcUpdates(api: widget.api),
           const SizedBox(height: 16),
         ],

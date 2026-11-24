@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'recharge_telegram.dart';
@@ -28,7 +29,7 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings>
   @override
   void initState() {
     super.initState();
-    if (widget.api.user?['role'] != 'owner') return;
+    if (!hasSection(widget.api.user ?? {}, 'telegram_account')) return;
     run(
       () async => status = Map<String, dynamic>.from(
         await widget.api.request(telegramAccountPath),
@@ -121,7 +122,7 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings>
 
   @override
   Widget build(BuildContext context) {
-    if (widget.api.user?['role'] != 'owner') {
+    if (!hasSection(widget.api.user ?? {}, 'telegram_account')) {
       return const Text('Only owners can connect a Telegram account.');
     }
     final profile = status['profile'];
@@ -163,14 +164,24 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings>
           ),
           field(code, 'Telegram login code', secret: true, numeric: true),
           FilledButton(
-            onPressed: busy || coolingDown ? null : () => run(verify),
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'telegram_account') ||
+                    busy ||
+                    coolingDown
+                ? null
+                : () => run(verify),
             child: const Text('Verify code'),
           ),
         ] else if (stage == 'password') ...[
           const Text('Your Telegram account uses two-step verification.'),
           field(password, 'Telegram two-step password', secret: true),
           FilledButton(
-            onPressed: busy || coolingDown ? null : () => run(verify),
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'telegram_account') ||
+                    busy ||
+                    coolingDown
+                ? null
+                : () => run(verify),
             child: const Text('Sign in to Telegram'),
           ),
         ] else ...[
@@ -182,13 +193,21 @@ class _TelegramAccountSettingsState extends State<TelegramAccountSettings>
           field(apiHash, 'Telegram API hash', secret: true),
           field(phone, 'Your Telegram phone number (+country code)'),
           FilledButton(
-            onPressed: busy || coolingDown ? null : () => run(login),
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'telegram_account') ||
+                    busy ||
+                    coolingDown
+                ? null
+                : () => run(login),
             child: const Text('Send login code'),
           ),
         ],
         if (stage != 'disconnected' || error != null)
           TextButton(
-            onPressed: busy || coolingDown
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'telegram_account') ||
+                    busy ||
+                    coolingDown
                 ? null
                 : () => run(() async {
                     status = Map<String, dynamic>.from(
@@ -251,7 +270,7 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
     if (busy ||
         coolingDown ||
         !connected ||
-        widget.api.user?['role'] != 'owner') {
+        !hasSection(widget.api.user ?? {}, 'telegram_account')) {
       return;
     }
     setState(() {
@@ -276,7 +295,9 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
   }
 
   Future<void> check() async {
-    if (widget.api.user?['role'] != 'owner' || coolingDown) return;
+    if (!hasSection(widget.api.user ?? {}, 'telegram_account') || coolingDown) {
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
@@ -349,7 +370,9 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
 
   @override
   Widget build(BuildContext context) {
-    if (widget.api.user?['role'] != 'owner') return const SizedBox.shrink();
+    if (!hasSection(widget.api.user ?? {}, 'telegram_account')) {
+      return const SizedBox.shrink();
+    }
     final person = result?['profile'];
     return Card(
       child: Padding(
@@ -425,7 +448,14 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
                     : 'Test sender: ${sender?['first_name'] ?? 'connected Telegram account'} ${sender?['last_name'] ?? ''}',
               ),
               FilledButton.icon(
-                onPressed: busy || coolingDown || result?['test_token'] == null
+                onPressed:
+                    !canEditSection(
+                          widget.api.user ?? {},
+                          'telegram_account',
+                        ) ||
+                        busy ||
+                        coolingDown ||
+                        result?['test_token'] == null
                     ? null
                     : sendTest,
                 icon: const Icon(Icons.send_outlined),
@@ -436,7 +466,12 @@ class _TelegramPhoneLookupState extends State<TelegramPhoneLookup>
               ),
             ],
             OutlinedButton.icon(
-              onPressed: busy || coolingDown ? null : check,
+              onPressed:
+                  !canEditSection(widget.api.user ?? {}, 'telegram_account') ||
+                      busy ||
+                      coolingDown
+                  ? null
+                  : check,
               icon: const Icon(Icons.search),
               label: const Text('Check saved phone'),
             ),

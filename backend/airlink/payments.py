@@ -11,13 +11,13 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_
 from sqlalchemy.exc import IntegrityError
 from . import sas4, section_access, radius_pin
 from .db import get_db, SessionLocal
-from .models import (PaymentGateway, RechargePayment, RechargeCardReservation,
+from .models import (PaymentGateway, SharedPaymentGateway, RechargePayment, RechargeCardReservation,
                      SavedRechargeCard, RadiusCardReservation, SAS4UserConnection, User, now, audit)
-from .security import cipher, aware
+from .security import cipher, aware, owner
 
 router = APIRouter(prefix='/api/payments', tags=['Payments'])
 Provider = Literal['fib', 'fastpay']
@@ -68,7 +68,7 @@ def decoded(secret):
     try:
         return json.loads(cipher().decrypt(secret.encode()).decode())
     except Exception as exc:
-        raise PaymentError('Merchant credentials cannot be read. Save them again in My account.') from exc
+        raise PaymentError('Merchant credentials cannot be read. Ask the owner to save Payment setup again.') from exc
 
 
 def gateway_status(config):
@@ -77,27 +77,41 @@ def gateway_status(config):
 
 
 @router.get('/gateways')
-def gateways(user=Depends(sas4.sas4_access), db=Depends(get_db)):
-    configs = {c.provider: c for c in db.scalars(select(PaymentGateway).where(PaymentGateway.user_id == user.id))}
+def gateways(user=Depends(owner), db=Depends(get_db)):
+    configs = shared_gateways(db)
     return [gateway_status(configs[p]) if p in configs else {'provider': p, 'configured': False, 'environment': 'sandbox', 'merchant_id': '', 'has_secret': False} for p in ('fib', 'fastpay')]
 
 
 @router.get('/methods')
 def payment_methods(user=Depends(sas4.sas4_access), db=Depends(get_db)):
     # Checkout only needs availability; merchant configuration stays owner-only.
-    configs = {c.provider: c for c in db.scalars(select(PaymentGateway).where(PaymentGateway.user_id == user.id))}
+    configs = shared_gateways(db)
     return [{'provider': p, 'configured': p in configs,
              'environment': configs[p].environment if p in configs else 'sandbox'} for p in ('fib', 'fastpay')]
 
 
+def shared_gateway(db, provider):
+    selected = db.get(SharedPaymentGateway, provider)
+    actor = db.get(User, selected.user_id) if selected and selected.user_id else None
+    if not actor or not actor.active or not section_access.has_capability(actor, 'payment_gateways', db, write=True):
+        return None
+    return db.get(PaymentGateway, (actor.id, provider))
+
+
+def shared_gateways(db):
+    return {provider: config for provider in ('fib', 'fastpay')
+            if (config := shared_gateway(db, provider)) is not None}
+
+
 @router.put('/gateways/{provider}')
-def save_gateway(provider: Provider, data: GatewayInput, user=Depends(sas4.sas4_access), db=Depends(get_db)):
+def save_gateway(provider: Provider, data: GatewayInput, user=Depends(owner), db=Depends(get_db)):
     merchant = data.merchant_id.strip()
     if not merchant:
         raise HTTPException(422, 'Merchant identifier is required')
     config = db.get(PaymentGateway, (user.id, provider))
-    previous = decoded(config.encrypted_credentials) if config and not data.secret else {}
-    if not data.secret and (not config or previous.get('merchant_id') != merchant or config.environment != data.environment):
+    current = shared_gateway(db, provider)
+    previous = decoded(current.encrypted_credentials) if current and not data.secret else {}
+    if not data.secret and (not current or previous.get('merchant_id') != merchant or current.environment != data.environment):
         raise HTTPException(422, 'Enter the merchant secret when adding or changing the account or environment')
     secret = data.secret or previous.get('secret')
     if config is None:
@@ -106,8 +120,17 @@ def save_gateway(provider: Provider, data: GatewayInput, user=Depends(sas4.sas4_
     config.environment = data.environment
     config.encrypted_credentials = cipher().encrypt(json.dumps({'merchant_id': merchant, 'secret': secret}).encode()).decode()
     config.updated_at = now()
+    selected = db.get(SharedPaymentGateway, provider)
+    if selected is None:
+        selected = SharedPaymentGateway(provider=provider)
+        db.add(selected)
+    selected.user_id = user.id
     audit(db, user, 'payment.gateway.configure', provider)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, 'Payment setup changed while saving. Reload the settings and try again.') from None
     return gateway_status(config)
 
 
@@ -138,7 +161,7 @@ def fib_headers(client, base, credentials):
     except httpx.HTTPError as exc:
         raise PaymentError('FIB authentication could not be reached. Check your internet connection and try again.') from exc
     if response.status_code in (400, 401, 403):
-        raise PaymentError('FIB rejected the merchant credentials. Check the FIB client ID, client secret, and Sandbox/Production environment in My account → Payment setup.')
+        raise PaymentError('FIB rejected the merchant credentials. The owner must check the FIB client ID, client secret, and Sandbox/Production environment in My account → Payment setup.')
     try:
         data = provider_json(response)
     except PaymentError as exc:
@@ -150,10 +173,9 @@ def fib_headers(client, base, credentials):
 
 
 @router.post('/gateways/fib/test')
-def test_fib_connection(user=Depends(sas4.sas4_access), db=Depends(get_db)):
-    if user.role != 'owner':
-        raise HTTPException(403, 'Owner access is required to test payment settings.')
-    config = db.get(PaymentGateway, (user.id, 'fib'))
+def test_fib_connection(user=Depends(owner), db=Depends(get_db)):
+    section_access.require_any(user, ('payment_gateways',), db, write=True)
+    config = shared_gateway(db, 'fib')
     if not config:
         raise HTTPException(409, 'Save the FIB merchant settings first.')
     try:
@@ -331,8 +353,7 @@ def public_order(order):
 
 @router.get('/users/{user_id}/radius-card')
 def radius_card_quote(user_id: int, user=Depends(sas4.sas4_access), db=Depends(get_db)):
-    if user.role != 'owner':
-        raise HTTPException(403, 'Owner access is required for SAS4 card checkout.')
+    section_access.require_any(user, ('fib_recharge',), db)
     if user_id < 1:
         raise HTTPException(422, 'Invalid SAS4 user ID')
     connection, password = sas4.local_user_connection(db, user)
@@ -360,6 +381,8 @@ def begin_payment(user_id: int, data: PaymentInput, user=Depends(sas4.sas4_acces
 
 
 def begin_customer_payment(user_id, data, user, db, package_profile_id=None):
+    if data.provider == 'fib':
+        section_access.require_any(user, ('fib_recharge',), db, write=True)
     if user_id < 1:
         raise HTTPException(422, 'Invalid SAS4 user ID')
     existing = db.get(RechargePayment, data.transaction_id)
@@ -371,12 +394,12 @@ def begin_customer_payment(user_id, data, user, db, package_profile_id=None):
         RechargePayment.sas4_user_id == user_id, RechargePayment.status.in_(['creating', 'pending', 'activating', 'paid_review', 'creation_unknown', 'review_required'])).limit(1))
     if outstanding:
         return public_order(outstanding)
-    config = db.get(PaymentGateway, (user.id, data.provider))
+    config = shared_gateway(db, data.provider)
     if not config:
-        raise HTTPException(409, 'Configure this payment provider in My account first.')
+        raise HTTPException(409, 'This payment method is not configured. Ask the owner to complete Payment setup.')
     radius = data.provider == 'fib' and data.card_source == 'radius_pin'
     if data.provider == 'fib':
-        if user.role != 'owner':
+        if not radius and not section_access.has_capability(user, 'card_system', db, write=True):
             raise HTTPException(403, 'Owner access is required to issue cards from Card System.')
         amount = None  # Loaded from the reserved card, never from a customer-entered amount.
     connection, password = sas4.local_user_connection(db, user)
@@ -413,7 +436,8 @@ def begin_customer_payment(user_id, data, user, db, package_profile_id=None):
             raise HTTPException(409, 'SAS4 package details could not be verified. No payment was created.') from None
     order = RechargePayment(id=data.transaction_id, user_id=user.id, sas4_user_id=user_id, sas4_username=connection.username,
         provider=data.provider, environment=config.environment, encrypted_credentials=config.encrypted_credentials,
-        status='creating', amount=str(amount), currency='IQD', quote={k: quote[k] for k in ('profile_id', 'expiration', 'manager_cost')})
+        status='creating', amount=str(amount), currency='IQD', quote={
+            **{k: quote[k] for k in ('profile_id', 'expiration', 'manager_cost')}, 'merchant_owner_id': config.user_id})
     # Serialize reservation of a payment slot for this subscriber across browser tabs.
     from .api import cache
     from redis.exceptions import RedisError, WatchError
@@ -583,12 +607,16 @@ def reconcile_order(db, order):
         return
     actor = db.get(User, order.user_id) if order.user_id else None
     connection = db.get(SAS4UserConnection, order.user_id) if order.user_id else None
-    if not actor or not actor.active or (auto_card and actor.role != 'owner') or (actor.role not in ('owner', 'manager') and section_access.role_policy(actor, db) is None) or not connection or connection.username != order.sas4_username:
+    if not actor or not actor.active or (auto_card and not radius and not section_access.has_capability(actor, 'card_system', db, write=True)) or (actor.role not in ('owner', 'manager') and section_access.role_policy(actor, db) is None) or not connection or connection.username != order.sas4_username:
         order.status, order.detail = 'paid_review', 'Payment received. SAS4 account access changed; activation requires review.'
         db.commit()
         return
-    if section_access.role_policy(actor, db) is not None and 'isp_card' not in section_access.editable(actor, db):
+    if (actor.role == 'manager' or section_access.role_policy(actor, db) is not None) and 'isp_card' not in section_access.editable(actor, db):
         order.status, order.detail = 'paid_review', 'Payment received. Recharge permission changed; activation requires review.'
+        db.commit()
+        return
+    if actor.role != 'owner' and order.provider == 'fib' and 'fib_recharge' not in section_access.editable(actor, db):
+        order.status, order.detail = 'paid_review', 'Payment received. FIB recharge permission changed; activation requires review.'
         db.commit()
         return
     try:
@@ -644,15 +672,23 @@ def reconcile_order(db, order):
 
 @router.get('/users/{user_id}')
 def user_payments(user_id: int, user=Depends(sas4.sas4_access), db=Depends(get_db)):
-    rows = db.scalars(select(RechargePayment).where(RechargePayment.user_id == user.id, RechargePayment.sas4_user_id == user_id)
+    scope = RechargePayment.user_id == user.id
+    if section_access.has_capability(user, 'payment_gateways', db):
+        scope = or_(scope, RechargePayment.quote['merchant_owner_id'].as_string() == user.id)
+    rows = db.scalars(select(RechargePayment).where(scope, RechargePayment.sas4_user_id == user_id)
         .order_by(RechargePayment.created_at.desc()).limit(10)).all()
     return [public_order(row) for row in rows]
+
+
+def may_view_order(user, order):
+    return order and (order.user_id == user.id or
+                      (section_access.has_capability(user, 'payment_gateways') and order.quote.get('merchant_owner_id') == user.id))
 
 
 @router.get('/orders/{order_id}')
 def payment_status(order_id: str, user=Depends(sas4.sas4_access), db=Depends(get_db)):
     order = db.get(RechargePayment, order_id)
-    if not order or order.user_id != user.id:
+    if not may_view_order(user, order):
         raise HTTPException(404, 'Payment not found')
     return public_order(order)
 
@@ -660,10 +696,9 @@ def payment_status(order_id: str, user=Depends(sas4.sas4_access), db=Depends(get
 @router.post('/orders/{order_id}/review-creation')
 def review_creation(order_id: str, data: CreationReview, user=Depends(sas4.sas4_access), db=Depends(get_db)):
     order = db.scalar(select(RechargePayment).where(RechargePayment.id == order_id).with_for_update())
-    if not order or order.user_id != user.id:
+    if not may_view_order(user, order):
         raise HTTPException(404, 'Payment not found')
-    if user.role != 'owner':
-        raise HTTPException(403, 'Owner access is required to review payment creation.')
+    section_access.require_any(user, ('payment_gateways',), db, write=True)
     if order.provider != 'fib' or order.status != 'creation_unknown' or order.provider_id:
         raise HTTPException(409, 'Only unconfirmed FIB creation without a bank payment ID can be reviewed here.')
     claimed = db.execute(update(RechargePayment).where(

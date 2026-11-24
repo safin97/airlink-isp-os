@@ -51,8 +51,9 @@ def manager_configuration(db, user, manager_id):
 
 @router.get('')
 def catalog(user=Depends(owner), db=Depends(get_db)):
+    from .api import tower_ids
     towers = []
-    for tower in db.scalars(select(Tower).order_by(Tower.name)):
+    for tower in db.scalars(select(Tower).where(Tower.id.in_(tower_ids(db, user))).order_by(Tower.name)):
         towers.append({'id': tower.id, 'name': tower.name, **public_login(tower_api.configuration(db, tower.id))})
     connection = db.get(SAS4UserConnection, user.id)
     _, settings = load_settings(db, user)
@@ -66,7 +67,8 @@ def save(data: LoginInput, user=Depends(owner), db=Depends(get_db)):
     if not data.username.strip():
         raise HTTPException(422, 'Enter a device username')
     if data.scope == 'tower':
-        tower = db.get(Tower, data.target_id)
+        from .api import check_tower
+        tower = check_tower(db, user, data.target_id, write=True)
         if tower is None:
             raise HTTPException(404, 'Tower not found')
         tower_api.save(db, tower.id, TowerInput(name=tower.name, api_enabled=data.enabled,

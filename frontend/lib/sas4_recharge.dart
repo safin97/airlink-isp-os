@@ -76,7 +76,8 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
               ? 'credit'
               : method] ==
           true &&
-      (method != 'fib' || widget.api.user?['role'] == 'owner');
+      (method != 'fib' ||
+          canEditSection(widget.api.user ?? {}, 'fib_recharge'));
   bool get ready =>
       canEditSection(widget.api.user ?? {}, 'isp_card') &&
       error == null &&
@@ -156,7 +157,10 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
             }
           });
           if (order != null) startPolling();
-          if (widget.api.user?['role'] == 'owner') await loadCards();
+          if (methods['card'] == true &&
+              hasSection(widget.api.user ?? {}, 'fib_recharge')) {
+            await loadCards();
+          }
         } catch (_) {
           /* Direct SAS4 recharge remains available if payment setup cannot load. */
         }
@@ -600,6 +604,13 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
                 'Check the merchant portal before starting another payment.',
         }),
         if (order!['provider'] == 'fib' &&
+            !canEditSection(widget.api.user ?? {}, 'payment_gateways') &&
+            ['creation_failed', 'creation_unknown'].contains(status))
+          const AppText(
+            'Ask the owner to check the bank connection or review this payment using the reference below.',
+          ),
+        if (order!['provider'] == 'fib' &&
+            canEditSection(widget.api.user ?? {}, 'payment_gateways') &&
             ['creation_failed', 'creation_unknown'].contains(status)) ...[
           if (connectionMessage != null) Text(connectionMessage!),
           Wrap(
@@ -712,6 +723,7 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
     const types = [
       ('credit', 'Manager balance', Icons.account_balance_wallet_outlined),
       ('fib', 'FIB Bank', Icons.account_balance_outlined),
+      ('fastpay', 'FastPay', Icons.payments_outlined),
     ];
     bool selected(String type) => method == type;
     final colors = Theme.of(context).colorScheme;
@@ -874,12 +886,20 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
                     rechargeMethods(),
                     const SizedBox(height: 16),
                     if (!permitted)
-                      const AppText(
-                        'Your SAS4 account does not have permission for this method.',
+                      AppText(
+                        method == 'fib' &&
+                                !canEditSection(
+                                  widget.api.user ?? {},
+                                  'fib_recharge',
+                                )
+                            ? 'Ask the owner to enable FIB Bank recharge in your Access Role.'
+                            : 'Your SAS4 account does not have permission for this method.',
                       ),
                     if (bank && gateways[method]?['configured'] != true)
-                      const AppText(
-                        'Set up this merchant account in My account → Payment setup to enable automatic payments.',
+                      AppText(
+                        widget.api.user?['role'] == 'owner'
+                            ? 'Configure this bank for all users in My account → Payment setup.'
+                            : 'This bank is not available yet. Ask the owner to complete Payment setup. You do not need bank credentials.',
                       ),
                     if (bank && gateways[method]?['configured'] == true) ...[
                       Text(

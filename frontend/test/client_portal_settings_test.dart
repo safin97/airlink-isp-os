@@ -12,6 +12,8 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    api.user ??= {};
+    api.user!.putIfAbsent('role', () => 'owner');
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -76,6 +78,8 @@ void main() {
       await tap(tester, 'Save client portal');
       expect(saves.last['subscriber_networks'], ['172.0.0.0/8']);
       await tester.pumpWidget(const SizedBox.shrink());
+      api.user ??= {};
+      api.user!.putIfAbsent('role', () => 'owner');
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

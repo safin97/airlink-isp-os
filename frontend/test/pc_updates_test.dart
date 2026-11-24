@@ -25,6 +25,10 @@ void main() {
               'state': {'status': 'ready'},
               'plan': {
                 'id': 'exact-reviewed-plan',
+                'gpu': {
+                  'message':
+                      'GTX 1660 Ti driver included. Restart after installation.',
+                },
                 'packages': [
                   {
                     'name': 'nvidia-driver',
@@ -40,6 +44,8 @@ void main() {
               'supported': true,
               'state': {'status': 'installed'},
               'reboot_required': true,
+              'gpu_message':
+                  'NVIDIA driver packages installed. Verify after restarting.',
             };
           }
         }
@@ -50,6 +56,7 @@ void main() {
         );
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -62,6 +69,10 @@ void main() {
     await tester.tap(find.text('Check online'));
     await tester.pumpAndSettle();
     expect(find.text('610.1 → 610.2'), findsOneWidget);
+    expect(
+      find.text('GTX 1660 Ti driver included. Restart after installation.'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('Review and install'));
     await tester.pumpAndSettle();
     expect(writes.length, 1);
@@ -78,6 +89,10 @@ void main() {
     });
     expect(
       find.textContaining('Restart recommended to activate updates'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('NVIDIA driver packages installed. Verify after restarting.'),
       findsOneWidget,
     );
   });
@@ -98,6 +113,7 @@ void main() {
         );
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: PcUpdates(api: api)),

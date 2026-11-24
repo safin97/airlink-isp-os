@@ -12,25 +12,51 @@ const operationalSections = <String, String>{
   'alerts': 'Alerts',
   'reports': 'Reports',
 };
+const administrativeSections = <String, String>{
+  'fib_recharge': 'FIB Bank recharge',
+  'managers': 'Managers',
+  'inventory_admin': 'Inventory administration',
+  'device_login': 'Device login',
+  'towers_api': 'Towers API',
+  'card_system': 'Card System',
+  'ttlock': 'TTLock',
+  'deye_management': 'Deye configuration and sharing',
+  'backups': 'Backups and restore',
+  'vpn': 'VPN',
+  'payment_gateways': 'Payment setup',
+  'client_portal': 'Client portal settings',
+  'customer_device_access': 'Customer device access',
+  'device_api_access': 'Device API access',
+  'telegram_bot': 'Customer Telegram bot',
+  'telegram_account': 'Telegram account lookup',
+  'telegram_notifications': 'Telegram notifications',
+  'whatsapp': 'WhatsApp notifications',
+  'pc_updates': 'PC and GPU updates',
+  'snmp_sharing': 'SNMP visibility sharing',
+};
 const assignableSections = <String, String>{
   ...operationalSections,
   'software_updates': 'Software Updates',
   'settings': 'Settings',
   'access_roles': 'Access Roles',
+  ...administrativeSections,
 };
 const pageSections = <String, String>{
-  ...assignableSections,
+  ...operationalSections,
+  'software_updates': 'Software Updates',
+  'settings': 'Settings',
+  'access_roles': 'Access Roles',
   'deye': 'Deye Solar',
   'managers': 'Managers',
+  'ttlock': 'TTLock',
+  'device_login': 'Device login',
+  'towers_api': 'Towers API',
 };
 const ownerSections = <String, String>{
   ...pageSections,
   'diagnostics': 'Diagnostics',
   'my_account': 'My account',
-  'device_login': 'Device login',
-  'towers_api': 'Towers API',
   'card_system': 'Card System',
-  'ttlock': 'TTLock',
 };
 const pinnedOwnerSections = {'access_roles', 'my_account'};
 
@@ -57,6 +83,10 @@ bool hasSection(Map<String, dynamic> user, String key) {
   if ((key == 'access_roles') && !usesSectionPermissions(user)) {
     return user['role'] == 'owner';
   }
+  if (administrativeSections.containsKey(key) &&
+      !usesSectionPermissions(user)) {
+    return false;
+  }
   if (!usesSectionPermissions(user)) return true;
   if (!assignableSections.containsKey(key)) return false;
   final sections = user['sections'] as List?;
@@ -70,7 +100,9 @@ bool canEditSection(Map<String, dynamic> user, String key) {
   if (key == 'deye') return false;
   if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
   final editable = user['editable_sections'] as List?;
-  return editable == null || editable.contains(key);
+  return editable == null
+      ? !administrativeSections.containsKey(key)
+      : editable.contains(key);
 }
 
 bool canDeleteSection(Map<String, dynamic> user, String key) {
@@ -79,7 +111,7 @@ bool canDeleteSection(Map<String, dynamic> user, String key) {
   if (!usesSectionPermissions(user) || !hasSection(user, key)) return false;
   final deletable = user['deletable_sections'] as List?;
   return deletable == null
-      ? canEditSection(user, key)
+      ? !administrativeSections.containsKey(key) && canEditSection(user, key)
       : deletable.contains(key);
 }
 
@@ -88,6 +120,8 @@ bool canReadResource(Map<String, dynamic> user, String resource) {
   if (!usesSectionPermissions(user)) return true;
   const readers = <String, List<String>>{
     'dashboard': ['dashboard', 'noc'],
+    'users': ['managers'],
+    'access-roles': ['access_roles'],
     'towers': ['towers', 'noc', 'network_map', 'monitoring'],
     'places': ['towers'],
     'devices': ['towers', 'noc', 'network_map', 'monitoring'],
@@ -261,7 +295,7 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
               ),
             const SizedBox(height: 8),
             const AppText(
-              'Account administration stays owner-only. Access Roles can be delegated. My account remains available.',
+              'Administrative features require explicit permissions. Managers can delegate only their own permissions. Owner accounts stay protected.',
             ),
             if (error != null)
               Text(
@@ -283,4 +317,89 @@ class _SectionAccessDialogState extends State<SectionAccessDialog> {
       ),
     ],
   );
+}
+
+// Mirror the server's administrative route registry for immediate UI feedback.
+const featureRoutes = <String, String>{
+  '/integrations/ttlock': 'ttlock',
+  '/card-system': 'card_system',
+  '/vpn': 'vpn',
+  '/backups': 'backups',
+  '/towers-api-profiles': 'towers_api',
+  '/integrations/sas4/device-login-profiles': 'device_login',
+  '/integrations/sas4/device-access': 'customer_device_access',
+  '/device-api-access': 'device_api_access',
+  '/payments/gateways': 'payment_gateways',
+  '/client-portal': 'client_portal',
+  '/integrations/telegram-account': 'telegram_account',
+  '/integrations/whatsapp': 'whatsapp',
+  '/system/pc-updates': 'pc_updates',
+  '/users': 'managers',
+  '/snmp-profile-visibility': 'snmp_sharing',
+  '/integrations/telegram': 'telegram_notifications',
+};
+String? featureForRequest(String path) {
+  path = Uri.parse(path).path.replaceFirst(RegExp(r'/$'), '');
+  for (final route in featureRoutes.entries) {
+    if (path == route.key || path.startsWith('${route.key}/')) {
+      return route.value;
+    }
+  }
+  return null;
+}
+
+String featureRequestAction(String method, String path, Object? body) {
+  if (method == 'DELETE') return 'delete';
+  if (['GET', 'HEAD', 'OPTIONS'].contains(method)) {
+    return path.startsWith('/integrations/ttlock/') &&
+            path.endsWith('/bluetooth')
+        ? 'edit'
+        : 'view';
+  }
+  final values = body is Map ? body : const {};
+  final action =
+      path == '/integrations/ttlock/bridge/jobs' && values['parameters'] is Map
+      ? values['parameters']['action']
+      : [
+          '/card-system/radius/action',
+          '/integrations/ttlock/mobile/prepare',
+        ].contains(path)
+      ? values['action']
+      : null;
+  if (action is String &&
+      (action == 'delete' ||
+          action.endsWith('_delete') ||
+          action == 'lock_reset')) {
+    return 'delete';
+  }
+  if (path.startsWith('/integrations/ttlock/mobile/') &&
+      (path.endsWith('/complete') || path.endsWith('/sync'))) {
+    return 'view';
+  }
+  if (path.startsWith('/integrations/ttlock/bridge/jobs/') &&
+      path.endsWith('/claim')) {
+    return 'view';
+  }
+  if (path.endsWith('/delete') ||
+      (path.endsWith('/disconnect') && !path.startsWith('/vpn/'))) {
+    return 'delete';
+  }
+  if (path.startsWith('/card-system/') && path.endsWith('/pin')) return 'view';
+  return 'edit';
+}
+
+bool canFeatureRequest(
+  Map<String, dynamic> user,
+  String path,
+  String method,
+  Object? body,
+) {
+  if (user['role'] == 'owner') return true;
+  final feature = featureForRequest(path);
+  if (feature == null) return true;
+  return switch (featureRequestAction(method, Uri.parse(path).path, body)) {
+    'view' => hasSection(user, feature),
+    'delete' => canDeleteSection(user, feature),
+    _ => canEditSection(user, feature),
+  };
 }

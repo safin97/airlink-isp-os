@@ -54,6 +54,10 @@ On a macOS Desktop folder synchronized by a file provider, Flutter framework sig
 
 ### Chrome on a computer, Android or iPhone
 
+Opening TTLock in the native AirLink app checks permission without contacting a lock. If access is missing, an entry dialog offers **Allow Bluetooth** or **Not now**. Allow opens the operating system's Bluetooth/Nearby devices permission request (and the existing Android discovery-location request). Previously blocked or restricted access offers **Open app settings**; the status refreshes when the app resumes. Already granted permission does not show the entry prompt again. A granted permission is labeled separately from a verified lock connection and does not pair, unlock or change a device.
+
+The website shows **Bluetooth setup** with instructions for the phone bridge. It does not claim to grant native TTLock Bluetooth access from a browser. Permission UI and state checks are covered by `frontend/test/ttlock_bluetooth_permission_test.dart`; real system dialogs still need physical Android/iPhone testing.
+
 1. Install the updated AirLink Android app, or sign/install the updated iPhone app. Update the backend through migration `f42bc1583d69`. Both browser and app must reach the same updated HTTPS server.
 2. Sign in to the same AirLink **owner account** and connect the same TTLock account on both devices.
 3. In the phone app open **TTLock → Share Bluetooth with website**, give the phone a recognizable name and press **Start Bluetooth sharing**. Keep the app open near the locks.

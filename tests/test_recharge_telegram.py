@@ -70,6 +70,10 @@ def test_all_recharge_types_send_receipt_once_from_selected_owner(client, owner,
 @pytest.mark.parametrize('method', ['card', 'credit', 'extend', 'fib', 'fastpay'])
 def test_real_recharge_hooks_for_manager_only_queue_confirmed_success(client, owner, receipts, monkeypatch, method):
     mid, manager = user(client, owner, 'manager', name='recharge-manager')
+    if method == 'fib':
+        assert client.put('/api/users/' + mid + '/sections', headers=owner, json={
+            'sections': ['isp_card', 'fib_recharge'],
+            'editable_sections': ['isp_card', 'fib_recharge'], 'deletable_sections': []}).status_code == 200
     client.put('/api/integrations/sas4', headers=manager, json=SETTINGS)
     activations = []
     def activate(*args, **kwargs):

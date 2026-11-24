@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'telegram_messages.dart';
@@ -17,6 +18,8 @@ class TelegramSettings extends StatefulWidget {
 class _TelegramSettingsState extends State<TelegramSettings> {
   final token = TextEditingController();
   final chat = TextEditingController();
+  bool get canEdit =>
+      canEditSection(widget.api.user ?? {}, 'telegram_notifications');
   bool editingMessages = false;
   bool enabled = false, busy = true, hasToken = false;
   bool languageDirty = false;
@@ -173,7 +176,7 @@ class _TelegramSettingsState extends State<TelegramSettings> {
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: busy || languages.isEmpty
+              onPressed: !canEdit || busy || languages.isEmpty
                   ? null
                   : () => showMessages(true),
               icon: const Icon(Icons.edit_note),
@@ -186,6 +189,7 @@ class _TelegramSettingsState extends State<TelegramSettings> {
             const SizedBox(height: 12),
             TextField(
               controller: token,
+              enabled: canEdit && !busy,
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
@@ -198,6 +202,7 @@ class _TelegramSettingsState extends State<TelegramSettings> {
             ),
             TextField(
               controller: chat,
+              enabled: canEdit && !busy,
               decoration: const InputDecoration(
                 labelText: 'Chat ID or @channelname',
               ),
@@ -221,7 +226,7 @@ class _TelegramSettingsState extends State<TelegramSettings> {
                       ),
                     )
                     .toList(),
-                onChanged: busy ? null : chooseLanguage,
+                onChanged: !canEdit || busy ? null : chooseLanguage,
               ),
             const SizedBox(height: 8),
             const Text(
@@ -236,7 +241,7 @@ class _TelegramSettingsState extends State<TelegramSettings> {
                 'Runs in the background while the monitoring service is active.',
               ),
               value: enabled,
-              onChanged: busy
+              onChanged: !canEdit || busy
                   ? null
                   : (value) => setState(() => enabled = value),
             ),
@@ -245,11 +250,13 @@ class _TelegramSettingsState extends State<TelegramSettings> {
               runSpacing: 8,
               children: [
                 FilledButton(
-                  onPressed: busy || languages.isEmpty ? null : () => save(),
+                  onPressed: !canEdit || busy || languages.isEmpty
+                      ? null
+                      : () => save(),
                   child: const Text('Save'),
                 ),
                 OutlinedButton(
-                  onPressed: busy || languages.isEmpty
+                  onPressed: !canEdit || busy || languages.isEmpty
                       ? null
                       : () => save(test: true),
                   child: const Text('Save and send test'),

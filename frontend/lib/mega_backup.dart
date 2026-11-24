@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -29,7 +30,7 @@ class _MegaBackupState extends State<MegaBackup> {
   int weekday = 6, generation = 0;
   String? error, message;
   Timer? timer;
-  bool get owner => widget.api.user?['role'] == 'owner';
+  bool get owner => hasSection(widget.api.user ?? {}, 'backups');
   bool get running =>
       data['running'] == true ||
       data['testing'] == true ||
@@ -190,7 +191,11 @@ class _MegaBackupState extends State<MegaBackup> {
   @override
   Widget build(BuildContext context) {
     if (!owner) return const SizedBox.shrink();
-    final disabled = busy || loading || running;
+    final disabled =
+        !canEditSection(widget.api.user ?? {}, 'backups') ||
+        busy ||
+        loading ||
+        running;
     const days = [
       'Monday',
       'Tuesday',
@@ -301,7 +306,10 @@ class _MegaBackupState extends State<MegaBackup> {
                   child: const Text('Restore from MEGA'),
                 ),
                 TextButton(
-                  onPressed: disabled || data['has_account_password'] != true
+                  onPressed:
+                      !canDeleteSection(widget.api.user ?? {}, 'backups') ||
+                          busy ||
+                          data['has_account_password'] != true
                       ? null
                       : () => action('/disconnect'),
                   child: const Text('Disconnect MEGA'),

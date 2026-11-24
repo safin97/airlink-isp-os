@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -20,7 +21,7 @@ class _VpnSettingsState extends State<VpnSettings> {
   bool busy = false, reading = false, dirty = false;
   int generation = 0;
   Timer? timer;
-  bool get owner => widget.api.user?['role'] == 'owner';
+  bool get owner => hasSection(widget.api.user ?? {}, 'vpn');
 
   @override
   void initState() {
@@ -149,7 +150,11 @@ class _VpnSettingsState extends State<VpnSettings> {
     final configured = data?['configured'] == true;
     final status = data?['status'];
     final active = status == 'connected' || status == 'connecting';
-    final editable = supported && !busy && !active;
+    final editable =
+        canEditSection(widget.api.user ?? {}, 'vpn') &&
+        supported &&
+        !busy &&
+        !active;
     final label = switch (status) {
       'connected' => 'Connected',
       'connecting' => 'Connecting…',
@@ -195,7 +200,7 @@ class _VpnSettingsState extends State<VpnSettings> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Connect this AirLink server to your VPN server. Only the owner can view or change this connection.',
+              'Connect this AirLink server to your VPN server. Access is controlled by your Access Role.',
             ),
             const SizedBox(height: 12),
             Text('VPN status: $label', key: const ValueKey('vpn-status')),
@@ -265,13 +270,22 @@ class _VpnSettingsState extends State<VpnSettings> {
                   child: const Text('Connect'),
                 ),
                 OutlinedButton(
-                  onPressed: supported && !busy && active
+                  onPressed:
+                      canEditSection(widget.api.user ?? {}, 'vpn') &&
+                          supported &&
+                          !busy &&
+                          active
                       ? () => act('disconnect')
                       : null,
                   child: const Text('Disconnect'),
                 ),
                 TextButton(
-                  onPressed: editable && configured ? remove : null,
+                  onPressed:
+                      canDeleteSection(widget.api.user ?? {}, 'vpn') &&
+                          !busy &&
+                          configured
+                      ? remove
+                      : null,
                   child: const Text('Remove VPN'),
                 ),
                 if (error != null)

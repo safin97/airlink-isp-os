@@ -1,6 +1,13 @@
 import subprocess
 from pathlib import Path
+import pytest
 from console import gpu
+
+
+@pytest.fixture(autouse=True)
+def isolated_pci_database(monkeypatch):
+    monkeypatch.setattr(gpu, 'PCI_DATABASES', ())
+    gpu._pci_models.cache_clear()
 
 
 def device(root, bus, vendor='0x10de', device_id='0x2484', driver='nvidia', kind='0x030000'):
@@ -42,6 +49,15 @@ def test_missing_driver_does_not_claim_acceleration(tmp_path, monkeypatch):
     result = gpu.detect(tmp_path)[0]
     assert result['vendor'] == 'NVIDIA' and result['status'] == 'not_loaded'
     assert result['utilization_percent'] is None
+
+
+def test_gtx_1660_ti_name_fallback_does_not_claim_driver_is_working(tmp_path, monkeypatch):
+    device(tmp_path, '0000:01:00.0', device_id='0x2191', driver=None)
+    monkeypatch.setattr(gpu, 'command', lambda args: '')
+    result = gpu.detect(tmp_path)[0]
+    assert result['name'] == 'NVIDIA GeForce GTX 1660 Ti (laptop)'
+    assert result['status'] == 'not_loaded'
+    assert result['utilization_percent'] is None and result['driver_version'] is None
 
 
 def test_intel_fallback_and_unavailable_nvidia_metrics(tmp_path, monkeypatch):
@@ -90,3 +106,56 @@ def test_sampler_caches_names_but_refreshes_driver_and_utilization(tmp_path, mon
     (path / 'driver').unlink()
     reading = sampler.read()[0]
     assert reading['status'] == 'not_loaded' and reading['utilization_percent'] is None
+
+
+def test_numeric_lspci_name_cannot_replace_known_gtx_model(tmp_path, monkeypatch):
+    device(tmp_path, '0000:01:00.0', device_id='0x2191', driver=None)
+    monkeypatch.setattr(gpu, 'command', lambda args:
+        '0000:01:00.0 "3D controller" "NVIDIA Corporation" "Device 2191"\n' if args[0] == 'lspci' else '')
+    result = gpu.detect(tmp_path)[0]
+    assert result['name'] == 'NVIDIA GeForce GTX 1660 Ti (laptop)'
+    assert result['status'] == 'not_loaded'
+
+
+def test_offline_database_identifies_multiple_gpus_without_lspci_or_drivers(tmp_path, monkeypatch):
+    root = tmp_path / 'devices'
+    root.mkdir()
+    device(root, '0000:00:02.0', vendor='0x8086', device_id='0x1234', driver=None)
+    device(root, '0000:01:00.0', vendor='0x1002', device_id='0x5678', driver=None)
+    database = tmp_path / 'pci.ids'
+    # Synthetic fixtures exercise vendor/device/subsystem/class parsing.
+    database.write_text('8086  Intel Corporation\n\t1234  Test Integrated Graphics\n'
+                        '\t\t0001 0002  Board name must not replace GPU\n'
+                        '1002  Advanced Micro Devices\n\t5678  Test Radeon Graphics\n'
+                        'C 03  Display controller\n\t1234  Not a GPU model\n')
+    monkeypatch.setattr(gpu, 'PCI_DATABASES', (tmp_path / 'missing', database))
+    monkeypatch.setattr(gpu, 'command', lambda args: '')
+    readings = gpu.detect(root)
+    assert [row['name'] for row in readings] == ['Intel Test Integrated Graphics', 'AMD Test Radeon Graphics']
+    assert all(row['status'] == 'not_loaded' and row['utilization_percent'] is None for row in readings)
+    gpu.detect(root)
+    assert gpu._pci_models.cache_info().hits == 1
+    database.write_text(database.read_text().replace('Test Integrated Graphics', 'Updated Integrated Graphics'))
+    assert gpu.detect(root)[0]['name'] == 'Intel Updated Integrated Graphics'
+
+
+def test_real_lspci_name_wins_over_offline_database(tmp_path, monkeypatch):
+    device(tmp_path, '0000:01:00.0', driver=None)
+    monkeypatch.setattr(gpu, 'pci_model_names', lambda unresolved: {} if not unresolved else pytest.fail('Unexpected database lookup'))
+    monkeypatch.setattr(gpu, 'command', lambda args: '')
+    assert gpu.detect(tmp_path, name_lookup=lambda: {'0000:01:00.0': 'NVIDIA Specific Model'})[0]['name'] == 'NVIDIA Specific Model'
+
+
+def test_unavailable_nvidia_name_preserves_detected_model(tmp_path, monkeypatch):
+    device(tmp_path, '0000:01:00.0', device_id='0x2191')
+    monkeypatch.setattr(gpu, 'command', lambda args: '' if args[0] == 'lspci' else
+        '00000000:01:00.0, N/A, 610.1, 6144, 10, 0, 40\n')
+    result = gpu.detect(tmp_path)[0]
+    assert result['name'] == 'NVIDIA GeForce GTX 1660 Ti (laptop)'
+    assert result['utilization_percent'] == 0
+
+
+def test_unknown_id_stays_explicit_and_does_not_inherit_another_model(tmp_path, monkeypatch):
+    device(tmp_path, '0000:01:00.0', device_id='0xffff', driver=None)
+    monkeypatch.setattr(gpu, 'command', lambda args: '')
+    assert gpu.detect(tmp_path)[0]['name'] == 'NVIDIA 0xffff'

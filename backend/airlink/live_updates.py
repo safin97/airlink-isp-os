@@ -24,7 +24,7 @@ def snapshot(token):
                              ('alerts', api.alerts), ('links', api.links)]:
             if allowed(name):
                 rows[name] = reader(user=user, db=db)
-        if user.role == 'owner':
+        if allowed('users'):
             rows['users'] = api.users(user=user, db=db)
         if allowed('snmp-profiles'):
             rows['snmp-profiles'] = api.profiles(user=user, db=db)

@@ -6,10 +6,62 @@ import shlex
 import shutil
 import subprocess
 import time
+from functools import lru_cache
 from pathlib import Path
 
 PCI_ROOT = Path('/sys/bus/pci/devices')
 VENDORS = {'0x10de': 'NVIDIA', '0x1002': 'AMD', '0x8086': 'Intel', '0x1234': 'QEMU'}
+# PCI 2191 includes laptop Max-Q variants; do not guess the subsystem variant.
+KNOWN_NAMES = {('0x10de', '0x2191'): 'NVIDIA GeForce GTX 1660 Ti (laptop)'}
+PCI_DATABASES = (Path('/usr/share/misc/pci.ids'), Path('/usr/share/hwdata/pci.ids'),
+                 Path('/usr/share/pci.ids'))
+
+
+def has_model(value):
+    """Numeric PCI placeholders and failed driver readings are not model names."""
+    value = value.strip()
+    return bool(value and value.lower() not in {'n/a', 'unknown', '[not supported]', 'nvidia', 'amd', 'intel'}
+                and not re.fullmatch(r'(?:0x)?[0-9a-fA-F]{4}', value)
+                and not re.search(r'\bDevice\s+(?:0x)?[0-9a-fA-F]{4}$', value, re.IGNORECASE))
+
+
+@lru_cache(maxsize=8)
+def _pci_models(path, modified, size, wanted):
+    """Read only GPU entries; cache by database revision and detected PCI IDs."""
+    models = {}
+    vendor = None
+    vendor_name = ''
+    with path.open(errors='replace') as database:
+        for line in database:
+            if line.startswith(('#', '\n', '\t\t')):
+                continue
+            if not line.startswith('\t'):
+                match = re.match(r'^([0-9a-fA-F]{4})\s+(.+)', line)
+                vendor = '0x' + match[1].lower() if match else None
+                vendor_name = VENDORS.get(vendor, match[2].strip()) if match else ''
+            elif vendor:
+                match = re.match(r'^\t([0-9a-fA-F]{4})\s+(.+)', line)
+                key = (vendor, '0x' + match[1].lower()) if match else None
+                if key in wanted and has_model(match[2]):
+                    models[key] = (vendor_name + ' ' + match[2].strip())[:200]
+    return models
+
+
+def pci_model_names(devices):
+    wanted = tuple(sorted({(gpu['vendor_id'], gpu['device_id']) for gpu in devices}))
+    models = {}
+    if not wanted:
+        return models
+    for path in PCI_DATABASES:
+        try:
+            info = path.stat()
+            if info.st_size > 16 * 1024 * 1024:
+                continue
+            for key, value in _pci_models(path, info.st_mtime_ns, info.st_size, wanted).items():
+                models.setdefault(key, value)
+        except OSError:
+            continue
+    return models
 
 
 def command(args):
@@ -45,7 +97,7 @@ def device_names():
     for line in command(['lspci', '-D', '-mm']).splitlines():
         try:
             row = shlex.split(line)
-            if len(row) >= 4 and address(row[0]):
+            if len(row) >= 4 and address(row[0]) and has_model(row[3]):
                 names[address(row[0])] = (row[2] + ' ' + row[3])[:200]
         except ValueError:
             continue
@@ -69,15 +121,19 @@ def detect(pci_root=None, name_lookup=None):
             continue
         vendor = VENDORS.get(vendor_id, vendor_id)
         devices.append({'pci_address': bus, 'vendor': vendor, 'vendor_id': vendor_id,
-                        'device_id': device_id, 'name': f'{vendor} {device_id}',
+                        'device_id': device_id, 'name': KNOWN_NAMES.get((vendor_id, device_id), f'{vendor} {device_id}'),
                         'driver': driver, 'status': 'loaded' if driver else 'not_loaded',
                         'driver_version': None, 'memory_total_mib': None,
                         'memory_used_mib': None, 'utilization_percent': None, 'temperature_c': None})
     if not devices:
         return []
     names = (name_lookup or device_names)()
+    unresolved = [gpu for gpu in devices if not has_model(names.get(gpu['pci_address'], ''))]
+    models = pci_model_names(unresolved)
     for gpu in devices:
-        gpu['name'] = names.get(gpu['pci_address'], gpu['name'])
+        name = names.get(gpu['pci_address'], '')
+        gpu['name'] = (name[:200] if has_model(name) else
+                       models.get((gpu['vendor_id'], gpu['device_id']), gpu['name']))
     if any(gpu['vendor_id'] == '0x10de' for gpu in devices):
         output = command(['nvidia-smi',
             '--query-gpu=pci.bus_id,name,driver_version,memory.total,memory.used,utilization.gpu,temperature.gpu',
@@ -90,7 +146,8 @@ def detect(pci_root=None, name_lookup=None):
             row = readings.get(gpu['pci_address'])
             if gpu['vendor_id'] != '0x10de' or row is None or gpu['driver'] != 'nvidia':
                 continue
-            gpu.update(name=row[1].strip()[:200], driver_version=row[2].strip()[:80],
+            gpu.update(name=row[1].strip()[:200] if has_model(row[1]) else gpu['name'],
+                       driver_version=row[2].strip()[:80],
                        status='ready', memory_total_mib=number(row[3]),
                        memory_used_mib=number(row[4]), utilization_percent=number(row[5]),
                        temperature_c=number(row[6]))

@@ -98,7 +98,7 @@ def test_group_validation_rejects_hidden_edit_delete_and_admin_escalation(client
     body = {'name':'Example', 'sections':[], 'editable_sections':[], 'deletable_sections':[]}
     for key in ('editable_sections','deletable_sections'):
         assert client.post('/api/access-roles', headers=owner, json={**body,key:['towers']}).status_code == 422
-    for section in ('managers','invalid'):
+    for section in ('owner','invalid'):
         assert client.post('/api/access-roles', headers=owner, json={**body,'sections':[section]}).status_code == 422
     assert client.post('/api/access-roles', headers=owner, json={**body,'name':'  '}).status_code == 422
     assert client.post('/api/roles', headers=owner, json={'name':'Unknown','access_role_id':'missing'}).status_code == 404

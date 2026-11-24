@@ -82,6 +82,7 @@ void main() {
           );
         }),
       );
+      api.user ??= {'role': 'owner', 'username': 'owner'};
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: TTLockPage(api: api)),
@@ -187,6 +188,7 @@ void main() {
         );
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: TTLockPage(api: api)),
@@ -232,6 +234,7 @@ void main() {
         return http.Response('{"configured":false}', 200);
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: TTLockPage(api: api)),
@@ -248,7 +251,11 @@ void main() {
       findsOneWidget,
     );
     expect(loginCalls, 0);
-    await tester.ensureVisible(find.text('One-time integration setup'));
+    await tester.scrollUntilVisible(
+      find.text('One-time integration setup'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('One-time integration setup'));
     await tester.pumpAndSettle();
@@ -292,6 +299,7 @@ void main() {
           );
         }),
       );
+      api.user ??= {'role': 'owner', 'username': 'owner'};
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: TTLockPage(api: api)),
@@ -337,6 +345,7 @@ void main() {
             http.Response('{"detail":"Connection unavailable"}', 503),
       ),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: TTLockPage(api: api)),

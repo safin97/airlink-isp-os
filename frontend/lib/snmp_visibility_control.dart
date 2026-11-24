@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
@@ -70,7 +71,7 @@ class _SnmpVisibilityControlState extends State<SnmpVisibilityControl> {
           ),
           tristate: true,
           value: selected,
-          onChanged: busy ? null : (value) => save(value == true),
+          onChanged: !canEditSection(widget.api.user ?? {}, 'snmp_sharing') || busy ? null : (value) => save(value == true),
         ),
         if (error != null)
           Text(

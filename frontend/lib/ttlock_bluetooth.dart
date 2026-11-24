@@ -4,10 +4,54 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:ttlock_flutter/ttlock.dart';
 import 'mobile_platform.dart';
 
+enum TTLockBluetoothPermission {
+  unsupported,
+  needed,
+  granted,
+  settings,
+  restricted,
+}
+
 class TTLockBluetooth {
   bool get available => isMobileDevice;
   static bool _active = false;
   bool _scanning = false;
+
+  List<Permission> get _permissions =>
+      defaultTargetPlatform == TargetPlatform.android
+      ? [
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          Permission.locationWhenInUse,
+        ]
+      : [Permission.bluetooth];
+
+  TTLockBluetoothPermission _access(Iterable<PermissionStatus> values) {
+    if (values.any((s) => s.isRestricted)) {
+      return TTLockBluetoothPermission.restricted;
+    }
+    if (values.any((s) => s.isPermanentlyDenied)) {
+      return TTLockBluetoothPermission.settings;
+    }
+    return values.isNotEmpty && values.every((s) => s.isGranted)
+        ? TTLockBluetoothPermission.granted
+        : TTLockBluetoothPermission.needed;
+  }
+
+  Future<TTLockBluetoothPermission> permissionStatus() async {
+    if (!available) return TTLockBluetoothPermission.unsupported;
+    return _access(await Future.wait(_permissions.map((p) => p.status)));
+  }
+
+  Future<TTLockBluetoothPermission> requestPermission() async {
+    if (!available) return TTLockBluetoothPermission.unsupported;
+    final result = await _permissions.request();
+    return _access(
+      _permissions.map((p) => result[p] ?? PermissionStatus.denied),
+    );
+  }
+
+  Future<bool> openSettings() => openAppSettings();
 
   Future<void> ready() async {
     if (!available) {
@@ -15,18 +59,7 @@ class TTLockBluetooth {
         'Bluetooth requires the AirLink Android or iPhone app near the lock.',
       );
     }
-    final permissions = defaultTargetPlatform == TargetPlatform.android
-        ? [
-            Permission.bluetoothScan,
-            Permission.bluetoothConnect,
-            Permission.locationWhenInUse,
-          ]
-        : [Permission.bluetooth];
-    final result = await permissions.request();
-    if (result.values.any(
-      (status) =>
-          status.isDenied || status.isPermanentlyDenied || status.isRestricted,
-    )) {
+    if (await requestPermission() != TTLockBluetoothPermission.granted) {
       throw Exception(
         'Allow Bluetooth / Nearby devices in phone Settings. Android also needs location permission for lock discovery.',
       );

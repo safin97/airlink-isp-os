@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
@@ -269,7 +270,7 @@ class _DeviceApiAccessPanelState extends State<DeviceApiAccessPanel> {
               ),
             if (message != null) Text(message!),
             FilledButton(
-              onPressed: busy || target == null ? null : save,
+              onPressed: !canEditSection(widget.api.user ?? {}, 'device_api_access') || busy || target == null ? null : save,
               child: const AppText('Save device login'),
             ),
           ],

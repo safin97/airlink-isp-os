@@ -111,14 +111,14 @@ void main() {
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
       expect(writes, isEmpty);
-      for (final type in ['credit', 'fib']) {
+      for (final type in ['credit', 'fib', 'fastpay']) {
         expect(find.byKey(ValueKey('recharge-method-$type')), findsOneWidget);
       }
-      for (final type in ['bank', 'fastpay', 'extend', 'card']) {
+      for (final type in ['bank', 'extend', 'card']) {
         expect(find.byKey(ValueKey('recharge-method-$type')), findsNothing);
       }
       expect(find.text('Bank Card'), findsNothing);
-      expect(find.text('FastPay'), findsNothing);
+      expect(find.text('FastPay'), findsOneWidget);
       if (method != 'credit') {
         await tester.tap(find.byKey(ValueKey('recharge-method-$method')));
         await tester.pumpAndSettle();

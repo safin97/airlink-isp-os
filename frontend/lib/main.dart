@@ -456,7 +456,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               .key,
         )
       : pages[index] == 'TTLock'
-      ? false
+      ? hasSection(api.user!, 'ttlock')
       : pages[index] == 'My account'
       ? true
       : pages[index] == 'Deye Solar'
@@ -466,10 +466,17 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             (usesSectionPermissions(api.user!) &&
                 hasSection(api.user!, 'settings'))
       : pages[index] == 'Towers API'
-      ? owner
+      ? hasSection(api.user!, 'towers_api')
       : pages[index] == 'Device login'
-      ? owner
-      : (pages[index] == 'Settings' && canViewSnmpProfiles(api.user!)) ||
+      ? hasSection(api.user!, 'device_login')
+      : (pages[index] == 'Settings' &&
+                (canViewSnmpProfiles(api.user!) ||
+                    [
+                      'backups',
+                      'payment_gateways',
+                      'device_api_access',
+                      'vpn',
+                    ].any((key) => hasSection(api.user!, key)))) ||
             hasSection(
               api.user!,
               pageSections.entries
@@ -630,7 +637,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         'devices',
         'alerts',
         'links',
-        if (owner) ...['users', 'access-roles'],
+        if (hasSection(api.user!, 'managers')) 'users',
+        if (hasSection(api.user!, 'access_roles')) 'access-roles',
         if (canViewSnmpProfiles(api.user!)) 'snmp-profiles',
       ].where((resource) => canReadResource(api.user!, resource)).toList();
       final data = await Future.wait([
@@ -963,7 +971,6 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                 ),
                             if (pages[i] == 'ISP Card' &&
                                 page == i &&
-                                owner &&
                                 hasSection(api.user!, 'card_system'))
                               Padding(
                                 padding: const EdgeInsets.only(
@@ -1196,7 +1203,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       case 'Device login':
         return DeviceLoginProfiles(api: api);
       case 'Managers':
-        return owner
+        return hasSection(api.user!, 'managers')
             ? inventory('users')
             : notice(
                 'Owner access required',
@@ -1500,7 +1507,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                   style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
                 ),
               ),
-              if (owner)
+              if (canEditSection(api.user!, 'inventory_admin'))
                 FilledButton.icon(
                   onPressed: () => edit('places'),
                   icon: const Icon(Icons.add_location_alt_outlined),
@@ -1539,7 +1546,15 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       color: blue,
                                     ),
                                     const Spacer(),
-                                    if (owner && place['id'] != '')
+                                    if ((canEditSection(
+                                              api.user!,
+                                              'inventory_admin',
+                                            ) ||
+                                            canDeleteSection(
+                                              api.user!,
+                                              'inventory_admin',
+                                            )) &&
+                                        place['id'] != '')
                                       PopupMenuButton<String>(
                                         tooltip: 'Place actions',
                                         onSelected: (action) {
@@ -1555,12 +1570,20 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                             remove('places', place);
                                           }
                                         },
-                                        itemBuilder: (_) => const [
+                                        itemBuilder: (_) => [
                                           PopupMenuItem(
+                                            enabled: canEditSection(
+                                              api.user!,
+                                              'inventory_admin',
+                                            ),
                                             value: 'edit',
                                             child: AppText('Edit place'),
                                           ),
                                           PopupMenuItem(
+                                            enabled: canDeleteSection(
+                                              api.user!,
+                                              'inventory_admin',
+                                            ),
                                             value: 'delete',
                                             child: AppText('Delete place'),
                                           ),
@@ -1716,7 +1739,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                             }
                                           },
                                           itemBuilder: (_) => [
-                                            if (owner)
+                                            if (canEditSection(
+                                              api.user!,
+                                              'inventory_admin',
+                                            ))
                                               const PopupMenuItem(
                                                 value: 'discover_snmp',
                                                 child: AppText(
@@ -1850,9 +1876,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             onChanged: (v) => setState(() => search = v),
           ),
         ),
-        if ((resource == 'users' && owner) ||
+        if ((resource == 'users' && canEditSection(api.user!, 'managers')) ||
             (resource == 'towers' &&
-                owner &&
+                canEditSection(api.user!, 'inventory_admin') &&
                 placeFilter != null &&
                 placeFilter != '') ||
             (['devices', 'sectors'].contains(resource) && inventoryWriter))
@@ -1934,7 +1960,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           const SizedBox(height: 20),
         ],
         toolbar(resource),
-        if (resource == 'users' && owner)
+        if (resource == 'users' && hasSection(api.user!, 'snmp_sharing'))
           SnmpVisibilityControl(
             api: api,
             accounts: list('users'),
@@ -2081,9 +2107,14 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     ),
                                   ),
                                 if (resource == 'users' &&
-                                    owner &&
+                                    (canEditSection(api.user!, 'managers') ||
+                                        canDeleteSection(
+                                          api.user!,
+                                          'managers',
+                                        )) &&
                                     row['role'] != 'owner') ...[
-                                  if (row['role'] == 'manager' &&
+                                  if (canEditSection(api.user!, 'managers') &&
+                                      row['role'] == 'manager' &&
                                       row['manager_role_id'] == null &&
                                       row['access_role_id'] == null &&
                                       row['access_policy_configured'] != true)
@@ -2112,7 +2143,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     ),
                                   IconButton(
                                     tooltip: 'Edit username, password or role',
-                                    onPressed: () => editAccount(row),
+                                    onPressed:
+                                        canEditSection(api.user!, 'managers')
+                                        ? () => editAccount(row)
+                                        : null,
                                     icon: const Icon(
                                       Icons.edit_outlined,
                                       size: 19,
@@ -2120,7 +2154,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                   ),
                                   IconButton(
                                     tooltip: 'Delete account',
-                                    onPressed: () => deleteAccount(row),
+                                    onPressed:
+                                        canDeleteSection(api.user!, 'managers')
+                                        ? () => deleteAccount(row)
+                                        : null,
                                     icon: Icon(
                                       Icons.delete_outline,
                                       size: 19,
@@ -2140,7 +2177,10 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     row['active'] == true)
                                   IconButton(
                                     tooltip: 'Disable account',
-                                    onPressed: () => remove(resource, row),
+                                    onPressed:
+                                        canEditSection(api.user!, 'managers')
+                                        ? () => remove(resource, row)
+                                        : null,
                                     icon: const Icon(
                                       Icons.person_off_outlined,
                                       size: 19,
@@ -2203,7 +2243,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       context: context,
       builder: (_) => ResourceDialog(
         title: 'Edit account',
-        extraAction: row['role'] == 'manager' || row['role'] == 'owner'
+        extraAction:
+            owner && (row['role'] == 'manager' || row['role'] == 'owner')
             ? () => configureAccountTelegram(row)
             : null,
         fields: [
@@ -2221,12 +2262,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           ),
           managerParentField(account: row),
           managerPlacesField(),
-          FieldSpec(
-            'show_snmp_profiles',
-            'Show SNMP profiles',
-            kind: 'bool',
-            initial: false,
-          ),
+          if (canEditSection(api.user!, 'snmp_sharing'))
+            FieldSpec(
+              'show_snmp_profiles',
+              'Show SNMP profiles',
+              kind: 'bool',
+              initial: false,
+            ),
         ],
         initial: {
           'username': row['username'],
@@ -2395,7 +2437,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   Future<void> edit(String resource, {Map<String, dynamic>? existing}) async {
     if (resource == 'users' && !await refreshAccountRoles()) return;
-    if (resource == 'devices' && owner) {
+    if (resource == 'devices' && canEditSection(api.user!, 'inventory_admin')) {
       try {
         final profiles = await api.request('/snmp-profiles');
         if (!mounted) return;
@@ -2466,6 +2508,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             }
           }
           if (resource == 'towers') {
+            if (!owner && existing == null) {
+              payload['manager_id'] = api.user!['id'];
+            }
             final gps = (payload.remove('gps') as String? ?? '').trim();
             double? latitude;
             double? longitude;
@@ -2519,6 +2564,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       }
       if (mounted &&
           savedAccount != null &&
+          owner &&
           (savedAccount!['role'] == 'manager' ||
               savedAccount!['role'] == 'owner')) {
         await configureAccountTelegram(savedAccount!);
@@ -2539,7 +2585,11 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         : null,
     options: [
       ...list('access-roles')
-          .where((r) => allowOwner || r['account_type'] != 'owner')
+          .where(
+            (r) => owner
+                ? (allowOwner || r['account_type'] != 'owner')
+                : r['built_in'] != true && r['can_manage'] != false,
+          )
           .map(
             (r) => Option(
               r['built_in'] == true ? r['account_type'] : 'custom:${r['id']}',
@@ -2552,7 +2602,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Future<bool> refreshAccountRoles() async {
     try {
       final data = await Future.wait([
-        api.request('/access-roles'),
+        api.request(owner ? '/access-roles' : '/users/access-options'),
         api.request('/users'),
       ]);
       if (!mounted) return false;
@@ -2627,7 +2677,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       case 'towers':
         return [
           FieldSpec('name', 'Tower name', required: true),
-          if (owner)
+          if (canEditSection(api.user!, 'inventory_admin'))
             FieldSpec(
               'place_id',
               'Place',
@@ -2636,7 +2686,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           FieldSpec('location', 'Location', initial: ''),
           FieldSpec('gps', 'GPS (latitude, longitude)'),
           FieldSpec('management_ip', 'Management IP'),
-          if (owner) ...[
+          if (canEditSection(api.user!, 'towers_api')) ...[
             FieldSpec(
               'api_enabled',
               'Monitor tower devices using API (RouterOS REST / airOS)',
@@ -2703,12 +2753,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           accountTypeField(allowOwner: true),
           managerParentField(),
           managerPlacesField(),
-          FieldSpec(
-            'show_snmp_profiles',
-            'Show SNMP profiles',
-            kind: 'bool',
-            initial: api.user?['default_snmp_profile_visibility'] == true,
-          ),
+          if (canEditSection(api.user!, 'snmp_sharing'))
+            FieldSpec(
+              'show_snmp_profiles',
+              'Show SNMP profiles',
+              kind: 'bool',
+              initial: api.user?['default_snmp_profile_visibility'] == true,
+            ),
         ];
       default:
         return [
@@ -2742,11 +2793,13 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           FieldSpec(
             'snmp_profile_id',
             'SNMP profile',
-            kind: owner ? 'snmp_profile' : 'text',
-            helperText: owner
+            kind: canEditSection(api.user!, 'inventory_admin')
+                ? 'snmp_profile'
+                : 'text',
+            helperText: canEditSection(api.user!, 'inventory_admin')
                 ? 'Choose the SNMP version, then the matching saved credentials or public community.'
                 : null,
-            options: owner
+            options: canEditSection(api.user!, 'inventory_admin')
                 ? list('snmp-profiles')
                       .map(
                         (profile) => Option(
@@ -2904,8 +2957,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     );
   }
 
-  Widget clients() =>
-      ispCardSystem && owner && hasSection(api.user!, 'card_system')
+  Widget clients() => ispCardSystem && hasSection(api.user!, 'card_system')
       ? CardSystem(key: ValueKey('cards-$accountRevision'), api: api)
       : ispReports
       ? Sas4Reports(key: ValueKey('reports-$accountRevision'), api: api)
@@ -3152,7 +3204,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                 'Map tiles require internet access. Inventory and monitoring remain local.',
                 style: TextStyle(color: muted, fontSize: 12),
               ),
-              if (owner)
+              if (canEditSection(api.user!, 'inventory_admin'))
                 TextButton.icon(
                   onPressed: () => showDialog(
                     context: context,
@@ -3244,13 +3296,16 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Map<String, IconData> get settingsPages => {
     if (canViewSnmpProfiles(api.user!)) 'SNMP profiles': Icons.key_outlined,
     if (canManageSettings) ...{
-      if (owner) 'Backups': Icons.cloud_upload_outlined,
-      if (owner) 'Payment gateways': Icons.payments_outlined,
-      if (owner) 'Device API logins': Icons.router_outlined,
-      if (owner) 'VPN': Icons.vpn_key_outlined,
       'Network': Icons.settings_ethernet,
       'Audit log': Icons.history,
     },
+    if (hasSection(api.user!, 'backups'))
+      'Backups': Icons.cloud_upload_outlined,
+    if (hasSection(api.user!, 'payment_gateways'))
+      'Payment gateways': Icons.payments_outlined,
+    if (hasSection(api.user!, 'device_api_access'))
+      'Device API logins': Icons.router_outlined,
+    if (hasSection(api.user!, 'vpn')) 'VPN': Icons.vpn_key_outlined,
     'Session & permissions': Icons.security_outlined,
   };
 
@@ -3351,7 +3406,9 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       case 'Network':
         return NetworkSettings(api: api);
       case 'VPN':
-        return owner ? VpnSettings(api: api) : const SizedBox.shrink();
+        return hasSection(api.user!, 'vpn')
+            ? VpnSettings(api: api)
+            : const SizedBox.shrink();
       case 'Audit log':
         return section(
           'Audit trail',

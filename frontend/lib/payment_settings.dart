@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'app_language.dart';
 
 import 'package:flutter/material.dart';
@@ -20,7 +21,8 @@ class PaymentSettings extends StatefulWidget {
 
 class _PaymentSettingsState extends State<PaymentSettings>
     with LanguageRebuild {
-  bool get canEdit => widget.api.user?['role'] == 'owner';
+  bool get canView => hasSection(widget.api.user ?? {}, 'payment_gateways');
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'payment_gateways');
   final merchants = {
     for (final p in ['fib', 'fastpay']) p: TextEditingController(),
   };
@@ -47,7 +49,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
   }
 
   Future<void> load() async {
-    if (!canEdit) return;
+    if (!canView) return;
     if (loaded || busy) return;
     setState(() => busy = true);
     try {
@@ -126,7 +128,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
   }
 
   @override
-  Widget build(BuildContext context) => !canEdit
+  Widget build(BuildContext context) => !canView
       ? const SizedBox.shrink()
       : widget.embedded
       ? Column(
@@ -145,6 +147,9 @@ class _PaymentSettingsState extends State<PaymentSettings>
         );
 
   List<Widget> settingsContent() => [
+    const AppText(
+      'Owner-managed payment accounts. These settings apply to FIB Bank and FastPay checkout for all authorized users and the client portal. Other users do not need bank credentials.',
+    ),
     const AppText(
       'Use merchant API credentials, not your personal banking login. Secrets are stored encrypted and never shown again.',
     ),
@@ -235,7 +240,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
               ),
               if (provider == 'fib') ...[
                 TextButton.icon(
-                  onPressed: busy || configured[provider] != true
+                  onPressed: !canEdit || busy || configured[provider] != true
                       ? null
                       : testFib,
                   icon: const Icon(Icons.network_check),

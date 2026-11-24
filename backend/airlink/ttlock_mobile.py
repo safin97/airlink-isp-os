@@ -1,3 +1,4 @@
+from .section_access import require_feature
 """Bluetooth work happens on the phone; only successful SDK results sync to cloud."""
 from typing import Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -172,6 +173,7 @@ def operation_for(db, user, request_id):
 
 
 def sync_operation(db, user, op):
+    require_feature(user, 'ttlock', 'POST', '/api/integrations/ttlock/mobile/prepare', body={'action': op.action})
     if op.status == 'synced':
         return {'status': 'synced'}
     if op.status not in ('device_complete', 'sync_pending'):
@@ -258,6 +260,7 @@ def complete(request_id: str, data: Complete, user=Depends(owner), db=Depends(ge
     t.limited(user, 'mobile-sync', 60)
     with t.guard(user):
         op = operation_for(db, user, request_id)
+        require_feature(user, 'ttlock', 'POST', '/api/integrations/ttlock/mobile/prepare', body={'action': op.action})
         result = {'card_number': data.card_number, 'fingerprint_number': data.fingerprint_number,
             'lock_data': data.lock_data.get_secret_value() if data.lock_data else None}
         if op.status != 'prepared':

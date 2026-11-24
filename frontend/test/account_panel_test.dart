@@ -11,7 +11,7 @@ import 'package:airlink_isp_os/section_access.dart';
 
 void main() {
   for (final role in ['manager', 'technician', 'viewer']) {
-    testWidgets('$role cannot open owner pages with full section grants', (
+    testWidgets('$role cannot open administrative pages without explicit grants', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(1440, 1400);
@@ -33,9 +33,9 @@ void main() {
               'username': 'staff',
               'role': role,
               'access_policy_configured': true,
-              'sections': assignableSections.keys.toList(),
-              'editable_sections': assignableSections.keys.toList(),
-              'deletable_sections': assignableSections.keys.toList(),
+              'sections': operationalSections.keys.toList(),
+              'editable_sections': operationalSections.keys.toList(),
+              'deletable_sections': operationalSections.keys.toList(),
             };
       await tester.pumpWidget(
         MaterialApp(

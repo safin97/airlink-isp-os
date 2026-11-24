@@ -73,7 +73,7 @@ def public(db, row, user):
     result = {'id': row.id, 'name': row.name, **public_login(config),
               'transport': config.get('transport', 'web'),
               'shared': row.user_id != user.id}
-    if user.role == 'owner' and row.user_id == user.id:
+    if row.user_id == user.id:
         result['assigned_managers'] = assignments(db, row)
         result['manager_ids'] = [manager['id'] for manager in result['assigned_managers']]
     return result
@@ -108,8 +108,8 @@ def save(db, user, data, row=None):
         'port': data.port, 'verify_tls': data.verify_tls, 'enabled': data.enabled}).encode()).decode()
     db.flush()
     if data.manager_ids is not None:
-        if user.role != 'owner':
-            raise HTTPException(403, 'Only the owner can share device login profiles')
+        if row.user_id != user.id:
+            raise HTTPException(403, 'Only the profile creator can share device login profiles')
         manager_ids = set(data.manager_ids)
         managers = list(db.scalars(select(User).where(
             User.id.in_(manager_ids), User.role == 'manager', User.active.is_(True)))) if manager_ids else []

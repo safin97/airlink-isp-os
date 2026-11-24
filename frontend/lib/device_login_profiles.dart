@@ -22,7 +22,7 @@ class DeviceLoginProfiles extends StatefulWidget {
 class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   String get path =>
       widget.towers ? towersApiProfilesPath : deviceLoginProfilesPath;
-  String get section => widget.towers ? 'towers' : 'isp_card';
+  String get section => widget.towers ? 'towers_api' : 'device_login';
   List<dynamic> profiles = [];
   bool busy = true;
   String? error;
@@ -33,7 +33,12 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   Future<void> load() async {
-    if (widget.api.user?['role'] != 'owner') return;
+    if (!hasSection(
+      widget.api.user ?? {},
+      (widget.towers ? 'towers_api' : 'device_login'),
+    )) {
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
@@ -55,7 +60,12 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   Future<void> edit([Map<String, dynamic>? profile]) async {
-    if (widget.api.user?['role'] != 'owner') return;
+    if (!hasSection(
+      widget.api.user ?? {},
+      (widget.towers ? 'towers_api' : 'device_login'),
+    )) {
+      return;
+    }
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => DeviceLoginProfileEditor(
@@ -105,7 +115,11 @@ class _DeviceLoginProfilesState extends State<DeviceLoginProfiles> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.api.user?['role'] != 'owner'
+  Widget build(BuildContext context) =>
+      !hasSection(
+        widget.api.user ?? {},
+        (widget.towers ? 'towers_api' : 'device_login'),
+      )
       ? const SizedBox.shrink()
       : Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -245,7 +259,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
   @override
   void initState() {
     super.initState();
-    if (widget.api.user?['role'] == 'owner') loadManagers();
+    if (canEditSection(widget.api.user ?? {}, widget.path == towersApiProfilesPath ? 'towers_api' : 'device_login')) loadManagers();
   }
 
   Future<void> loadManagers() async {
@@ -285,7 +299,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
           'port': port.text.trim().isEmpty ? null : int.parse(port.text.trim()),
           'verify_tls': verifyTls,
           'enabled': enabled,
-          if (widget.api.user?['role'] == 'owner')
+          if (canEditSection(widget.api.user ?? {}, widget.path == towersApiProfilesPath ? 'towers_api' : 'device_login'))
             'manager_ids': managerIds.toList(),
         },
       );
@@ -439,7 +453,7 @@ class _DeviceLoginProfileEditorState extends State<DeviceLoginProfileEditor> {
                   value: enabled,
                   onChanged: busy ? null : (v) => setState(() => enabled = v),
                 ),
-                if (widget.api.user?['role'] == 'owner') ...[
+                if (canEditSection(widget.api.user ?? {}, widget.path == towersApiProfilesPath ? 'towers_api' : 'device_login')) ...[
                   const Divider(),
                   const Align(
                     alignment: AlignmentDirectional.centerStart,

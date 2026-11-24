@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
 import 'app_language.dart';
@@ -29,7 +30,10 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
       hasCommunity = false,
       tryPublicSnmp = false;
   String? error, message;
-  bool get canEdit => widget.api.user?['role'] == 'owner';
+  bool get canView =>
+      hasSection(widget.api.user ?? {}, 'customer_device_access');
+  bool get canEdit =>
+      canEditSection(widget.api.user ?? {}, 'customer_device_access');
 
   @override
   void initState() {
@@ -56,7 +60,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
   }
 
   Future<void> load() async {
-    if (!canEdit) return;
+    if (!canView) return;
     try {
       final data = await widget.api.request('/integrations/sas4/device-access');
       if (mounted) setState(() => apply(Map<String, dynamic>.from(data)));
@@ -109,7 +113,7 @@ class _CustomerDeviceAccessState extends State<CustomerDeviceAccess>
 
   @override
   Widget build(BuildContext context) {
-    if (!canEdit) return const SizedBox.shrink();
+    if (!canView) return const SizedBox.shrink();
     final content = Padding(
       padding: const EdgeInsets.all(12),
       child: Column(

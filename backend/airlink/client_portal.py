@@ -1,3 +1,4 @@
+from .section_access import has_capability
 """Customer-only recharge portal. Never exposes staff sessions or router credentials."""
 import ipaddress
 import json
@@ -69,7 +70,7 @@ def configured(db):
         raise HTTPException(503, 'Client recharge is not available yet. Contact your internet provider.')
     actor = db.get(User, row.owner_id)
     connection = db.get(SAS4UserConnection, row.owner_id)
-    if not actor or not actor.active or actor.role != 'owner' or not connection or connection.username != row.sas4_username:
+    if not actor or not actor.active or not has_capability(actor, 'client_portal', db, write=True) or not connection or connection.username != row.sas4_username:
         raise HTTPException(503, 'Client recharge is temporarily unavailable. Contact your internet provider.')
     return row, actor
 
@@ -557,7 +558,12 @@ def checkout(data: FibCheckout, request: Request, context=Depends(current), db=D
 
 @router.get('/payments')
 def history(context=Depends(current), db=Depends(get_db)):
-    return payments.user_payments(context[2].customer_id, context[1], db)
+    # A customer session must not inherit the merchant owner's staff-order view.
+    rows = db.scalars(select(RechargePayment).where(
+        RechargePayment.user_id == context[1].id,
+        RechargePayment.sas4_user_id == context[2].customer_id)
+        .order_by(RechargePayment.created_at.desc()).limit(10)).all()
+    return [payments.public_order(row) for row in rows]
 
 
 @router.get('/payments/{order_id}')

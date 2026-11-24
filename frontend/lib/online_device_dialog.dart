@@ -243,7 +243,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
   }
 
   Future<void> addTowerProfile() async {
-    if (widget.api.user?['role'] != 'owner' || busy) return;
+    if (!canEditSection(widget.api.user ?? {}, 'towers_api') || busy) return;
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => DeviceLoginProfileEditor(
@@ -672,7 +672,7 @@ class _OnlineDeviceDialogState extends State<OnlineDeviceDialog> {
             busy: busy,
             loadingProfiles: loadingProfiles,
             profilesLoaded: profilesLoaded,
-            owner: widget.api.user?['role'] == 'owner',
+            owner: canEditSection(widget.api.user ?? {}, 'towers_api'),
             canEdit: canEditSection(widget.api.user ?? {}, 'towers'),
             error: error,
             errorStatus: loginErrorStatus,

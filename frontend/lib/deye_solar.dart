@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -40,8 +41,10 @@ class _DeyeSolarState extends State<DeyeSolar> {
   StreamSubscription<Map<String, dynamic>>? liveSubscription;
   Map<String, dynamic>? pendingLive;
   static const base = '/integrations/deye';
-  bool get canEdit => widget.api.user?['role'] == 'owner';
-  bool get canDelete => canEdit;
+  bool get canView => hasSection(widget.api.user ?? {}, 'deye_management');
+  bool get canEdit => canEditSection(widget.api.user ?? {}, 'deye_management');
+  bool get canDelete =>
+      canDeleteSection(widget.api.user ?? {}, 'deye_management');
 
   @override
   void initState() {

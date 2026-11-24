@@ -73,6 +73,8 @@ void main() {
         }),
       );
       final service = FakeService(api);
+      api.user ??= {};
+      api.user!.putIfAbsent('role', () => 'owner');
       await tester.pumpWidget(
         MaterialApp(
           home: TTLockDevicePage(

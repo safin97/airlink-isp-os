@@ -22,7 +22,7 @@ def access(user=Depends(current_user)):
 
 
 @router.get(PATH)
-def list_profiles(user=Depends(access), db=Depends(get_db)):
+def list_profiles(user=Depends(owner), db=Depends(get_db)):
     return [profiles.public(db, row, user) for row in db.scalars(
         profiles.visible_query(user).order_by(DeviceLoginProfile.name))]
 
@@ -34,17 +34,17 @@ def managers(user=Depends(owner), db=Depends(get_db)):
 
 
 @router.post(PATH, status_code=201)
-def create_profile(data: profiles.ProfileInput, user=Depends(access), db=Depends(get_db)):
+def create_profile(data: profiles.ProfileInput, user=Depends(owner), db=Depends(get_db)):
     return profiles.save(db, user, data)
 
 
 @router.put(PATH + '/{profile_id}')
-def update_profile(profile_id: str, data: profiles.ProfileInput, user=Depends(access), db=Depends(get_db)):
+def update_profile(profile_id: str, data: profiles.ProfileInput, user=Depends(owner), db=Depends(get_db)):
     return profiles.save(db, user, data, profiles.get_owned_profile(db, user, profile_id))
 
 
 @router.delete(PATH + '/{profile_id}', status_code=204)
-def delete_profile(profile_id: str, user=Depends(access), db=Depends(get_db)):
+def delete_profile(profile_id: str, user=Depends(owner), db=Depends(get_db)):
     db.delete(profiles.get_owned_profile(db, user, profile_id))
     audit(db, user, 'device_login_profile.delete', profile_id)
     db.commit()

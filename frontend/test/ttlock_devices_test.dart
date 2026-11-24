@@ -59,6 +59,8 @@ void main() {
           );
         }),
       );
+      api.user ??= {};
+      api.user!.putIfAbsent('role', () => 'owner');
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: TTLockPage(api: api)),

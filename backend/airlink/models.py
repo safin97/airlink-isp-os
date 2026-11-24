@@ -471,6 +471,13 @@ class PaymentGateway(Base):
     updated_at = Column(DateTime(timezone=True), default=now, nullable=False)
 
 
+class SharedPaymentGateway(Base):
+    __tablename__ = 'shared_payment_gateways'
+    provider = Column(String(16), primary_key=True)
+    # Keep the selection if an owner is removed; never fall back to another bank.
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+
 class RechargePayment(Base):
     __tablename__ = 'recharge_payments'
     __table_args__ = (UniqueConstraint('provider', 'environment', 'provider_id', name='uq_recharge_provider_payment'),)

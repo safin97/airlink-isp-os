@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:math';
 import 'dart:async';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -9,6 +10,7 @@ import 'package:url_launcher/link.dart';
 import 'api.dart';
 import 'app_language.dart';
 import 'ttlock_bluetooth.dart';
+import 'ttlock_bluetooth_permission.dart';
 import 'ttlock_device_page.dart';
 import 'ttlock_pair_page.dart';
 import 'ttlock_mobile_service.dart';
@@ -16,12 +18,14 @@ import 'ttlock_bridge_page.dart';
 
 class TTLockPage extends StatefulWidget {
   final Api api;
-  const TTLockPage({super.key, required this.api});
+  final TTLockBluetooth? bluetooth;
+  const TTLockPage({super.key, required this.api, this.bluetooth});
   @override
   State<TTLockPage> createState() => _TTLockPageState();
 }
 
 class _TTLockPageState extends State<TTLockPage> {
+  late final bluetooth = widget.bluetooth ?? TTLockBluetooth();
   final username = TextEditingController(), password = TextEditingController();
   final clientId = TextEditingController(),
       clientSecret = TextEditingController();
@@ -594,6 +598,8 @@ class _TTLockPageState extends State<TTLockPage> {
           'AirLink smart access. Your doors, devices and permissions in one place.',
         ),
         const SizedBox(height: 16),
+        TTLockBluetoothPermissionCard(bluetooth: bluetooth),
+        const SizedBox(height: 16),
         if (busy || loading) const LinearProgressIndicator(),
         if (error != null)
           Padding(
@@ -637,7 +643,15 @@ class _TTLockPageState extends State<TTLockPage> {
                         ),
                         input(password, 'TTLock password', secret: true),
                         FilledButton.icon(
-                          onPressed: (busy || loading) ? null : connect,
+                          onPressed:
+                              (!canEditSection(
+                                    widget.api.user ?? {},
+                                    'ttlock',
+                                  ) ||
+                                  busy ||
+                                  loading)
+                              ? null
+                              : connect,
                           icon: const Icon(Icons.login),
                           label: AppText(
                             busy
@@ -714,7 +728,12 @@ class _TTLockPageState extends State<TTLockPage> {
                       input(clientId, 'Client ID'),
                       input(clientSecret, 'Client Secret', secret: true),
                       FilledButton(
-                        onPressed: (busy || loading) ? null : saveApplication,
+                        onPressed:
+                            (!canEditSection(widget.api.user ?? {}, 'ttlock') ||
+                                busy ||
+                                loading)
+                            ? null
+                            : saveApplication,
                         child: const AppText('Save integration setup'),
                       ),
                     ],
@@ -725,6 +744,8 @@ class _TTLockPageState extends State<TTLockPage> {
           ),
         if (configured && !editing)
           TTLockDashboard(
+            canEdit: canEditSection(widget.api.user ?? {}, 'ttlock'),
+            canDelete: canDeleteSection(widget.api.user ?? {}, 'ttlock'),
             locks: locks,
             states: states,
             total: total,

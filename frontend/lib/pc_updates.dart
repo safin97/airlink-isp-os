@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -151,7 +152,7 @@ class _PcUpdatesState extends State<PcUpdates> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Update installed GPU drivers, CPU microcode, Linux kernel, device firmware and system packages over the internet.',
+              'Update GPU drivers, CPU microcode, Linux kernel, device firmware and system packages over the internet. Missing GTX 1660 Ti drivers are included when available.',
             ),
             const Text(
               'Uses the PC’s configured repositories and driver branch. BIOS/UEFI firmware is not included.',
@@ -168,6 +169,11 @@ class _PcUpdatesState extends State<PcUpdates> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             if (state['error'] != null) Text('${state['error']}'),
+            if (plan?['gpu']?['message'] != null) ...[
+              const SizedBox(height: 12),
+              Text('${plan!['gpu']['message']}'),
+            ] else if (data?['gpu_message'] != null)
+              Text('${data!['gpu_message']}'),
             if (recovery)
               const Text(
                 'An installation was interrupted or failed. Review the PC locally before another update or restart.',
@@ -201,7 +207,11 @@ class _PcUpdatesState extends State<PcUpdates> {
               runSpacing: 8,
               children: [
                 OutlinedButton.icon(
-                  onPressed: !supported || busy || recovery
+                  onPressed:
+                      !canEditSection(widget.api.user ?? {}, 'pc_updates') ||
+                          !supported ||
+                          busy ||
+                          recovery
                       ? null
                       : () => act('check'),
                   icon: const Icon(Icons.system_update_alt),
@@ -209,7 +219,12 @@ class _PcUpdatesState extends State<PcUpdates> {
                 ),
                 if (packages.isNotEmpty)
                   FilledButton(
-                    onPressed: !supported || busy || recovery || error != null
+                    onPressed:
+                        !canEditSection(widget.api.user ?? {}, 'pc_updates') ||
+                            !supported ||
+                            busy ||
+                            recovery ||
+                            error != null
                         ? null
                         : () => install(plan!),
                     child: const Text('Review and install'),

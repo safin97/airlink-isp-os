@@ -4,9 +4,16 @@ from sqlalchemy.orm import object_session
 from .models import UserSectionAccess, UserSectionEdits, UserSectionDeletes, UserManagerRole, ManagerRole, AccessRole, UserAccessRole, BuiltinAccessRole
 
 OPERATIONAL = ('dashboard', 'noc', 'towers', 'isp_card', 'monitoring', 'network_map', 'alerts', 'reports')
-ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles', 'deye')
-ALL = (*ASSIGNABLE, 'managers')
-OWNER_PAGES = (*[key for key in ALL if key != 'roles'], 'diagnostics', 'my_account', 'device_login', 'towers_api', 'card_system', 'ttlock')
+# New capabilities never inherit legacy operational edit/delete defaults.
+ADMINISTRATIVE = ('fib_recharge', 'managers', 'inventory_admin', 'device_login',
+                  'towers_api', 'card_system', 'ttlock', 'deye_management',
+                  'backups', 'vpn', 'payment_gateways', 'client_portal',
+                  'customer_device_access', 'device_api_access', 'telegram_bot',
+                  'telegram_account', 'telegram_notifications', 'whatsapp', 'pc_updates', 'snmp_sharing')
+ASSIGNABLE = (*OPERATIONAL, 'software_updates', 'settings', 'roles', 'access_roles', 'deye', *ADMINISTRATIVE)
+ALL = ASSIGNABLE
+OWNER_PAGES = (*OPERATIONAL, 'software_updates', 'settings', 'access_roles', 'deye', 'managers',
+               'diagnostics', 'my_account', 'device_login', 'towers_api', 'card_system', 'ttlock')
 OWNER_PINNED = ('access_roles', 'my_account')
 READ_RESOURCES = {
     'dashboard': ('dashboard', 'noc'),
@@ -84,7 +91,7 @@ def editable(user, db=None):
     db = db if db is not None else object_session(user)
     saved = db.get(UserSectionEdits, user.id) if db is not None else None
     # Preserve existing grants until the owner explicitly sets edit permissions.
-    return visible if saved is None else [key for key in visible if key in saved.sections]
+    return [key for key in visible if key not in ADMINISTRATIVE] if saved is None else [key for key in visible if key in saved.sections]
 
 
 def deletable(user, db=None):
@@ -96,13 +103,15 @@ def deletable(user, db=None):
             if saved is not None:
                 return [key for key in effective(user, db) if key != 'deye' and key in saved.sections]
             # These newly delegated administrative sections require explicit delete grants.
-            return [key for key in editable(user, db) if key not in ('roles', 'access_roles')]
+            return [key for key in editable(user, db) if key not in ('roles', 'access_roles', *ADMINISTRATIVE)]
         return editable(user, db)
     return [key for key in effective(user, db) if key != 'deye' and key in policy['delete']]
 
 
 def require_any(user, sections, db=None, *, write=False, delete=False):
-    if user.role != 'manager' and role_policy(user, db) is None:
+    if user.role == 'owner':
+        return
+    if user.role != 'manager' and role_policy(user, db) is None and not set(sections).intersection(ADMINISTRATIVE):
         return
     if not set(effective(user, db)).intersection(sections):
         raise HTTPException(403, 'This section is not enabled for your account')
@@ -113,17 +122,84 @@ def require_any(user, sections, db=None, *, write=False, delete=False):
         raise HTTPException(403, 'Read-only access: editing is not enabled for this section')
 
 
-def enforce_request(user, method, path):
+# Exact prefix boundaries prevent look-alike routes from inheriting access.
+FEATURE_ROUTES = {
+    '/api/integrations/ttlock': 'ttlock', '/api/card-system': 'card_system',
+    '/api/vpn': 'vpn', '/api/backups': 'backups',
+    '/api/towers-api-profiles': 'towers_api',
+    '/api/integrations/sas4/device-login-profiles': 'device_login',
+    '/api/integrations/sas4/device-access': 'customer_device_access',
+    '/api/device-api-access': 'device_api_access',
+    '/api/payments/gateways': 'payment_gateways',
+    '/api/client-portal': 'client_portal',
+    '/api/integrations/telegram-account': 'telegram_account',
+    '/api/integrations/whatsapp': 'whatsapp',
+    '/api/system/pc-updates': 'pc_updates',
+    '/api/users': 'managers', '/api/snmp-profile-visibility': 'snmp_sharing',
+    '/api/integrations/telegram': 'telegram_notifications',
+}
+
+
+def administrative_feature(path):
     path = path.rstrip('/')
+    if path in ('/api/snmp-profiles/discovery-public', '/api/snmp-profiles/discovery-match'):
+        return 'inventory_admin'
+    for root, feature in FEATURE_ROUTES.items():
+        if path == root or path.startswith(root + '/'):
+            return feature
+    return None
+
+
+def has_capability(user, feature, db=None, *, write=False, delete=False):
+    if user.role == 'owner':
+        return True
+    permissions = deletable(user, db) if delete else editable(user, db) if write else effective(user, db)
+    return feature in permissions
+
+
+def request_action(method, path, body=None):
+    if method in ('GET', 'HEAD', 'OPTIONS'):
+        if path.startswith('/api/integrations/ttlock/') and path.endswith('/bluetooth'):
+            return 'edit'  # SDK lockData authorizes hardware changes.
+        return 'view'
+    if method == 'DELETE':
+        return 'delete'
+    body = body if isinstance(body, dict) else {}
+    action = body.get('action') if path in ('/api/card-system/radius/action', '/api/integrations/ttlock/mobile/prepare') else None
+    if path == '/api/integrations/ttlock/bridge/jobs' and isinstance(body.get('parameters'), dict):
+        action = body['parameters'].get('action')
+    if isinstance(action, str) and (action == 'delete' or action.endswith('_delete') or action == 'lock_reset'):
+        return 'delete'
+    if path.startswith('/api/integrations/ttlock/mobile/') and path.endswith(('/complete', '/sync')):
+        return 'view'  # The endpoint rechecks the persisted operation's action.
+    if path.startswith('/api/integrations/ttlock/bridge/jobs/') and path.endswith('/claim'):
+        return 'view'  # Claim rechecks the queued action before releasing SDK credentials.
+    if path.endswith('/delete') or (path.endswith('/disconnect') and not path.startswith('/api/vpn/')):
+        return 'delete'
+    if path.startswith('/api/card-system/') and path.endswith('/pin'):
+        return 'view'
+    return 'edit'
+
+
+def require_feature(user, feature, method='GET', path='', body=None):
+    action = request_action(method, path, body)
+    require_any(user, (feature,), write=action == 'edit', delete=action == 'delete')
+
+
+def enforce_request(user, method, path, body=None):
+    path = path.rstrip('/')
+    feature = administrative_feature(path)
+    if feature:
+        return require_feature(user, feature, method, path, body)
+    if path == '/api/integrations/customer-telegram' and (method not in ('GET', 'HEAD', 'OPTIONS') or has_capability(user, 'telegram_bot')):
+        return require_feature(user, 'telegram_bot', method, path, body)
     if path == '/api/integrations/deye' or path.startswith('/api/integrations/deye/'):
         from . import deye_access
+        if has_capability(user, 'deye_management'):
+            return require_feature(user, 'deye_management', method, path, body)
         if user.role != 'owner' and (method not in ('GET', 'HEAD', 'OPTIONS') or not deye_access.visible(user)):
             raise HTTPException(403, 'Deye Solar configuration and sharing are owner-only; viewing requires owner permission')
         return
-    owner_sections = ('/api/integrations/ttlock', '/api/card-system', '/api/vpn', '/api/backups', '/api/towers-api-profiles', '/api/integrations/sas4/device-login-profiles',
-                      '/api/integrations/sas4/device-access', '/api/payments/gateways')
-    if user.role != 'owner' and any(path == root or path.startswith(root + '/') for root in owner_sections):
-        raise HTTPException(403, 'Owner access required')
     if path.rstrip('/') == '/api/snmp-profiles':
         from . import snmp_visibility
         snmp_visibility.require(user)
@@ -177,5 +253,7 @@ def enforce_request(user, method, path):
         return require(('towers',))
     if resource == 'alerts':
         return require(('alerts',))
-    # Account administration remains owner-only.
+    if resource in ('links', 'discovery') and has_capability(user, 'inventory_admin'):
+        return require_feature(user, 'inventory_admin', method, path, body)
+    # Unregistered privileged routes remain owner-only.
     raise HTTPException(403, 'Owner access required')

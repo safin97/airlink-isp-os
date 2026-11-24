@@ -1,3 +1,4 @@
+import 'section_access.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/link.dart';
 import 'api.dart';
@@ -99,7 +100,11 @@ class _ClientPortalSettingsState extends State<ClientPortalSettings> {
   }
 
   Future<void> save() async {
-    if (busy || !loaded) return;
+    if (!canEditSection(widget.api.user ?? {}, 'client_portal') ||
+        busy ||
+        !loaded) {
+      return;
+    }
     // Include an entered range even when Save is pressed before Add.
     if (rangeInput.text.trim().isNotEmpty && !addRange()) return;
     setState(() {
@@ -146,7 +151,10 @@ class _ClientPortalSettingsState extends State<ClientPortalSettings> {
         contentPadding: EdgeInsets.zero,
         title: const AppText('Enable client recharge portal'),
         value: enabled,
-        onChanged: busy || !loaded
+        onChanged:
+            !canEditSection(widget.api.user ?? {}, 'client_portal') ||
+                busy ||
+                !loaded
             ? null
             : (value) => setState(() {
                 enabled = value;
@@ -185,7 +193,12 @@ class _ClientPortalSettingsState extends State<ClientPortalSettings> {
       ),
       const SizedBox(height: 10),
       OutlinedButton.icon(
-        onPressed: busy || !loaded ? null : addRange,
+        onPressed:
+            !canEditSection(widget.api.user ?? {}, 'client_portal') ||
+                busy ||
+                !loaded
+            ? null
+            : addRange,
         icon: const Icon(Icons.add),
         label: const AppText('Add IP range'),
       ),
@@ -235,7 +248,12 @@ class _ClientPortalSettingsState extends State<ClientPortalSettings> {
       ),
       const SizedBox(height: 16),
       FilledButton(
-        onPressed: busy || !loaded ? null : save,
+        onPressed:
+            !canEditSection(widget.api.user ?? {}, 'client_portal') ||
+                busy ||
+                !loaded
+            ? null
+            : save,
         child: const AppText('Save client portal'),
       ),
       if (error != null)

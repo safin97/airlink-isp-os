@@ -24,6 +24,7 @@ void main() {
         return http.Response('{}', 200);
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -72,6 +73,7 @@ void main() {
         return http.Response('{}', 201);
       }),
     );
+    api.user ??= {'role': 'owner', 'username': 'owner'};
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(

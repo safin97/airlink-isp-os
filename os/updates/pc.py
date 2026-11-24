@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from updates import update
+from updates import gpu_driver
 
 ROOT = Path('/var/lib/airlink-system/pc-updates')
 INSTALLED = Path('/etc/airlink/installed')
@@ -134,6 +135,7 @@ def status():
     reboot = bool(available and (Path('/var/run/reboot-required').exists() or
                   (installed.get('reboot_required') and installed.get('boot_id') == boot_id())))
     return {'supported': available, 'state': state, 'plan': plan, 'reboot_required': reboot,
+            'gpu_message': installed.get('gpu_message'),
             'reason': None if available else 'PC updates run on the installed AirLink Linux PC. They are unavailable in the local preview.'}
 
 
@@ -197,10 +199,14 @@ def create_plan():
                                   run(['apt-cache', 'policy', microcode]), re.MULTILINE)
             if candidate:
                 targets.append(microcode + '=' + candidate.group(1))
+    gpu = gpu_driver.missing_driver_plan(run)
+    if gpu:
+        # Merge by package name: a requested driver must have one exact version.
+        targets = list({spec.split('=', 1)[0]: spec for spec in [*targets, *gpu['targets']]}.values())
     if targets:
         packages = parse_plan(run(APT + ['--simulate', '--no-remove', 'install', *targets]))
     plan = {'packages': packages, 'fingerprint': fingerprint(), 'checked_at': time.time(),
-            'expires': time.time() + 3600}
+            'expires': time.time() + 3600, 'gpu': gpu}
     plan['id'] = hashlib.sha256(update.canonical(plan)).hexdigest()
     update.atomic(ROOT / 'plan.json', plan)
     write_state('ready')
@@ -212,6 +218,9 @@ def install_plan():
     if (not plan.get('packages') or request.get('plan_id') != plan.get('id') or
             time.time() > plan['expires'] or fingerprint() != plan['fingerprint']):
         raise ValueError('Approved updates expired or installed packages changed. Check again.')
+    gpu = plan.get('gpu') or {}
+    if gpu.get('kernel') and gpu_driver.platform.release() != gpu['kernel']:
+        raise ValueError('The running kernel changed. Check and review the NVIDIA driver plan again.')
     targets = specifications(plan['packages'])
     command = APT + ['--no-remove', 'install', *targets]
     if parse_plan(run(command + ['--simulate'])) != plan['packages']:
@@ -230,9 +239,13 @@ def install_plan():
     run(command + ['--no-download', '--assume-yes'], timeout=5400)
     if run(['dpkg', '--audit']).strip():
         raise RuntimeError('Package configuration is incomplete; review the PC update journal locally.')
+    if gpu.get('kernel') and not run(['modinfo', '-k', gpu['kernel'], '-F', 'version', 'nvidia']).strip():
+        raise RuntimeError('NVIDIA kernel module was not built. Review the PC update journal and DKMS locally before restarting.')
     # Restart activates updated kernels/drivers and libraries held by running services.
     reboot = bool(plan['packages'])
-    update.atomic(ROOT / 'installed.json', {'boot_id': boot_id(), 'reboot_required': reboot, 'plan_id': plan['id']})
+    update.atomic(ROOT / 'installed.json', {'boot_id': boot_id(), 'reboot_required': reboot, 'plan_id': plan['id'],
+        'gpu_message': ('NVIDIA driver packages installed. After restarting, verify driver status and Local display in PC settings → Overview.'
+                        if gpu.get('kernel') else None)})
     update.health_check()
     write_state('installed', count=len(plan['packages']))
 

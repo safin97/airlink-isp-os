@@ -16,8 +16,9 @@ from . import section_access
 router = APIRouter(prefix='/api/integrations/telegram', tags=['Telegram'])
 
 def account(user_id: Optional[str] = None, user=Depends(current_user), db=Depends(get_db)):
-    if user.role != 'owner':
-        raise HTTPException(403, 'Only the owner can manage account Telegram notifications')
+    section_access.require_any(user, ('telegram_notifications',), db)
+    if user.role != 'owner' and user_id and user_id != user.id:
+        raise HTTPException(403, 'You can manage only your own Telegram notifications')
     target = db.get(User, user_id) if user_id else user
     if not target or target.role not in ('owner', 'manager'):
         raise HTTPException(404, 'Owner or manager account not found')

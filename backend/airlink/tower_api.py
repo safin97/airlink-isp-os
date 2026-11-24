@@ -1,3 +1,4 @@
+from .section_access import has_capability, require_any
 """Write-only, encrypted credentials inherited by devices in a tower."""
 import json
 from fastapi import HTTPException
@@ -28,7 +29,7 @@ def public_configuration(config):
 
 
 def public_settings(db, tower_id, user):
-    if user.role != 'owner':
+    if not has_capability(user, 'towers_api', db):
         return {}
     config = configuration(db, tower_id)
     return public_configuration(config)
@@ -38,8 +39,7 @@ def save(db, tower_id, data, user):
     fields = data.model_fields_set & FIELDS
     if not fields:
         return
-    if user.role != 'owner':
-        raise HTTPException(403, 'Only owner configures tower API credentials')
+    require_any(user, ('towers_api',), db, write=True)
     old = configuration(db, tower_id)
     config = dict(old)
     for field in fields:
