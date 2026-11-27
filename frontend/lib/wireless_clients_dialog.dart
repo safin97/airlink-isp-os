@@ -20,6 +20,7 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
   Map<String, dynamic>? data;
   String? error;
   bool fetching = false;
+  String order = 'stable';
   Timer? timer;
 
   @override
@@ -59,11 +60,30 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = ((data?['clients'] as List?) ?? [])
+    final original = ((data?['clients'] as List?) ?? [])
         .map(
           (row) => error == null ? row : {...row as Map, 'status': 'unknown'},
         )
         .toList();
+    // Partition instead of an unstable sort: retain first-seen order per group.
+    final groups = order == 'online'
+        ? ['up', 'down', 'unknown']
+        : ['down', 'up', 'unknown'];
+    final rows = order == 'stable'
+        ? original
+        : [
+            for (final status in groups)
+              ...original.where(
+                (row) =>
+                    (row['status'] == 'up' || row['status'] == 'down'
+                        ? row['status']
+                        : 'unknown') ==
+                    status,
+              ),
+          ];
+    final online = original.where((row) => row['status'] == 'up').length;
+    final offline = original.where((row) => row['status'] == 'down').length;
+    final unknown = original.length - online - offline;
     String localTime(dynamic value) {
       final time = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
       if (time == null) return '—';
@@ -76,7 +96,7 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
       title: Text('${tr('Wireless clients')} — ${widget.device['name']}'),
       content: SizedBox(
         width: 1080,
-        height: 360,
+        height: 460,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -90,12 +110,36 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
             if (data == null && error == null) const LinearProgressIndicator(),
             if (data != null) ...[
               Text('${data!['total'] ?? '—'} ${tr('registered clients')}'),
+              if (rows.isNotEmpty || data!['counts'] != null)
+                Text('Online: $online · Offline: $offline · Unknown: $unknown'),
               if (data!['collected_at'] != null)
                 Text('${tr('Collected')}: ${data!['collected_at']}'),
               const SizedBox(height: 12),
               if (rows.isNotEmpty)
                 const AppText(
-                  'Clients keep their row order. Down means a complete registration check confirmed disconnection. Unknown means the current status could not be confirmed.',
+                  'Offline means a complete registration check confirmed disconnection. Unknown means the current status could not be confirmed.',
+                ),
+              if (rows.isNotEmpty)
+                DropdownButton<String>(
+                  key: const ValueKey('registration-client-order'),
+                  value: order,
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'stable',
+                      child: Text('Stable row order'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'online',
+                      child: Text('Online first'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'offline',
+                      child: Text('Offline first'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => order = value);
+                  },
                 ),
               if (data!['history_limited'] == true)
                 const AppText(
@@ -123,7 +167,7 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                     (data!['total'] as num) >
                         rows.where((row) => row['status'] == 'up').length)
                   Text(
-                    '${rows.where((row) => row['status'] == 'up').length} confirmed up · ${rows.length} known clients',
+                    '$online confirmed online · ${rows.length} known clients',
                   ),
                 Expanded(
                   child: SingleChildScrollView(
@@ -184,9 +228,9 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                                           : 'Since ${localTime(row['status_since'])}',
                                       child: Text(
                                         row['status'] == 'up'
-                                            ? 'Up'
+                                            ? 'Online'
                                             : row['status'] == 'down'
-                                            ? 'Down'
+                                            ? 'Offline'
                                             : 'Unknown',
                                         style: TextStyle(
                                           color: row['status'] == 'up'

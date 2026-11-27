@@ -50,13 +50,26 @@ void main() {
         .map((r) => r.key)
         .toList();
     final original = keys();
-    expect(find.text('Up'), findsNWidgets(2));
+    expect(find.text('Online'), findsNWidgets(2));
     rows[0]['status'] = 'down';
     rows[0]['last_status'] = 'down';
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
     expect(keys(), original);
-    expect(find.text('Down'), findsOneWidget);
+    expect(find.text('Offline'), findsOneWidget);
+    expect(find.text('Online: 1 · Offline: 1 · Unknown: 0'), findsOneWidget);
+    Future<void> order(String label) async {
+      await tester.tap(find.byKey(const ValueKey('registration-client-order')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    await order('Online first');
+    expect(keys(), original.reversed.toList());
+    await order('Offline first');
+    expect(keys(), original);
+    await order('Stable row order');
     expect(find.text('-65 dBm'), findsNWidgets(2));
     expect(
       tester
@@ -73,7 +86,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(keys(), original);
     expect(find.text('Unknown'), findsOneWidget);
-    expect(find.text('Up'), findsOneWidget);
+    expect(find.text('Online'), findsOneWidget);
     expect(
       tester.widget<DataTable>(find.byType(DataTable)).rows.first.color,
       isNull,
@@ -83,6 +96,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(keys(), original);
     expect(find.text('Unknown'), findsNWidgets(2));
+    expect(find.text('Online: 0 · Offline: 0 · Unknown: 2'), findsOneWidget);
+    await order('Offline first');
+    expect(keys(), original);
     await tester.pumpWidget(const SizedBox());
   });
 }

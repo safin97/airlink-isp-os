@@ -28,9 +28,9 @@ from .models import DeviceTelemetrySnapshot
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
 from .registration_usernames import service as registration_username_service
-from .wireless_clients import public_clients, HISTORY_KEY, remember_clients, client_history_view
+from .wireless_clients import registration_state
 from . import snmp_discovery
-from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment
+from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment, DeviceEthernetDisplay
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
@@ -831,6 +831,7 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
                        'status': device_status, 'downtime_seconds': downtime,
                        'snmp_status': snmp_status(device, metric),
                        'api_status': status,
+                       'registration_counts': registration_state(device, metric, snapshot, now())['counts'],
                        **device_telemetry.display(device, metric, snapshot, fresh, effective_vendor)})
     return result
 
@@ -998,6 +999,7 @@ def wireless_management_context(db, user, device_id):
 @app.get('/api/devices/{device_id}/ethernet-ports')
 def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends(get_db)):
     device, metric, _ = wireless_management_context(db, user, device_id)
+    snapshot = db.get(DeviceTelemetrySnapshot, device.id)
     status = snmp_status(device, metric)
     profile = db.get(SNMPProfile, device.snmp_profile_id) if device.snmp_profile_id else None
     version = json.loads(cipher().decrypt(profile.encrypted_credentials.encode())).get('version', '3') if profile else None
@@ -1018,8 +1020,27 @@ def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends
                       'rx_bps': port.get('rx_bps') if fresh else None,
                       'tx_bps': port.get('tx_bps') if fresh else None})
     return {'supported': supported, 'snmp_status': status, 'snmp_version': version,
+            'speed_port': device.ethernet_speed_port,
+            'speed_port_choices': device_telemetry.port_choices(device, metric, snapshot),
+            'can_select_speed_port': user.role == 'owner' or (
+                (user.role == 'manager' or section_access.role_policy(user, db) is not None)
+                and 'towers' in section_access.editable(user, db)),
             'collected_at': metric.collected_at if values else None,
             'poll_interval': device.poll_interval, 'ports': ports}
+
+
+@app.put('/api/devices/{device_id}/ethernet-display')
+def select_device_ethernet_speed(device_id: str, data: DeviceEthernetDisplay,
+                                 user=Depends(current_user), db=Depends(get_db)):
+    device, metric, _ = wireless_management_context(db, user, device_id)
+    check_tower(db, user, device.tower_id, write=True)
+    section_access.require_any(user, ['towers'], db, write=True)
+    snapshot = db.get(DeviceTelemetrySnapshot, device.id)
+    if data.port is not None and data.port not in device_telemetry.port_choices(device, metric, snapshot):
+        raise HTTPException(422, 'Choose a reported Ethernet port or Automatic')
+    device.ethernet_speed_port = data.port
+    commit(db, user, 'device.ethernet_display', device.id)
+    return {'id': device.id, 'ethernet_speed_port': device.ethernet_speed_port}
 
 
 @app.get('/api/devices/{device_id}/wireless-settings')
@@ -1068,19 +1089,9 @@ def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_
     device = check_device(db, user, device_id)
     metric = db.scalar(select(Metric).where(Metric.device_id == device_id)
                        .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1))
-    fresh = bool(device.enabled and device.last_poll and metric and
-                 (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
-    values = metric.values if fresh else {}
     snapshot = db.get(DeviceTelemetrySnapshot, device_id)
-    history = (snapshot.fields.get(HISTORY_KEY) or {}) if snapshot else {}
-    # Older samples can still be displayed before the worker saves its first history.
-    if fresh and not history:
-        history = remember_clients({}, values, metric.collected_at, device.ip_address)
-    source = values.get('wireless_registration_source')
-    successful = values.get('snmp_up') if source == 'SNMP' else values.get('api_up')
-    clients = client_history_view(history, device, now(), metric.collected_at if fresh and successful else None)
-    if not history:
-        clients = [{**row, 'status': 'unknown'} for row in public_clients(values.get('wireless_registrations'))]
+    result = registration_state(device, metric, snapshot, now())
+    clients = result['clients']
     lookup_status = 'not_needed'
     unmatched = [row for row in clients if row.get('status') != 'down' and not row.get('pppoe_username') and row.get('pppoe_username_status') != 'ambiguous']
     if unmatched:
@@ -1089,13 +1100,7 @@ def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_
             row['pppoe_username'] = matches.get(row['mac_address'])
             row['pppoe_username_status'] = ('matched' if row['pppoe_username'] else
                 'ambiguous' if row['mac_address'] in matches else lookup_status if lookup_status == 'pending' else 'unavailable')
-    total = values.get('wireless_clients')
-    available = bool(clients) or (values.get('wireless_registration_source') and total == 0)
-    return {'clients': clients, 'total': total if total is not None else history.get('total'),
-            'history_limited': bool(history.get('limited')), 'username_lookup_status': lookup_status, 'status': 'available' if available else
-            'stale' if metric and not fresh else 'unavailable',
-            'source': source or history.get('source'),
-            'collected_at': metric.collected_at if fresh else history.get('collected_at')}
+    return {**result, 'username_lookup_status': lookup_status}
 
 
 @app.get("/api/alerts")

@@ -113,6 +113,17 @@ class DeviceInput(Strict):
         return result
 
 
+class DeviceEthernetDisplay(Strict):
+    port: Optional[str] = Field(max_length=128)
+
+    @field_validator('port')
+    @classmethod
+    def port_name(cls, value):
+        if value is not None and (not value.strip() or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+            raise ValueError('Choose a reported Ethernet port or Automatic')
+        return value
+
+
 class DeviceSNMPAssignment(Strict):
     snmp_profile_id: str = Field(min_length=1, max_length=36)
     tower_id: str = Field(min_length=1, max_length=36)

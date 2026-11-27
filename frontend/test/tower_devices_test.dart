@@ -79,6 +79,7 @@ void main() {
           {
             'id': '1',
             'name': 'North online',
+            'registration_counts': {'online': 1, 'offline': 1, 'unknown': 0},
             'vendor': 'mikrotik_switch',
             'snmp_status': 'connected',
             'api_status': 'connected',
@@ -198,6 +199,7 @@ void main() {
       expect(find.byTooltip('Delete'), findsNothing);
       expect(find.text('Memory'), findsNothing);
       expect(find.text('Registration clients'), findsOneWidget);
+      expect(find.text('Online: 1\nOffline: 1'), findsOneWidget);
       final clients = find.byKey(const ValueKey('wireless-clients-1'));
       await tester.ensureVisible(clients);
       await tester.tap(clients);
@@ -235,6 +237,7 @@ void main() {
       onlineDevice.addAll({
         'status': 'offline',
         'downtime_seconds': 65,
+        'registration_counts': {'online': 0, 'offline': 0, 'unknown': 2},
         'telemetry_stale_fields': savedTelemetry.keys.toList(),
         'telemetry_at': '2026-11-27T09:00:00Z',
         'telemetry_field_addresses': {'ethernet_links': '192.0.2.250'},
@@ -254,7 +257,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('wireless-clients-1')),
-          matching: find.text('2'),
+          matching: find.text('Online: 0\nOffline: 0\nUnknown: 2'),
         ),
         findsOneWidget,
       );
@@ -282,6 +285,7 @@ void main() {
       onlineDevice.addAll({
         'status': 'online',
         'downtime_seconds': null,
+        'registration_counts': {'online': 2, 'offline': 0, 'unknown': 0},
         'telemetry_stale_fields': [],
         'telemetry': {
           ...savedTelemetry,
@@ -292,6 +296,7 @@ void main() {
       await tester.pump(const Duration(seconds: 10));
       await tester.pumpAndSettle();
       expect(find.text('North changed'), findsOneWidget);
+      expect(find.text('Online: 2\nOffline: 0'), findsOneWidget);
       expect(find.text('AirLink North'), findsNothing);
       expect(find.text('0d 0h 1m'), findsOneWidget);
       expect(find.text('Last known readings'), findsNothing);

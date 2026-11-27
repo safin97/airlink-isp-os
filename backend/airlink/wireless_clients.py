@@ -61,6 +61,33 @@ def client_history_view(history, device, timestamp, confirmed_at=None):
     return result
 
 
+def registration_state(device, metric, snapshot, timestamp):
+    """One status calculation for the device count and the registration list."""
+    fresh = bool(device.enabled and device.last_poll and metric and
+                 (aware(timestamp) - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
+    values = metric.values if fresh else {}
+    history = (snapshot.fields.get(HISTORY_KEY) or {}) if snapshot else {}
+    if fresh and not history:
+        history = remember_clients({}, values, metric.collected_at, device.ip_address)
+    source = values.get('wireless_registration_source')
+    successful = values.get('snmp_up') if source == 'SNMP' else values.get('api_up')
+    clients = client_history_view(history, device, timestamp, metric.collected_at if fresh and successful else None)
+    if not history:
+        clients = [{**row, 'status': 'unknown'} for row in public_clients(values.get('wireless_registrations'))]
+    total = values.get('wireless_clients')
+    available = bool(clients) or (source and total == 0)
+    counts = ({'online': sum(row['status'] == 'up' for row in clients),
+               'offline': sum(row['status'] == 'down' for row in clients),
+               'unknown': sum(row['status'] not in ('up', 'down') for row in clients),
+               'limited': bool(history.get('limited'))} if history or clients else None)
+    return {'clients': clients, 'counts': counts,
+            'total': total if total is not None else history.get('total'),
+            'history_limited': bool(history.get('limited')),
+            'status': 'available' if available else 'stale' if metric and not fresh else 'unavailable',
+            'source': source or history.get('source'),
+            'collected_at': metric.collected_at if fresh else history.get('collected_at')}
+
+
 def mac_address(value):
     if not isinstance(value, str):
         return None

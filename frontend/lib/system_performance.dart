@@ -47,6 +47,8 @@ class SystemPerformance extends StatelessWidget {
       String reading,
       List<String> details, {
       dynamic percent,
+      String? status,
+      bool healthy = false,
     }) => Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -66,6 +68,24 @@ class SystemPerformance extends StatelessWidget {
                 ),
               ],
             ),
+            if (status != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    healthy ? Icons.check_circle_outline : Icons.info_outline,
+                    size: 16,
+                    color: healthy
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(status, style: theme.textTheme.bodySmall),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 12),
             Text(
               reading,
@@ -94,6 +114,53 @@ class SystemPerformance extends StatelessWidget {
         '${data['cpu_cores'] ?? '—'} cores · ${data['cpu_threads'] ?? '—'} threads',
       ], percent: data['cpu_percent']),
     );
+    final gpus = data['gpus'] as List?;
+    if (gpus == null || gpus.isEmpty) {
+      cards.add(
+        tile('GPU', Icons.developer_board, 'Unavailable', [
+          gpus == null
+              ? 'GPU readings unavailable'
+              : 'No GPU detected on this host',
+        ]),
+      );
+    } else {
+      for (final gpu in gpus.whereType<Map>()) {
+        final ready = gpu['status'] == 'ready';
+        final usage = gpu['utilization_percent'];
+        final hasUsage =
+            ready &&
+            usage is num &&
+            usage.isFinite &&
+            usage >= 0 &&
+            usage <= 100;
+        final status = hasUsage
+            ? (usage == 0 ? 'Working · Idle' : 'Working · Active')
+            : gpu['status'] == 'not_loaded'
+            ? 'Driver not loaded'
+            : 'Usage unavailable';
+        cards.add(
+          tile(
+            'GPU',
+            Icons.developer_board,
+            hasUsage ? number(usage, suffix: '%') : 'Unavailable',
+            [
+              gpu['name'] as String? ?? 'Unknown GPU',
+              'GPU utilization',
+              'VRAM: ${number(gpu['memory_used_mib'], suffix: ' MiB')} used / ${number(gpu['memory_total_mib'], suffix: ' MiB')}',
+              'Temperature: ${number(gpu['temperature_c'], suffix: ' °C')}',
+              'Driver: ${gpu['driver'] ?? 'Not loaded'}${gpu['driver_version'] == null ? '' : ' · ${gpu['driver_version']}'}',
+              if (!ready)
+                gpu['status'] == 'not_loaded'
+                    ? 'GPU detected; driver not loaded'
+                    : 'GPU detected; telemetry unavailable',
+            ],
+            percent: hasUsage ? usage : null,
+            status: status,
+            healthy: hasUsage,
+          ),
+        );
+      }
+    }
     cards.add(
       tile('Memory', Icons.storage, number(memory['percent'], suffix: '%'), [
         '${bytes(memory['used_bytes'])} used / ${bytes(memory['total_bytes'])}',
@@ -120,39 +187,6 @@ class SystemPerformance extends StatelessWidget {
         ['Read speed', 'Write: ${throughput(data['disk_write_bytes_sec'])}'],
       ),
     );
-    final gpus = data['gpus'] as List?;
-    if (gpus == null || gpus.isEmpty) {
-      cards.add(
-        tile('GPU', Icons.developer_board, 'Unavailable', [
-          gpus == null
-              ? 'GPU readings unavailable'
-              : 'No GPU detected on this host',
-        ]),
-      );
-    } else {
-      for (final gpu in gpus.whereType<Map>()) {
-        final ready = gpu['status'] == 'ready';
-        cards.add(
-          tile(
-            gpu['name'] as String? ?? 'GPU',
-            Icons.developer_board,
-            ready
-                ? number(gpu['utilization_percent'], suffix: '%')
-                : 'Unavailable',
-            [
-              'VRAM: ${number(gpu['memory_used_mib'], suffix: ' MiB')} used / ${number(gpu['memory_total_mib'], suffix: ' MiB')}',
-              'Temperature: ${number(gpu['temperature_c'], suffix: ' °C')}',
-              'Driver: ${gpu['driver'] ?? 'Not loaded'}${gpu['driver_version'] == null ? '' : ' · ${gpu['driver_version']}'}',
-              if (!ready)
-                gpu['status'] == 'not_loaded'
-                    ? 'GPU detected; driver not loaded'
-                    : 'GPU detected; telemetry unavailable',
-            ],
-            percent: ready ? gpu['utilization_percent'] : null,
-          ),
-        );
-      }
-    }
     cards.add(
       tile('Google DNS', Icons.dns_outlined, latencyReading(google), [
         '8.8.8.8 · ICMP round-trip',

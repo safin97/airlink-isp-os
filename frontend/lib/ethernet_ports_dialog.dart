@@ -8,9 +8,11 @@ class EthernetPortsDialog extends StatefulWidget {
     super.key,
     required this.api,
     required this.device,
+    this.onChanged,
   });
   final Api api;
   final Map<String, dynamic> device;
+  final Future<void> Function()? onChanged;
 
   @override
   State<EthernetPortsDialog> createState() => _EthernetPortsDialogState();
@@ -21,6 +23,12 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
   String? error;
   bool busy = false;
   bool fetching = false;
+  bool saving = false;
+  bool dirty = false;
+  String? selectedPort;
+  String? saveError;
+  bool saved = false;
+  int selectionRevision = 0;
   Timer? timer;
 
   @override
@@ -40,17 +48,20 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
   }
 
   Future<void> load({bool quiet = false}) async {
-    if (fetching) return;
+    if (fetching || saving) return;
     fetching = true;
+    final revision = selectionRevision;
     if (!quiet) setState(() => busy = true);
     try {
       final result = await widget.api.request(
         '/devices/${Uri.encodeComponent(widget.device['id'].toString())}/ethernet-ports',
       );
       if (mounted &&
+          revision == selectionRevision &&
           (error != null || jsonEncode(data) != jsonEncode(result))) {
         setState(() {
           data = Map<String, dynamic>.from(result);
+          if (!dirty) selectedPort = data!['speed_port'] as String?;
           error = null;
         });
       }
@@ -71,9 +82,39 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
       ? '${(value / 1000000).toStringAsFixed(3)} Mbps'
       : 'Unavailable';
 
+  Future<void> savePort() async {
+    selectionRevision++;
+    setState(() {
+      saving = true;
+      saveError = null;
+      saved = false;
+    });
+    try {
+      await widget.api.request(
+        '/devices/${Uri.encodeComponent(widget.device['id'].toString())}/ethernet-display',
+        method: 'PUT',
+        body: {'port': selectedPort},
+      );
+      if (!mounted) return;
+      setState(() {
+        dirty = false;
+        saved = true;
+      });
+      await widget.onChanged?.call();
+    } catch (e) {
+      if (mounted) setState(() => saveError = e.toString());
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ports = (data?['ports'] as List?) ?? [];
+    final choices = <String>{
+      ...((data?['speed_port_choices'] as List?) ?? []).whereType<String>(),
+      if (selectedPort != null) selectedPort!,
+    }.toList()..sort();
     const labels = {
       'connected': 'Running',
       'disconnected': 'Not running · Link down',
@@ -119,6 +160,48 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
                   error!,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
+              if (data?['can_select_speed_port'] == true) ...[
+                const SizedBox(height: 12),
+                const Text('Port shown in the Ethernet speed column'),
+                DropdownButton<String>(
+                  key: const ValueKey('ethernet-speed-port'),
+                  isExpanded: true,
+                  value: selectedPort ?? '',
+                  items: [
+                    const DropdownMenuItem(
+                      value: '',
+                      child: Text('Automatic (available port)'),
+                    ),
+                    ...choices.map(
+                      (name) =>
+                          DropdownMenuItem(value: name, child: Text(name)),
+                    ),
+                  ],
+                  onChanged: saving
+                      ? null
+                      : (value) => setState(() {
+                          selectedPort = value == '' ? null : value;
+                          dirty = true;
+                          saved = false;
+                        }),
+                ),
+                const Text(
+                  'Saved for this device and shared with everyone who can view it. Last reported speed stays visible during an outage.',
+                ),
+                FilledButton(
+                  onPressed: saving || !dirty ? null : savePort,
+                  child: Text(saving ? 'Saving…' : 'Save displayed port'),
+                ),
+                if (saved) const Text('Displayed port saved.'),
+                if (saveError != null)
+                  Text(
+                    saveError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                const SizedBox(height: 12),
+              ],
               if (data != null && data!['supported'] != true)
                 const Text(
                   'Assign an SNMP profile in Edit device and enable matching SNMP access on the device to see all reported Ethernet ports.',
@@ -200,7 +283,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
       actions: [
         TextButton(onPressed: busy ? null : load, child: const Text('Refresh')),
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: saving ? null : () => Navigator.pop(context),
           child: const Text('Close'),
         ),
       ],

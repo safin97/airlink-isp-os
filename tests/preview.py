@@ -249,6 +249,9 @@ if 'connection_timeout' not in {column['name'] for column in inspect(engine).get
 if 'down_since' not in {column['name'] for column in inspect(engine).get_columns('devices')}:
     with engine.begin() as connection:
         connection.execute(text('ALTER TABLE devices ADD COLUMN down_since DATETIME'))
+if 'ethernet_speed_port' not in {column['name'] for column in inspect(engine).get_columns('devices')}:
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE devices ADD COLUMN ethernet_speed_port VARCHAR(128)'))
 # Keep local accounts aligned with the production consolidation migration.
 import importlib.util
 migration_spec = importlib.util.spec_from_file_location('preview_direct_access_roles',

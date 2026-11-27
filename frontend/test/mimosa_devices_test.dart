@@ -18,7 +18,9 @@ void main() {
         final mimosa = <String, dynamic>{
           'id': 'm',
           'name': 'Backhaul',
-          'vendor': 'mimosa',
+          'vendor': mixed ? 'generic' : 'mimosa',
+          'detected_vendor': 'mimosa',
+          'model': 'C5c',
           'tower_id': 'north',
           'ip_address': '192.0.2.1',
           'status': 'online',
@@ -103,7 +105,106 @@ void main() {
             findsOneWidget,
           );
         }
-        // Live patches change readings without navigation or a manual refresh.
+        // Measured speeds are independent of ambiguous/missing traffic ports.
+        mimosa['telemetry'] = {
+          'ethernet_links': [
+            {'name': 'eth0', 'speed_mbps': 100},
+            {'name': 'eth1', 'speed_mbps': 1000},
+          ],
+          'ethernet_traffic': <String, dynamic>{},
+        };
+        socket.controller.add({
+          'type': 'patch',
+          'rows': {'devices': devices},
+        });
+        await tester.pumpAndSettle();
+        expect(find.text('eth0: 100 Mbps · eth1: 1000 Mbps'), findsOneWidget);
+        expect(find.text('TX: Unavailable\nRX: Unavailable'), findsOneWidget);
+        mimosa['status'] = 'offline';
+        mimosa['telemetry_stale_fields'] = ['ethernet_links'];
+        mimosa['telemetry_field_times'] = {
+          'ethernet_links': '2026-11-27T12:00:00Z',
+        };
+        socket.controller.add({
+          'type': 'patch',
+          'rows': {'devices': devices},
+        });
+        await tester.pumpAndSettle();
+        expect(find.text('eth0: 100 Mbps · eth1: 1000 Mbps'), findsOneWidget);
+        final speedTip = tester
+            .widgetList<Tooltip>(find.byType(Tooltip))
+            .singleWhere(
+              (t) =>
+                  t.message?.startsWith('eth0: 100 Mbps · eth1: 1000 Mbps') ??
+                  false,
+            );
+        expect(speedTip.message, contains('Last known reading'));
+        expect(
+          speedTip.message,
+          contains(DateTime.parse('2026-11-27T12:00:00Z').toLocal().toString()),
+        );
+        mimosa['status'] = 'online';
+        mimosa.remove('telemetry_stale_fields');
+        mimosa.remove('telemetry_field_times');
+        // Explicit port choice overrides automatic readings for every vendor.
+        for (final vendor in ['mikrotik', 'mimosa', 'ruijie', 'ubiquiti']) {
+          mimosa['vendor'] = vendor;
+          mimosa['ethernet_auto'] = {
+            'name': 'eth0',
+            'speed_mbps': 2500,
+            'stale': true,
+            'observed_at': '2026-11-27T12:30:00Z',
+          };
+          mimosa['ethernet_speed_port'] = 'sfp1';
+          mimosa['telemetry'] = {
+            'ethernet_links': [
+              {'name': 'ether1', 'speed_mbps': 100},
+            ],
+            'ethernet_selected': {'name': 'sfp1', 'speed_mbps': 10000},
+          };
+          socket.controller.add({
+            'type': 'patch',
+            'rows': {'devices': devices},
+          });
+          await tester.pumpAndSettle();
+          expect(find.text('sfp1: 10000 Mbps'), findsOneWidget);
+          expect(find.text('ether1: 100 Mbps'), findsNothing);
+          mimosa['telemetry'] = {
+            'ethernet_links': [
+              {'name': 'ether1', 'speed_mbps': 100},
+            ],
+          };
+          socket.controller.add({
+            'type': 'patch',
+            'rows': {'devices': devices},
+          });
+          await tester.pumpAndSettle();
+          expect(find.text('sfp1: Unavailable'), findsOneWidget);
+          expect(find.text('ether1: 100 Mbps'), findsNothing);
+          mimosa.remove('ethernet_speed_port');
+          socket.controller.add({
+            'type': 'patch',
+            'rows': {'devices': devices},
+          });
+          await tester.pumpAndSettle();
+          expect(find.text('eth0: 2500 Mbps'), findsOneWidget);
+          final automaticTip = tester
+              .widgetList<Tooltip>(find.byType(Tooltip))
+              .singleWhere(
+                (t) => t.message?.startsWith('eth0: 2500 Mbps') ?? false,
+              );
+          expect(automaticTip.message, contains('Last known reading'));
+          expect(
+            automaticTip.message,
+            contains(
+              DateTime.parse('2026-11-27T12:30:00Z').toLocal().toString(),
+            ),
+          );
+        }
+        mimosa['vendor'] = mixed ? 'generic' : 'mimosa';
+        mimosa.remove('ethernet_speed_port');
+        mimosa.remove('ethernet_auto');
+        // Older samples still render, and live patches update without reload.
         mimosa['telemetry'] = {
           'weakest_signal_dbm': -70.5,
           'ethernet_traffic': {

@@ -88,4 +88,67 @@ void main() {
     expect(find.text('0.0%'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+  testWidgets(
+    'GPU follows CPU and updates active, idle and unavailable states',
+    (tester) async {
+      Future<void> show(String state, dynamic usage) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: SystemPerformance(
+                  data: {
+                    'gpus': [
+                      {
+                        'name': 'NVIDIA GeForce GTX 1660 Ti',
+                        'status': state,
+                        'driver': state == 'not_loaded' ? null : 'nvidia',
+                        'utilization_percent': usage,
+                      },
+                    ],
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      await show('ready', 64);
+      final gpuCard = find.ancestor(
+        of: find.text('NVIDIA GeForce GTX 1660 Ti'),
+        matching: find.byType(Card),
+      );
+      final bar = find.descendant(
+        of: gpuCard,
+        matching: find.byType(LinearProgressIndicator),
+      );
+      expect(find.text('Working · Active'), findsOneWidget);
+      expect(find.text('64.0%'), findsOneWidget);
+      expect(tester.widget<LinearProgressIndicator>(bar).value, 0.64);
+      final cards = tester.widgetList<Card>(find.byType(Card)).toList();
+      expect(cards[1], tester.widget<Card>(gpuCard));
+
+      await show('ready', 0);
+      expect(find.text('Working · Idle'), findsOneWidget);
+      expect(find.text('Working · Active'), findsNothing);
+      expect(tester.widget<LinearProgressIndicator>(bar).value, 0);
+
+      for (final usage in [null, -1, 101, double.nan, double.infinity, '25']) {
+        await show('ready', usage);
+        expect(find.text('Usage unavailable'), findsOneWidget);
+        expect(find.text('Working · Idle'), findsNothing);
+        expect(bar, findsNothing);
+      }
+      await show('loaded', 64);
+      expect(find.text('GPU detected; telemetry unavailable'), findsOneWidget);
+      expect(find.text('64.0%'), findsNothing);
+      expect(bar, findsNothing);
+      await show('not_loaded', 64);
+      expect(find.text('Driver not loaded'), findsOneWidget);
+      expect(find.text('GPU detected; driver not loaded'), findsOneWidget);
+      expect(bar, findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

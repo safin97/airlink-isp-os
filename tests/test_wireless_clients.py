@@ -27,11 +27,13 @@ def test_connected_clients_scope_freshness_and_secret_filter(client, owner):
         data = response.json()
         assert data['status'] == 'available' and data['total'] == 1
         assert data['clients'][0]['mac_address'] == 'AA:BB:CC:DD:EE:01'
+        assert data['counts'] == {'online': 0, 'offline': 0, 'unknown': 1, 'limited': False}
         assert 'secret-must-not-leak' not in response.text
         assert client.get('/api/devices/'+other+'/wireless-clients', headers=manager).status_code == 404
         metric.collected_at = now()-timedelta(hours=1); db.commit()
         assert client.get(path, headers=manager).json()['status'] == 'stale'
         assert client.get(path, headers=manager).json()['clients'] == []
+        assert client.get(path, headers=manager).json()['counts'] is None
     client.put('/api/users/'+manager_id+'/sections', headers=owner,
                json={'sections':['isp_card']}).raise_for_status()
     assert client.get(path, headers=manager).status_code == 403

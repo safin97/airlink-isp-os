@@ -375,6 +375,7 @@ class Device(Base):
     ip_address = Column(String(45), nullable=False, unique=True)
     vendor = Column(String(30), nullable=False, default="generic")
     model = Column(String(120), default="")
+    ethernet_speed_port = Column(String(128))
     snmp_profile_id = Column(String(36), ForeignKey("snmp_profiles.id", ondelete="RESTRICT"))
     poll_interval = Column(Integer, default=60, nullable=False)
     connection_timeout = Column(Integer, default=2, server_default="2", nullable=False)

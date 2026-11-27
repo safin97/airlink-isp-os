@@ -1309,28 +1309,42 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
 
   Widget wirelessClientCount(Map<String, dynamic> device) {
     final count = device['telemetry']?['wireless_clients'];
-    if (count is! num) return const AppText('Unavailable');
+    final counts = device['registration_counts'] as Map?;
+    if (count is! num && counts == null) return const AppText('Unavailable');
+    final label = counts == null
+        ? (count as num).toInt().toString()
+        : 'Online: ${counts['online']}\nOffline: ${counts['offline']}'
+              '${(counts['unknown'] as num? ?? 0) > 0 ? '\nUnknown: ${counts['unknown']}' : ''}';
     return Tooltip(
-      message: telemetryNote(device, 'wireless_clients'),
+      message: counts == null
+          ? telemetryNote(device, 'wireless_clients')
+          : 'Known registration clients. Offline requires a confirmed disconnection; failed or stale checks show Unknown.'
+                '${counts['limited'] == true ? '\nClient history limit reached; counts cover retained clients.' : ''}',
       child: TextButton(
         key: ValueKey('wireless-clients-${device['id']}'),
         onPressed: () => showDialog<void>(
           context: context,
           builder: (_) => WirelessClientsDialog(api: api, device: device),
         ),
-        child: Text(count.toInt().toString()),
+        child: Text(label),
       ),
     );
   }
 
   String telemetryNote(Map<String, dynamic> device, String field) {
-    final stale = (device['telemetry_stale_fields'] as List? ?? []).contains(
-      field,
-    );
+    final automatic = field == 'ethernet_auto'
+        ? device['ethernet_auto'] as Map?
+        : null;
+    final stale =
+        automatic?['stale'] == true ||
+        (device['telemetry_stale_fields'] as List? ?? []).contains(field);
     final stamp =
-        device['telemetry_field_times']?[field] ?? device['telemetry_at'];
+        automatic?['observed_at'] ??
+        device['telemetry_field_times']?[field] ??
+        device['telemetry_at'];
     final date = DateTime.tryParse(stamp?.toString() ?? '')?.toLocal();
-    final address = device['telemetry_field_addresses']?[field];
+    final address =
+        automatic?['address'] ?? device['telemetry_field_addresses']?[field];
     return '${stale ? 'Last known reading' : 'Collected'}${date == null ? '' : ': $date'}'
         '${address != null && address != device['ip_address'] ? '\nRecorded from $address before the address changed.' : ''}'
         '${stale && field == 'uptime_seconds' ? '\nUptime stays at the last reported value until the device reports again.' : ''}';
@@ -1382,10 +1396,34 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Widget deviceReading(Map<String, dynamic> device, String field) {
     final data = Map<String, dynamic>.from(device['telemetry'] ?? {});
     String reading = 'Unavailable';
+    var speedField = 'ethernet_links';
     String number(num value) => value == value.roundToDouble()
         ? value.toInt().toString()
         : value.toStringAsFixed(1);
-    if (field == 'signal_dbm') {
+    final selectedPort = device['ethernet_speed_port'];
+    final automatic = device['ethernet_auto'] as Map?;
+    if ((field == 'ethernet_links' || field == 'mimosa_ethernet_speed') &&
+        selectedPort is String &&
+        selectedPort.isNotEmpty) {
+      final port = data['ethernet_selected'] as Map? ?? {};
+      final speed = port['speed_mbps'];
+      reading = '$selectedPort: Unavailable';
+      if (port['name'] == selectedPort &&
+          speed is num &&
+          speed.isFinite &&
+          speed > 0) {
+        reading = '$selectedPort: ${number(speed)} Mbps';
+      }
+      field = 'ethernet_selected';
+    } else if ((field == 'ethernet_links' ||
+            field == 'mimosa_ethernet_speed') &&
+        automatic?['speed_mbps'] is num &&
+        (automatic!['speed_mbps'] as num).isFinite &&
+        (automatic['speed_mbps'] as num) > 0) {
+      reading =
+          '${automatic['name']}: ${number(automatic['speed_mbps'] as num)} Mbps';
+      field = 'ethernet_auto';
+    } else if (field == 'signal_dbm') {
       final signal = data['signal_dbm'] ?? data['weakest_signal_dbm'];
       if (signal is num && signal.isFinite && signal >= -150 && signal < 0) {
         reading = '${number(signal)} dBm';
@@ -1397,10 +1435,31 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           : 'Unavailable';
       reading = 'TX: ${rate(port['tx_bps'])}\nRX: ${rate(port['rx_bps'])}';
     } else if (field == 'mimosa_ethernet_speed') {
-      final port = data['ethernet_traffic'] as Map? ?? {};
-      final speed = port['speed_mbps'];
-      if (speed is num && speed.isFinite && speed > 0) {
-        reading = '${port['name'] ?? 'Ethernet'}: ${number(speed)} Mbps';
+      // Link speed has its own saved observation. Traffic selection can be
+      // empty on partial polls or when several Ethernet interfaces are present.
+      final links = (data['ethernet_links'] as List? ?? [])
+          .whereType<Map>()
+          .where(
+            (port) =>
+                port['speed_mbps'] is num &&
+                (port['speed_mbps'] as num).isFinite &&
+                (port['speed_mbps'] as num) > 0,
+          );
+      if (links.isNotEmpty) {
+        reading = links
+            .map(
+              (p) =>
+                  '${p['name'] ?? 'Ethernet'}: ${number(p['speed_mbps'] as num)} Mbps',
+            )
+            .join(' · ');
+      } else {
+        // Compatibility with samples collected before separate link readings.
+        final port = data['ethernet_traffic'] as Map? ?? {};
+        final speed = port['speed_mbps'];
+        speedField = 'ethernet_traffic';
+        if (speed is num && speed.isFinite && speed > 0) {
+          reading = '${port['name'] ?? 'Ethernet'}: ${number(speed)} Mbps';
+        }
       }
     } else if (field == 'ethernet_links') {
       final links = (data[field] as List? ?? []).whereType<Map>().where(
@@ -1439,7 +1498,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       if (data['firmware_version'] != null) data['firmware_version'],
       telemetryNote(device, switch (field) {
         'wireless' => 'wireless_ssids',
-        'mimosa_ethernet_speed' => 'ethernet_traffic',
+        'mimosa_ethernet_speed' => speedField,
         'signal_dbm' when data['signal_dbm'] == null => 'weakest_signal_dbm',
         _ => field,
       }),
@@ -2029,6 +2088,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               : SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
+                    dataRowMaxHeight: resource == 'devices' ? 88 : null,
                     columns: [
                       ...columns.map((x) => DataColumn(label: Text(x))),
                       const DataColumn(label: AppText('Actions')),
@@ -2081,6 +2141,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                               builder: (_) => EthernetPortsDialog(
                                 api: api,
                                 device: Map<String, dynamic>.from(row),
+                                onChanged: () => reload(quiet: true),
                               ),
                             ),
                             child: deviceReading(
@@ -2180,6 +2241,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                       builder: (_) => EthernetPortsDialog(
                                         api: api,
                                         device: Map<String, dynamic>.from(row),
+                                        onChanged: () => reload(quiet: true),
                                       ),
                                     ),
                                     icon: const Icon(

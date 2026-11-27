@@ -43,7 +43,17 @@ def test_client_status_history_keeps_order_across_disconnects_failures_and_recov
         async def run():
             await worker.poll(did, asyncio.Semaphore(1))
         asyncio.run(run())
-        return client.get(path, headers=owner).json()['clients']
+        result = client.get(path, headers=owner).json()
+        rows = result['clients']
+        assert result['counts'] == {
+            'online': sum(row['status'] == 'up' for row in rows),
+            'offline': sum(row['status'] == 'down' for row in rows),
+            'unknown': sum(row['status'] == 'unknown' for row in rows),
+            'limited': False,
+        }
+        inventory = client.get('/api/devices', headers=owner).json()[0]
+        assert inventory['registration_counts'] == result['counts']
+        return rows
 
     a, b, c = ['AA:BB:CC:DD:EE:0' + n for n in ('1', '2', '3')]
     first = poll(readings([b, a]))
