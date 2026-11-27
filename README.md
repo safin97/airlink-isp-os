@@ -44,6 +44,8 @@ See [installation](docs/INSTALLATION.md), [local PC settings](docs/LOCAL-PANEL.m
 
 [Deye Solar](docs/DEYE-CLOUD.md) connects to Deye Cloud to display solar, battery, load and grid readings. It requires internet access, a Deye Cloud account and Deye developer application credentials.
 
+[Twilio WhatsApp](docs/TWILIO-WHATSAPP.md) sends customer recharge receipts and expiry reminders. Configure it in **My account → Twilio WhatsApp messaging**, then enable each customer in **Customer WhatsApp**. It replaces the direct Meta WhatsApp integration.
+
 The GPU-capable ISO includes automatic NVIDIA RTX detection and a prebuilt driver. See [GPU support](docs/GPU.md) for hardware scope, status reporting and the distinction between graphics acceleration and monitoring capacity.
 
 To host signed application updates on your own public GitHub repository, see [GitHub Releases setup](docs/GITHUB-UPDATES.md).

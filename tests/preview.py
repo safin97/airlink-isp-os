@@ -118,14 +118,14 @@ async def preview_lifespan(app):
     monitor_task = None
     alert_task = None
     customer_messages = None
-    whatsapp_messages = None
+    twilio_whatsapp_messages = None
     pin_payments = None
     api.system_stats_service.start()
     if args.live:
         pin_payments = asyncio.create_task(api.payments.payment_worker(saved_pin_only=True))
         mega_backups.start()
         customer_messages = asyncio.create_task(api.customer_telegram.worker())
-        whatsapp_messages = asyncio.create_task(api.whatsapp.worker())
+        twilio_whatsapp_messages = asyncio.create_task(api.twilio_whatsapp.worker())
         api.deye_monitor_service.start()
         from monitoring import worker
         worker.cache = api.cache
@@ -160,10 +160,10 @@ async def preview_lifespan(app):
             with suppress(asyncio.CancelledError):
                 await pin_payments
         mega_backups.stop()
-        if whatsapp_messages:
-            whatsapp_messages.cancel()
+        if twilio_whatsapp_messages:
+            twilio_whatsapp_messages.cancel()
             with suppress(asyncio.CancelledError):
-                await whatsapp_messages
+                await twilio_whatsapp_messages
         if customer_messages:
             customer_messages.cancel()
             with suppress(asyncio.CancelledError):

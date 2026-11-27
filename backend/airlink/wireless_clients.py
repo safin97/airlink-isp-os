@@ -1,6 +1,64 @@
 """Bounded public wireless registration fields; never expose raw device records."""
 import re
+from datetime import datetime
 from .client_telemetry import number
+from .security import aware
+
+HISTORY_KEY = '_registration_history'
+HISTORY_LIMIT = 4096
+
+
+def remember_clients(previous, values, timestamp, address):
+    """Retain first-seen order; only a complete list proves a client left."""
+    history = dict(previous or {})
+    source = values.get('wireless_registration_source')
+    successful = values.get('snmp_up') if source == 'SNMP' else values.get('api_up')
+    if not source or not successful or not isinstance(values.get('wireless_registrations'), list):
+        return history
+    stamp = aware(timestamp).isoformat()
+    rows = [dict(row) for row in history.get('clients', [])]
+    known = {row['mac_address']: row for row in rows}
+    current = {row['mac_address']: row for row in public_clients(values['wireless_registrations'])}
+    complete = (values.get('wireless_registrations_complete') is True and
+                len(public_clients(values['wireless_registrations'])) == len(values['wireless_registrations']) and
+                values.get('wireless_clients', len(current)) == len(current))
+    # Preserve rows through address changes, but never infer disconnection from
+    # a different device's list until that MAC has been observed there.
+    for row in rows:
+        if complete and row.get('address') == address and row['mac_address'] not in current:
+            if row['last_status'] != 'down':
+                row['status_since'] = stamp
+            row.update(last_status='down', checked_at=stamp)
+    for mac in sorted(current):
+        observed = current[mac]
+        row = known.get(mac)
+        if row is None:
+            if len(rows) >= HISTORY_LIMIT:
+                history['limited'] = True
+                continue
+            row = {'mac_address': mac, 'first_seen': stamp}
+            rows.append(row)
+        if row.get('last_status') != 'up' or row.get('address') != address:
+            row['status_since'] = stamp
+        row.update({key: value for key, value in observed.items() if value is not None and value != ''})
+        row.update(last_status='up', last_seen=stamp, checked_at=stamp, address=address)
+    history.update(clients=rows, collected_at=stamp, source=source, complete=complete,
+                   total=values.get('wireless_clients'))
+    return history
+
+
+def client_history_view(history, device, timestamp, confirmed_at=None):
+    result = []
+    for saved in history.get('clients', []):
+        row = dict(saved)
+        fresh = bool(device.enabled and device.last_poll and device.status != 'offline' and
+                     confirmed_at and aware(datetime.fromisoformat(row['checked_at'])) == aware(confirmed_at) and
+                     row.get('address') == device.ip_address and
+                     (aware(timestamp) - aware(datetime.fromisoformat(row['checked_at']))).total_seconds()
+                     <= device.poll_interval * 3 + 30)
+        row['status'] = row['last_status'] if fresh else 'unknown'
+        result.append(row)
+    return result
 
 
 def mac_address(value):

@@ -16,6 +16,7 @@ void main() {
         client: MockClient((request) async {
           expect(request.url.path, '/api/devices/1/outages');
           expect(request.url.queryParameters['limit'], '100');
+          expect(request.url.queryParameters['include_current'], 'true');
           calls++;
           if (calls == 3) {
             return http.Response('{"detail":"Access denied"}', 403);
@@ -44,19 +45,23 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('No completed outages recorded yet.'), findsOneWidget);
+      expect(find.text('No confirmed outages recorded yet.'), findsOneWidget);
       await tester.pump(const Duration(seconds: 15));
       await tester.pumpAndSettle();
-      expect(find.text('Offline since'), findsOneWidget);
+      expect(find.text('Went down'), findsOneWidget);
       expect(find.text('Back online'), findsOneWidget);
-      expect(find.text('0d 2h 1m 0s'), findsOneWidget);
+      expect(find.text('121 min 0 sec'), findsOneWidget);
       final row = tester.widget<DataTable>(find.byType(DataTable)).rows.single;
       expect(row.cells[0].child, isA<Text>());
       expect((row.cells[0].child as Text).data, contains('2026-11-09'));
+      final start = DateTime.parse('2026-11-09T10:00:00Z').toLocal();
+      final hour = start.hour.toString().padLeft(2, '0');
+      final minute = start.minute.toString().padLeft(2, '0');
+      expect((row.cells[0].child as Text).data, endsWith('$hour:$minute:00'));
       await tester.tap(find.byTooltip('Refresh downtime history'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Access denied'), findsOneWidget);
-      expect(find.text('0d 2h 1m 0s'), findsNothing);
+      expect(find.text('121 min 0 sec'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -82,7 +87,7 @@ void main() {
       await tester.pumpAndSettle();
       old.complete(http.Response('[{"duration_seconds":7200}]', 200));
       await tester.pumpAndSettle();
-      expect(find.text('No completed outages recorded yet.'), findsOneWidget);
+      expect(find.text('No confirmed outages recorded yet.'), findsOneWidget);
       expect(find.byType(DataTable), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },

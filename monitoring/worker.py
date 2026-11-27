@@ -13,6 +13,7 @@ from .snmp import collect, interface_rate
 from airlink.device_api import collect_api
 from airlink.vendor_identity import merge_vendor
 from airlink.tower_api import configuration as tower_configuration
+from airlink.device_telemetry import remember
 
 log = logging.getLogger("airlink.monitor")
 cache = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
@@ -117,6 +118,7 @@ async def poll(device_id, semaphore):
                     obj.speed_mbps = interface.get("speed_mbps")
                     obj.oper_status = interface.get("status")
                 up = values["icmp_up"] or values.get("snmp_up", False) or values.get("api_up", False)
+                remember(db, device, values, timestamp)
                 if up:
                     if device.status == 'offline' and device.down_since is not None:
                         # Save the completed outage atomically with the recovery sample.

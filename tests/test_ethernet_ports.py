@@ -9,17 +9,18 @@ from monitoring import snmp
 from test_api import tower, user
 
 
-@pytest.mark.parametrize('condition', ['connected', 'stale', 'failed', 'disabled', 'pending', 'v1', 'other_vendor'])
-@pytest.mark.parametrize('vendor', ['mikrotik', 'mikrotik_switch'])
+@pytest.mark.parametrize('condition', ['connected', 'stale', 'failed', 'disabled', 'pending', 'v1', 'v3', 'other_vendor', 'no_profile'])
+@pytest.mark.parametrize('vendor', ['mikrotik', 'mikrotik_switch', 'ruijie', 'ubiquiti'])
 def test_ports_states_freshness_and_scope(client, owner, condition, vendor):
     uid, manager = user(client, owner, 'manager')
     tid = tower(client, owner, manager=uid)
-    profile = client.post('/api/snmp-profiles', headers=owner, json={
-        'name': 'Switch', 'version': '1' if condition == 'v1' else '2c', 'community': 'test-private'}).json()
+    credentials = ({'version': '3', 'username': 'reader', 'auth_key': 'test-auth-private', 'priv_key': 'test-priv-private'}
+                   if condition == 'v3' else {'version': '1' if condition == 'v1' else '2c', 'community': 'test-private'})
+    profile = client.post('/api/snmp-profiles', headers=owner, json={'name': 'Switch', **credentials}).json()
     did = client.post('/api/devices', headers=owner, json={
         'name': 'Switch', 'ip_address': '192.0.2.4', 'tower_id': tid,
         'vendor': 'mimosa' if condition == 'other_vendor' else vendor,
-        'snmp_profile_id': profile['id']}).json()['id']
+        'snmp_profile_id': None if condition == 'no_profile' else profile['id']}).json()['id']
     stamp = now() - timedelta(minutes=10 if condition == 'stale' else 0)
     ports = {
         '1': {'name': 'ether1', 'type': 6, 'status': 1, 'admin_status': 1, 'speed_mbps': 1000, 'rx_bps': 24000000, 'tx_bps': 0},
@@ -40,12 +41,13 @@ def test_ports_states_freshness_and_scope(client, owner, condition, vendor):
     result = client.get('/api/devices/'+did+'/ethernet-ports', headers=manager)
     assert result.status_code == 200
     assert 'test-private' not in result.text
+    assert 'test-auth-private' not in result.text and 'test-priv-private' not in result.text
     data = result.json()
-    if condition in ('v1', 'other_vendor', 'pending'):
+    if condition in ('no_profile', 'pending'):
         assert data['ports'] == []
     else:
         assert [p['name'] for p in data['ports']] == ['ether1', 'ether2', 'sfp1', 'renamed-port']
-        if condition == 'connected':
+        if condition in ('connected', 'v1', 'v3', 'other_vendor'):
             assert [p['state'] for p in data['ports']] == ['connected', 'disconnected', 'disabled', 'unknown']
             assert data['ports'][0]['rx_bps'] == 24000000
             assert data['ports'][0]['tx_bps'] == 0

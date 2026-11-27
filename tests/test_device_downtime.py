@@ -37,6 +37,14 @@ def test_downtime_only_for_confirmed_fresh_outage(client, owner, monkeypatch,
         db.commit()
     result = client.get('/api/devices', headers=owner).json()[0]
     assert result['downtime_seconds'] == expected
+    history = client.get(f'/api/devices/{did}/outages?include_current=true', headers=owner).json()
+    if expected is None:
+        assert history == []
+    else:
+        assert len(history) == 1
+        assert history[0]['duration_seconds'] == expected
+        assert history[0]['ended_at'] is None
+        assert history[0]['started_at'] == (clock - timedelta(hours=2)).isoformat()
     if expected is not None:
         monkeypatch.setattr(api, 'now', lambda: clock + timedelta(seconds=60))
         assert client.get('/api/devices', headers=owner).json()[0]['downtime_seconds'] == 7260
@@ -72,6 +80,8 @@ def test_outage_survives_polls_and_clears_on_recovery(client, owner, monkeypatch
     clock = start + timedelta(hours=2)
     asyncio.run(poll())
     assert client.get('/api/devices', headers=owner).json()[0]['downtime_seconds'] == 7200
+    endpoint = '/api/devices/' + did + '/outages?include_current=true'
+    assert client.get(endpoint, headers=owner).json()[0]['ended_at'] is None
     if recovery == 'ping':
         ping.return_value = True
     elif recovery == 'snmp':
@@ -87,6 +97,7 @@ def test_outage_survives_polls_and_clears_on_recovery(client, owner, monkeypatch
         assert aware(outage.started_at) == start and aware(outage.ended_at) == clock
     history = client.get('/api/devices/' + did + '/outages', headers=owner).json()
     assert len(history) == 1 and history[0]['duration_seconds'] == 7260
+    assert client.get(endpoint, headers=owner).json() == history
     # Further successful polls must not duplicate the completed event.
     asyncio.run(poll())
     assert client.get('/api/devices/' + did + '/outages', headers=owner).json() == history
@@ -143,6 +154,12 @@ def test_outage_history_scope_permissions_and_order(client, owner):
     assert len(client.get(endpoint+'?limit=1', headers=manager).json()) == 1
     assert client.get(endpoint+'?limit=501', headers=manager).status_code == 422
     assert client.get('/api/devices/'+outside+'/outages', headers=manager).status_code == 404
+    for section in ['towers', 'noc']:
+        client.put('/api/users/'+mid+'/sections', headers=owner,
+            json={'sections': [section], 'editable_sections': [], 'deletable_sections': []}).raise_for_status()
+        assert client.get(endpoint, headers=manager).status_code == 200
+        assert client.get('/api/devices/'+outside+'/outages?include_current=true', headers=manager).status_code == 404
+        assert client.get('/api/devices/'+did+'/metrics', headers=manager).status_code == 403
     client.put('/api/users/'+mid+'/sections', headers=owner,
-        json={'sections': ['towers'], 'editable_sections': [], 'deletable_sections': []}).raise_for_status()
+        json={'sections': ['dashboard'], 'editable_sections': [], 'deletable_sections': []}).raise_for_status()
     assert client.get(endpoint, headers=manager).status_code == 403

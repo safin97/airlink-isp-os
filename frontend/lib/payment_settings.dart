@@ -31,6 +31,11 @@ class _PaymentSettingsState extends State<PaymentSettings>
   };
   final environments = {'fib': 'sandbox', 'fastpay': 'sandbox'};
   final configured = <String, bool>{};
+  final accessModes = {'fib': 'selected', 'fastpay': 'selected'};
+  final managerIds = {
+    for (final p in ['fib', 'fastpay']) p: <String>{},
+  };
+  List<dynamic> managers = [];
   bool loaded = false;
   bool busy = false;
   String? message;
@@ -53,15 +58,22 @@ class _PaymentSettingsState extends State<PaymentSettings>
     if (loaded || busy) return;
     setState(() => busy = true);
     try {
-      final rows = await widget.api.request('/payments/gateways');
+      final results = await Future.wait([
+        widget.api.request('/payments/gateways'),
+        widget.api.request('/payments/gateways/managers'),
+      ]);
+      final rows = results[0];
       if (!mounted) return;
       setState(() {
+        managers = List<dynamic>.from(results[1]);
         for (final row in rows) {
           final p = row['provider'];
           if (!merchants.containsKey(p)) continue;
           merchants[p]!.text = row['merchant_id'] ?? '';
           environments[p] = row['environment'] ?? 'sandbox';
           configured[p] = row['configured'] == true;
+          accessModes[p] = row['access_mode'] ?? 'all';
+          managerIds[p] = Set<String>.from(row['manager_ids'] ?? []);
         }
         loaded = true;
       });
@@ -88,13 +100,18 @@ class _PaymentSettingsState extends State<PaymentSettings>
               ? null
               : secrets[provider]!.text,
           'environment': environments[provider],
+          'access_mode': accessModes[provider],
+          'manager_ids': accessModes[provider] == 'selected'
+              ? managerIds[provider]!.toList()
+              : <String>[],
         },
       );
       if (!mounted) return;
       secrets[provider]!.clear();
       setState(() {
         configured[provider] = true;
-        message = 'Merchant settings saved. Reopen Recharge card to use them.';
+        message =
+            'Merchant settings and manager access saved. Reopen Recharge card to use them.';
       });
     } catch (e) {
       if (mounted) setState(() => message = e.toString());
@@ -148,7 +165,7 @@ class _PaymentSettingsState extends State<PaymentSettings>
 
   List<Widget> settingsContent() => [
     const AppText(
-      'Owner-managed payment accounts. These settings apply to FIB Bank and FastPay checkout for all authorized users and the client portal. Other users do not need bank credentials.',
+      'Configure FIB Bank and FastPay, then choose which AirLink managers may use each account. Managers use their own recharge permissions and do not need bank credentials.',
     ),
     const AppText(
       'Use merchant API credentials, not your personal banking login. Secrets are stored encrypted and never shown again.',
@@ -229,12 +246,64 @@ class _PaymentSettingsState extends State<PaymentSettings>
                 ),
               ),
               const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: ValueKey('payment-access-$provider'),
+                initialValue: accessModes[provider],
+                decoration: const InputDecoration(
+                  labelText: 'Who can use this payment account?',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'all',
+                    child: Text('All authorized users'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'selected',
+                    child: Text('Selected managers'),
+                  ),
+                ],
+                onChanged: busy || !canEdit
+                    ? null
+                    : (value) => setState(() => accessModes[provider] = value!),
+              ),
+              if (accessModes[provider] == 'selected') ...[
+                if (managers.isEmpty)
+                  const Text('No manager accounts available.'),
+                for (final manager in managers)
+                  CheckboxListTile(
+                    key: ValueKey('payment-manager-$provider-${manager['id']}'),
+                    title: Text(manager['username'].toString()),
+                    subtitle: manager['active'] == false
+                        ? const Text('Account disabled')
+                        : null,
+                    value: managerIds[provider]!.contains(manager['id']),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: busy || !canEdit
+                        ? null
+                        : (checked) => setState(() {
+                            if (checked == true) {
+                              managerIds[provider]!.add(
+                                manager['id'].toString(),
+                              );
+                            } else {
+                              managerIds[provider]!.remove(manager['id']);
+                            }
+                          }),
+                  ),
+                const Text('No managers selected means owners only.'),
+              ],
+              const Text(
+                'Owners retain access. Changes apply to new payments; existing payments continue verification.',
+              ),
+              const SizedBox(height: 12),
               const AppText(
                 'Sandbox payments never recharge a real SAS4 account. Production payments recharge only after server verification.',
                 style: TextStyle(fontSize: 12),
               ),
               const SizedBox(height: 12),
               FilledButton(
+                key: ValueKey('save-payment-$provider'),
                 onPressed: busy || !canEdit ? null : () => save(provider),
                 child: const AppText('Save merchant settings'),
               ),

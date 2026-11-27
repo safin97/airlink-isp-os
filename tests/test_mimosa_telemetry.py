@@ -41,7 +41,7 @@ def test_mimosa_signal_scaling_missing_values_and_total_priority(monkeypatch, to
     ({'1': {'name': 'eth0', 'type': 6, 'status': 1}, '2': {'name': 'eth1', 'type': 6, 'status': 1}}, None),
     ({'1': {'name': 'ether1', 'type': 6, 'status': 2, 'speed_mbps': 1000, 'tx_bps': 500}}, None),
 ])
-def test_mimosa_inventory_ethernet_selection_and_stale_removal(client, owner, ports, expected):
+def test_mimosa_inventory_ethernet_selection_and_last_known_readings(client, owner, ports, expected):
     tid = tower(client, owner)
     response = client.post('/api/devices', headers=owner, json={
         'name': 'Mimosa link', 'ip_address': '192.0.2.9', 'tower_id': tid, 'vendor': 'mimosa'})
@@ -56,9 +56,14 @@ def test_mimosa_inventory_ethernet_selection_and_stale_removal(client, owner, po
         metric_id = metric.id
     reading = client.get('/api/devices', headers=owner).json()[0]['telemetry']
     assert reading['signal_dbm'] == -62.7
-    assert reading.get('ethernet_traffic') == expected
+    assert (reading.get('ethernet_traffic') or None) == expected
     with SessionLocal() as db:
         db.get(Metric, metric_id).collected_at = now() - timedelta(minutes=20)
         db.commit()
-    stale = client.get('/api/devices', headers=owner).json()[0]['telemetry']
-    assert 'ethernet_traffic' not in stale and 'signal_dbm' not in stale
+    stale = client.get('/api/devices', headers=owner).json()[0]
+    assert stale['telemetry'] == reading
+    expected_stale = set(reading)
+    if not reading['ethernet_links']:
+        expected_stale.remove('ethernet_links')  # No speed was ever observed.
+        assert 'ethernet_links' not in stale['telemetry_field_times']
+    assert set(stale['telemetry_stale_fields']) == expected_stale

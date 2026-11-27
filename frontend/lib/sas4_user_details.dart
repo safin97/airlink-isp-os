@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'sas4_recharge.dart';
 import 'customer_telegram.dart';
-import 'whatsapp.dart';
+import 'twilio_whatsapp.dart';
 import 'section_access.dart';
 
 class Sas4UserDetails extends StatefulWidget {
@@ -438,20 +438,21 @@ class _Sas4UserDetailsState extends State<Sas4UserDetails>
                       icon: const Icon(Icons.send_outlined),
                       label: const Text('Customer Telegram'),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: !canEdit || saving
-                          ? null
-                          : () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => CustomerWhatsApp(
-                                  api: widget.api,
-                                  customerId: widget.userId,
+                    if (hasSection(widget.api.user ?? {}, 'whatsapp'))
+                      OutlinedButton.icon(
+                        onPressed: saving
+                            ? null
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => CustomerWhatsApp(
+                                    api: widget.api,
+                                    customerId: widget.userId,
+                                  ),
                                 ),
                               ),
-                            ),
-                      icon: const Icon(Icons.chat_outlined),
-                      label: const Text('Customer WhatsApp'),
-                    ),
+                        icon: const Icon(Icons.chat_outlined),
+                        label: const Text('Customer WhatsApp'),
+                      ),
                     const SizedBox(height: 20),
                     AppText(
                       editing

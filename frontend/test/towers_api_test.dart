@@ -179,6 +179,7 @@ void main() {
         ),
       );
       expect(actionButtons.map((button) => button.tooltip).toList(), [
+        'Downtime history',
         'Login via API',
         'Edit',
         'Delete',

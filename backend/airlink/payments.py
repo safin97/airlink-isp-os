@@ -15,7 +15,7 @@ from sqlalchemy import select, update, or_
 from sqlalchemy.exc import IntegrityError
 from . import sas4, section_access, radius_pin
 from .db import get_db, SessionLocal
-from .models import (PaymentGateway, SharedPaymentGateway, RechargePayment, RechargeCardReservation,
+from .models import (PaymentGateway, SharedPaymentGateway, PaymentGatewayAccess, RechargePayment, RechargeCardReservation,
                      SavedRechargeCard, RadiusCardReservation, SAS4UserConnection, User, now, audit)
 from .security import cipher, aware, owner
 
@@ -48,6 +48,8 @@ class GatewayInput(BaseModel):
     environment: Environment = 'sandbox'
     merchant_id: str = Field(min_length=1, max_length=255)
     secret: Optional[str] = Field(default=None, max_length=2048)
+    access_mode: Optional[Literal['all', 'selected']] = None
+    manager_ids: Optional[list[str]] = Field(default=None, max_length=500)
 
 
 class PaymentInput(BaseModel):
@@ -71,22 +73,49 @@ def decoded(secret):
         raise PaymentError('Merchant credentials cannot be read. Ask the owner to save Payment setup again.') from exc
 
 
-def gateway_status(config):
+def gateway_access(db, provider):
+    access = db.get(PaymentGatewayAccess, provider)
+    return {'access_mode': access.mode if access else 'all',
+            'manager_ids': sorted(db.scalars(select(User.id).where(
+                User.id.in_(access.manager_ids), User.role == 'manager'))) if access and access.manager_ids else []}
+
+
+def can_use_gateway(db, user, provider):
+    if not user.active:
+        return False
+    if user.role == 'owner':
+        return True
+    access = gateway_access(db, provider)
+    return access['access_mode'] == 'all' or (user.role == 'manager' and user.id in access['manager_ids'])
+
+
+def gateway_status(config, db):
     return {'provider': config.provider, 'environment': config.environment, 'configured': True,
-            'merchant_id': decoded(config.encrypted_credentials)['merchant_id'], 'has_secret': True}
+            'merchant_id': decoded(config.encrypted_credentials)['merchant_id'], 'has_secret': True,
+            **gateway_access(db, config.provider)}
 
 
 @router.get('/gateways')
 def gateways(user=Depends(owner), db=Depends(get_db)):
     configs = shared_gateways(db)
-    return [gateway_status(configs[p]) if p in configs else {'provider': p, 'configured': False, 'environment': 'sandbox', 'merchant_id': '', 'has_secret': False} for p in ('fib', 'fastpay')]
+    return [gateway_status(configs[p], db) if p in configs else {
+        'provider': p, 'configured': False, 'environment': 'sandbox', 'merchant_id': '', 'has_secret': False,
+        **(gateway_access(db, p) if db.get(SharedPaymentGateway, p) else {'access_mode': 'selected', 'manager_ids': []})
+    } for p in ('fib', 'fastpay')]
+
+
+@router.get('/gateways/managers')
+def gateway_managers(user=Depends(owner), db=Depends(get_db)):
+    return [{'id': row.id, 'username': row.username, 'active': row.active} for row in db.scalars(
+        select(User).where(User.role == 'manager').order_by(User.username, User.id))]
 
 
 @router.get('/methods')
 def payment_methods(user=Depends(sas4.sas4_access), db=Depends(get_db)):
     # Checkout only needs availability; merchant configuration stays owner-only.
     configs = shared_gateways(db)
-    return [{'provider': p, 'configured': p in configs,
+    return [{'provider': p, 'configured': p in configs and can_use_gateway(db, user, p),
+             'allowed': can_use_gateway(db, user, p),
              'environment': configs[p].environment if p in configs else 'sandbox'} for p in ('fib', 'fastpay')]
 
 
@@ -108,6 +137,17 @@ def save_gateway(provider: Provider, data: GatewayInput, user=Depends(owner), db
     merchant = data.merchant_id.strip()
     if not merchant:
         raise HTTPException(422, 'Merchant identifier is required')
+    access = gateway_access(db, provider)
+    mode = data.access_mode or access['access_mode']
+    manager_ids = sorted(set(data.manager_ids if data.manager_ids is not None else access['manager_ids']))
+    if mode == 'all':
+        if data.manager_ids:
+            raise HTTPException(422, 'Choose selected managers to assign individual accounts')
+        manager_ids = []
+    elif manager_ids:
+        found = set(db.scalars(select(User.id).where(User.id.in_(manager_ids), User.role == 'manager')))
+        if found != set(manager_ids):
+            raise HTTPException(422, 'Select valid AirLink manager accounts only')
     config = db.get(PaymentGateway, (user.id, provider))
     current = shared_gateway(db, provider)
     previous = decoded(current.encrypted_credentials) if current and not data.secret else {}
@@ -125,13 +165,20 @@ def save_gateway(provider: Provider, data: GatewayInput, user=Depends(owner), db
         selected = SharedPaymentGateway(provider=provider)
         db.add(selected)
     selected.user_id = user.id
-    audit(db, user, 'payment.gateway.configure', provider)
     try:
+        if data.access_mode is not None or data.manager_ids is not None:
+            db.flush()
+            policy = db.get(PaymentGatewayAccess, provider)
+            if policy is None:
+                policy = PaymentGatewayAccess(provider=provider)
+                db.add(policy)
+            policy.mode, policy.manager_ids = mode, manager_ids
+        audit(db, user, 'payment.gateway.configure', provider)
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, 'Payment setup changed while saving. Reload the settings and try again.') from None
-    return gateway_status(config)
+    return gateway_status(config, db)
 
 
 def provider_json(response):
@@ -397,6 +444,8 @@ def begin_customer_payment(user_id, data, user, db, package_profile_id=None):
     config = shared_gateway(db, data.provider)
     if not config:
         raise HTTPException(409, 'This payment method is not configured. Ask the owner to complete Payment setup.')
+    if not can_use_gateway(db, user, data.provider):
+        raise HTTPException(403, 'This payment method is not assigned to your manager account. Ask the owner for access.')
     radius = data.provider == 'fib' and data.card_source == 'radius_pin'
     if data.provider == 'fib':
         if not radius and not section_access.has_capability(user, 'card_system', db, write=True):

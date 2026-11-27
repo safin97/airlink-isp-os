@@ -1309,21 +1309,56 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Widget wirelessClientCount(Map<String, dynamic> device) {
     final count = device['telemetry']?['wireless_clients'];
     if (count is! num) return const AppText('Unavailable');
-    return TextButton(
-      key: ValueKey('wireless-clients-${device['id']}'),
-      onPressed: () => showDialog<void>(
-        context: context,
-        builder: (_) => WirelessClientsDialog(api: api, device: device),
+    return Tooltip(
+      message: telemetryNote(device, 'wireless_clients'),
+      child: TextButton(
+        key: ValueKey('wireless-clients-${device['id']}'),
+        onPressed: () => showDialog<void>(
+          context: context,
+          builder: (_) => WirelessClientsDialog(api: api, device: device),
+        ),
+        child: Text(count.toInt().toString()),
       ),
-      child: Text(count.toInt().toString()),
     );
   }
+
+  String telemetryNote(Map<String, dynamic> device, String field) {
+    final stale = (device['telemetry_stale_fields'] as List? ?? []).contains(
+      field,
+    );
+    final stamp =
+        device['telemetry_field_times']?[field] ?? device['telemetry_at'];
+    final date = DateTime.tryParse(stamp?.toString() ?? '')?.toLocal();
+    final address = device['telemetry_field_addresses']?[field];
+    return '${stale ? 'Last known reading' : 'Collected'}${date == null ? '' : ': $date'}'
+        '${address != null && address != device['ip_address'] ? '\nRecorded from $address before the address changed.' : ''}'
+        '${stale && field == 'uptime_seconds' ? '\nUptime stays at the last reported value until the device reports again.' : ''}';
+  }
+
+  Widget deviceStatus(Map<String, dynamic> device) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      badge(device['status']),
+      if ((device['telemetry_stale_fields'] as List? ?? []).isNotEmpty)
+        Text(
+          'Last known readings',
+          style: TextStyle(color: muted, fontSize: 10),
+        ),
+    ],
+  );
 
   bool isMimosa(dynamic device) =>
       (device['vendor'] == 'generic'
           ? device['detected_vendor']
           : device['vendor']) ==
       'mimosa';
+
+  bool isRuijie(dynamic device) =>
+      (device['vendor'] == 'generic'
+          ? device['detected_vendor']
+          : device['vendor']) ==
+      'ruijie';
 
   Widget deviceDowntime(Map<String, dynamic> device) {
     final seconds = device['downtime_seconds'];
@@ -1368,7 +1403,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       }
     } else if (field == 'ethernet_links') {
       final links = (data[field] as List? ?? []).whereType<Map>().where(
-        (port) => port['name']?.toString().toLowerCase() == 'ether1',
+        (port) =>
+            (isRuijie(device) ||
+                port['name']?.toString().toLowerCase() == 'ether1') &&
+            port['speed_mbps'] is num &&
+            (port['speed_mbps'] as num).isFinite &&
+            (port['speed_mbps'] as num) > 0,
       );
       if (links.isNotEmpty) {
         reading = links
@@ -1396,8 +1436,12 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       if (data['telemetry_source'] != null) data['telemetry_source'],
       if (data['device_model'] != null) data['device_model'],
       if (data['firmware_version'] != null) data['firmware_version'],
-      if (device['telemetry_at'] != null)
-        'Collected: ${device['telemetry_at']}',
+      telemetryNote(device, switch (field) {
+        'wireless' => 'wireless_ssids',
+        'mimosa_ethernet_speed' => 'ethernet_traffic',
+        'signal_dbm' when data['signal_dbm'] == null => 'weakest_signal_dbm',
+        _ => field,
+      }),
     ].join('\n');
     return Tooltip(
       message: details,
@@ -1895,6 +1939,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Widget inventory(String resource) {
     final data = filtered(resource);
     final hasMimosa = resource == 'devices' && data.any(isMimosa);
+    final hasRuijie = resource == 'devices' && data.any(isRuijie);
     final onlyMimosa = hasMimosa && data.every(isMimosa);
     if (resource == 'devices') {
       data.sort((a, b) => compareIpAddresses(a['ip_address'], b['ip_address']));
@@ -1906,7 +1951,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       _ => [
         onlyMimosa
             ? 'Signal'
-            : hasMimosa
+            : hasMimosa || hasRuijie
             ? 'Wireless SSID / Signal'
             : 'Wireless SSID',
         onlyMimosa
@@ -1914,7 +1959,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             : hasMimosa
             ? 'Registration clients / TX / RX traffic'
             : 'Registration clients',
-        hasMimosa ? 'Ethernet speed' : 'ether1 speed',
+        hasMimosa || hasRuijie ? 'Ethernet speed' : 'ether1 speed',
         'Uptime',
         'Downtime',
         'IP address',
@@ -2012,27 +2057,52 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           row['created_at']?.toString().substring(0, 10),
                         ],
                         _ => [
-                          deviceReading(
-                            row,
-                            isMimosa(row) ? 'signal_dbm' : 'wireless',
-                          ),
+                          isRuijie(row)
+                              ? Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    deviceReading(row, 'wireless'),
+                                    deviceReading(row, 'signal_dbm'),
+                                  ],
+                                )
+                              : deviceReading(
+                                  row,
+                                  isMimosa(row) ? 'signal_dbm' : 'wireless',
+                                ),
                           isMimosa(row)
                               ? deviceReading(row, 'ethernet_traffic')
                               : wirelessClientCount(row),
-                          deviceReading(
-                            row,
-                            isMimosa(row)
-                                ? 'mimosa_ethernet_speed'
-                                : 'ethernet_links',
+                          TextButton(
+                            key: ValueKey('ethernet-ports-${row['id']}'),
+                            onPressed: () => showDialog<void>(
+                              context: context,
+                              builder: (_) => EthernetPortsDialog(
+                                api: api,
+                                device: Map<String, dynamic>.from(row),
+                              ),
+                            ),
+                            child: deviceReading(
+                              row,
+                              isMimosa(row)
+                                  ? 'mimosa_ethernet_speed'
+                                  : 'ethernet_links',
+                            ),
                           ),
                           deviceReading(row, 'uptime_seconds'),
                           deviceDowntime(row),
                           row['ip_address'],
-                          badge(row['status']),
+                          deviceStatus(row),
                           row['vendor_label'] ?? row['vendor'],
                         ],
                       };
                       return DataRow(
+                        color:
+                            resource == 'devices' && row['status'] == 'offline'
+                            ? WidgetStatePropertyAll(
+                                red.withValues(alpha: 0.18),
+                              )
+                            : null,
                         cells: [
                           ...values.map(
                             (v) => DataCell(
@@ -2045,6 +2115,28 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                           DataCell(
                             Row(
                               children: [
+                                if (resource == 'devices' &&
+                                    ['towers', 'noc', 'monitoring'].any(
+                                      (section) =>
+                                          hasSection(api.user!, section),
+                                    ))
+                                  IconButton(
+                                    key: ValueKey(
+                                      'downtime-history-${row['id']}',
+                                    ),
+                                    tooltip: 'Downtime history',
+                                    onPressed: () => showDialog<void>(
+                                      context: context,
+                                      builder: (_) =>
+                                          DeviceDowntimeHistoryDialog(
+                                            api: api,
+                                            device: Map<String, dynamic>.from(
+                                              row,
+                                            ),
+                                          ),
+                                    ),
+                                    icon: const Icon(Icons.history, size: 19),
+                                  ),
                                 if (resource == 'towers')
                                   IconButton(
                                     tooltip: 'View tower devices',

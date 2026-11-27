@@ -104,6 +104,53 @@ class WhatsAppEvent(Base):
     message_id = Column(String(256))
 
 
+class TwilioWhatsAppSettings(Base):
+    __tablename__ = 'twilio_whatsapp_settings'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    sas4_username = Column(String(128), nullable=False)
+    encrypted_token = Column(Text, nullable=False)
+    config = Column(JSON, nullable=False)
+    version = Column(String(36), nullable=False, default=uid)
+    verified_at = Column(DateTime(timezone=True))
+    retry_at = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+    __table_args__ = (CheckConstraint('id = 1'),)
+
+
+class TwilioWhatsAppCustomer(Base):
+    __tablename__ = 'twilio_whatsapp_customers'
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    customer_id = Column(Integer, primary_key=True)
+    customer_username = Column(String(128), nullable=False)
+    phone_hash = Column(String(64), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+    version = Column(String(36), nullable=False, default=uid)
+    consent_at = Column(DateTime(timezone=True))
+    next_check = Column(DateTime(timezone=True), nullable=False, default=now, index=True)
+    last_checked = Column(DateTime(timezone=True))
+    last_error = Column(String(300))
+
+
+class TwilioWhatsAppEvent(Base):
+    __tablename__ = 'twilio_whatsapp_events'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    actor_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'))
+    customer_id = Column(Integer, nullable=False, index=True)
+    version = Column(String(36), nullable=False)
+    customer_version = Column(String(36), nullable=False)
+    kind = Column(String(20), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default='pending', index=True)
+    detail = Column(String(300))
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt = Column(DateTime(timezone=True), nullable=False, default=now)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now)
+    accepted_at = Column(DateTime(timezone=True))
+    message_id = Column(String(256))
+
+
 class RechargeTelegramSettings(Base):
     __tablename__ = 'recharge_telegram_settings'
     id = Column(Integer, primary_key=True)
@@ -368,6 +415,12 @@ class Metric(Base):
     __table_args__ = (Index("ix_metrics_device_time", "device_id", "collected_at"),)
 
 
+class DeviceTelemetrySnapshot(Base):
+    __tablename__ = "device_telemetry_snapshots"
+    device_id = Column(String(36), ForeignKey("devices.id", ondelete="CASCADE"), primary_key=True)
+    fields = Column(JSON, nullable=False)
+
+
 class DeviceOutage(Base):
     __tablename__ = "device_outages"
     id = Column(String(36), primary_key=True, default=uid)
@@ -476,6 +529,14 @@ class SharedPaymentGateway(Base):
     provider = Column(String(16), primary_key=True)
     # Keep the selection if an owner is removed; never fall back to another bank.
     user_id = Column(String(36), ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+
+
+class PaymentGatewayAccess(Base):
+    __tablename__ = 'payment_gateway_access'
+    provider = Column(String(16), ForeignKey('shared_payment_gateways.provider', ondelete='CASCADE'), primary_key=True)
+    mode = Column(String(16), nullable=False, default='all')
+    manager_ids = Column(JSON, nullable=False, default=list)
+    __table_args__ = (CheckConstraint("mode IN ('all', 'selected')"),)
 
 
 class RechargePayment(Base):

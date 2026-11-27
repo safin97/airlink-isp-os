@@ -19,14 +19,15 @@ from sqlalchemy.exc import IntegrityError
 from redis import Redis
 from redis.exceptions import RedisError
 from . import device_management, device_access, online_device, snmp_visibility, device_login_profiles
-from . import ttlock, ttlock_mobile, ttlock_bridge, towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, whatsapp
+from . import ttlock, ttlock_mobile, ttlock_bridge, towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, twilio_whatsapp
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
-from . import card_system, client_portal
+from . import card_system, client_portal, device_telemetry
+from .models import DeviceTelemetrySnapshot
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
 from .registration_usernames import service as registration_username_service
-from .wireless_clients import public_clients
+from .wireless_clients import public_clients, HISTORY_KEY, remember_clients, client_history_view
 from . import snmp_discovery
 from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment
 from .system_stats import service as system_stats_service
@@ -47,7 +48,7 @@ async def lifespan(app):
     settings.validate()
     task = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(payments.payment_worker())
     customer_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(customer_telegram.worker())
-    whatsapp_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(whatsapp.worker())
+    twilio_whatsapp_messages = None if os.environ.get('AIRLINK_TESTING') == 'true' else asyncio.create_task(twilio_whatsapp.worker())
     if os.environ.get('AIRLINK_TESTING') != 'true':
         customer_probe_service.start()
         customer_collector_service.start()
@@ -56,10 +57,10 @@ async def lifespan(app):
     try:
         yield
     finally:
-        if whatsapp_messages:
-            whatsapp_messages.cancel()
+        if twilio_whatsapp_messages:
+            twilio_whatsapp_messages.cancel()
             with suppress(asyncio.CancelledError):
-                await whatsapp_messages
+                await twilio_whatsapp_messages
         if customer_messages:
             customer_messages.cancel()
             with suppress(asyncio.CancelledError):
@@ -91,7 +92,7 @@ app.include_router(ttlock_bridge.router)
 app.include_router(customer_telegram.router)
 app.include_router(telegram_account.router)
 app.include_router(recharge_telegram.router)
-app.include_router(whatsapp.router)
+app.include_router(twilio_whatsapp.router)
 app.include_router(sas4.router)
 app.include_router(sas4_reports.router)
 app.include_router(payments.router)
@@ -115,8 +116,8 @@ async def safe_device_login_validation(request, exc):
         return JSONResponse(status_code=422, content={'detail': 'Check the sign-in or recharge details and try again.'})
     if request.url.path.startswith('/api/card-system'):
         return JSONResponse(status_code=422, content={'detail': 'Enter a PIN of 1–128 characters and a label of up to 120 characters.'})
-    if request.url.path.startswith('/api/integrations/whatsapp'):
-        return JSONResponse(status_code=422, content={'detail': 'Check the WhatsApp IDs, access token, template names, language and timezone.'})
+    if request.url.path.startswith('/api/integrations/twilio-whatsapp'):
+        return JSONResponse(status_code=422, content={'detail': 'Check the Twilio Account SID, Auth Token, WhatsApp sender, Content SIDs and timezone.'})
     if request.url.path.startswith('/api/integrations/telegram-account'):
         return JSONResponse(status_code=422, content={'detail': 'Check the Telegram API ID, API hash, phone, code or password.'})
     if request.url.path.startswith('/api/integrations/customer-telegram'):
@@ -789,36 +790,21 @@ def snmp_status(device, metric):
 def devices(user=Depends(current_user), db=Depends(get_db)):
     latest = (select(Metric.id).where(Metric.device_id == Device.id)
               .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1).correlate(Device).scalar_subquery())
-    query = devices_query(db, user).add_columns(Metric).outerjoin(Metric, Metric.id == latest).order_by(Device.name)
+    query = (devices_query(db, user).add_columns(Metric, DeviceTelemetrySnapshot)
+             .outerjoin(Metric, Metric.id == latest)
+             .outerjoin(DeviceTelemetrySnapshot, DeviceTelemetrySnapshot.device_id == Device.id).order_by(Device.name))
     result = []
     configs = tower_api.configurations(db, devices_query(db, user).with_only_columns(Device.tower_id).distinct())
-    for device, metric in db.execute(query):
+    for device, metric, snapshot in db.execute(query):
         status = 'not_configured'
         fresh = bool(device.enabled and device.last_poll and metric and
                      (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
         if configs.get(device.tower_id, tower_api.DEFAULTS)['enabled']:
             status = ('disabled' if not device.enabled else 'pending' if not device.last_poll or not metric
                       else 'stale' if not fresh else metric.values.get('api_status', 'pending'))
-        values = metric.values if fresh else {}
-        telemetry = {key: values[key] for key in ('cpu_percent', 'memory_percent', 'uptime_seconds',
-            'ethernet_links', 'signal_dbm', 'weakest_signal_dbm', 'wireless_clients',
-            'radio_frequencies_mhz', 'wireless_ssids', 'firmware_version', 'device_model', 'telemetry_source') if key in values}
-        if not telemetry.get('ethernet_links'):
-            telemetry['ethernet_links'] = [{'name': port.get('name', index), 'speed_mbps': port['speed_mbps']}
-                for index, port in values.get('interfaces', {}).items()
-                if port.get('type') == 6 and port.get('status') == 1 and port.get('speed_mbps', 0) > 0]
         detected = metric.values.get('detected_vendor') if metric and device.last_poll else None
         detected = detected if detected in VENDOR_LABELS and detected != 'generic' else None
         effective_vendor = device.vendor if device.vendor != 'generic' else detected or 'generic'
-        if effective_vendor == 'mimosa' and fresh:
-            # Keep traffic on one physical Ethernet port, not a bridge/radio sum.
-            # Some Mimosa firmware calls its only Ethernet port eth0 rather than ether1.
-            ports = [port for port in values.get('interfaces', {}).values() if port.get('type') == 6]
-            named = [port for port in ports if str(port.get('name', '')).lower() == 'ether1']
-            selected = named[0] if len(named) == 1 else ports[0] if len(ports) == 1 else None
-            if selected and selected.get('status') == 1 and selected.get('admin_status') != 2:
-                telemetry['ethernet_traffic'] = {key: selected[key]
-                    for key in ('name', 'speed_mbps', 'tx_bps', 'rx_bps') if key in selected}
         device_status = effective_status(device)
         downtime = (max(0, int((now() - aware(device.down_since)).total_seconds()))
                     if device_status_fresh(device) and device.status == 'offline' and device.down_since else None)
@@ -827,8 +813,8 @@ def devices(user=Depends(current_user), db=Depends(get_db)):
                        'vendor_auto': device.vendor == 'generic',
                        'status': device_status, 'downtime_seconds': downtime,
                        'snmp_status': snmp_status(device, metric),
-                       'api_status': status, 'telemetry': telemetry,
-                       'telemetry_at': metric.collected_at if fresh else None})
+                       'api_status': status,
+                       **device_telemetry.display(device, metric, snapshot, fresh, effective_vendor)})
     return result
 
 
@@ -965,12 +951,17 @@ def metrics(device_id: str, hours: int = Query(24, ge=1, le=720), user=Depends(c
 
 
 @app.get("/api/devices/{device_id}/outages")
-def device_outages(device_id: str, limit: int = Query(100, ge=1, le=500), user=Depends(current_user), db=Depends(get_db)):
-    check_device(db, user, device_id)
+def device_outages(device_id: str, limit: int = Query(100, ge=1, le=500), include_current: bool = False,
+                   user=Depends(current_user), db=Depends(get_db)):
+    device = check_device(db, user, device_id)
     rows = db.scalars(select(DeviceOutage).where(DeviceOutage.device_id == device_id)
                       .order_by(DeviceOutage.ended_at.desc(), DeviceOutage.id.desc()).limit(limit))
-    return [{**public(row), 'duration_seconds': max(0, int((aware(row.ended_at) - aware(row.started_at)).total_seconds()))}
-            for row in rows]
+    history = [{**public(row), 'duration_seconds': max(0, int((aware(row.ended_at) - aware(row.started_at)).total_seconds()))}
+               for row in rows]
+    if include_current and device_status_fresh(device) and device.status == 'offline' and device.down_since:
+        history.insert(0, {'device_id': device_id, 'started_at': aware(device.down_since), 'ended_at': None,
+                           'duration_seconds': max(0, int((now() - aware(device.down_since)).total_seconds()))})
+    return history
 
 
 @app.get("/api/devices/{device_id}/interfaces")
@@ -989,11 +980,12 @@ def wireless_management_context(db, user, device_id):
 
 @app.get('/api/devices/{device_id}/ethernet-ports')
 def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends(get_db)):
-    device, metric, vendor = wireless_management_context(db, user, device_id)
+    device, metric, _ = wireless_management_context(db, user, device_id)
     status = snmp_status(device, metric)
     profile = db.get(SNMPProfile, device.snmp_profile_id) if device.snmp_profile_id else None
     version = json.loads(cipher().decrypt(profile.encrypted_credentials.encode())).get('version', '3') if profile else None
-    supported = vendor in ('mikrotik', 'mikrotik_switch') and version in ('2', '2c')
+    # Ethernet interface tables are standard across vendors and SNMP versions.
+    supported = version in ('1', '2', '2c', '3')
     fresh = supported and status == 'connected'
     ports = []
     # Use the latest poll only: failed polls must not reuse old link states or rates.
@@ -1008,7 +1000,7 @@ def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends
                       'speed_mbps': port.get('speed_mbps') if fresh and state == 'connected' else None,
                       'rx_bps': port.get('rx_bps') if fresh else None,
                       'tx_bps': port.get('tx_bps') if fresh else None})
-    return {'supported': supported, 'snmp_status': status,
+    return {'supported': supported, 'snmp_status': status, 'snmp_version': version,
             'collected_at': metric.collected_at if values else None,
             'poll_interval': device.poll_interval, 'ports': ports}
 
@@ -1062,9 +1054,18 @@ def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_
     fresh = bool(device.enabled and device.last_poll and metric and
                  (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
     values = metric.values if fresh else {}
-    clients = public_clients(values.get('wireless_registrations'))
+    snapshot = db.get(DeviceTelemetrySnapshot, device_id)
+    history = (snapshot.fields.get(HISTORY_KEY) or {}) if snapshot else {}
+    # Older samples can still be displayed before the worker saves its first history.
+    if fresh and not history:
+        history = remember_clients({}, values, metric.collected_at, device.ip_address)
+    source = values.get('wireless_registration_source')
+    successful = values.get('snmp_up') if source == 'SNMP' else values.get('api_up')
+    clients = client_history_view(history, device, now(), metric.collected_at if fresh and successful else None)
+    if not history:
+        clients = [{**row, 'status': 'unknown'} for row in public_clients(values.get('wireless_registrations'))]
     lookup_status = 'not_needed'
-    unmatched = [row for row in clients if not row.get('pppoe_username') and row.get('pppoe_username_status') != 'ambiguous']
+    unmatched = [row for row in clients if row.get('status') != 'down' and not row.get('pppoe_username') and row.get('pppoe_username_status') != 'ambiguous']
     if unmatched:
         matches, lookup_status = registration_username_service.lookup(db, user)
         for row in unmatched:
@@ -1073,10 +1074,11 @@ def wireless_clients(device_id: str, user=Depends(current_user), db=Depends(get_
                 'ambiguous' if row['mac_address'] in matches else lookup_status if lookup_status == 'pending' else 'unavailable')
     total = values.get('wireless_clients')
     available = bool(clients) or (values.get('wireless_registration_source') and total == 0)
-    return {'clients': clients, 'total': total, 'username_lookup_status': lookup_status, 'status': 'available' if available else
+    return {'clients': clients, 'total': total if total is not None else history.get('total'),
+            'history_limited': bool(history.get('limited')), 'username_lookup_status': lookup_status, 'status': 'available' if available else
             'stale' if metric and not fresh else 'unavailable',
-            'source': values.get('wireless_registration_source'),
-            'collected_at': metric.collected_at if fresh else None}
+            'source': source or history.get('source'),
+            'collected_at': metric.collected_at if fresh else history.get('collected_at')}
 
 
 @app.get("/api/alerts")

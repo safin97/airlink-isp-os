@@ -8,6 +8,18 @@ In **Settings → SNMP credential profiles → Add SNMP profile**, select the ve
 
 ICMP echo is checked independently; a device is online when either ICMP or SNMP responds. Persistent failures cross the configured threshold before offline state. Availability reports specifically measure observed ICMP samples, so an ICMP-blocking device may have SNMP online status and 0% ICMP availability.
 
+## Device downtime history
+
+After a device reports readings, its last known SSID, signal, Ethernet speed, client count and reported uptime stay visible during an outage. The full device row turns red, downtime increases while monitoring confirms the outage, and uptime stays frozen at the last reported value. **Last known readings** identifies retained data; hover over a reading for its local collection time. New successful readings replace the corresponding values, including zero client counts and a lower uptime after reboot. Missing fields retain their own previous collection times. Last known client counts can open the retained client list, where unconfirmed statuses are labelled Unknown.
+
+Display snapshots persist across page refreshes, server restarts, metric retention and device settings changes. They are separate from live samples and are not used to fabricate monitoring charts or alerts. A device must report data before it has a snapshot. Settings changes restart live monitoring while keeping previous display values marked as last known. When a saved reading was collected at a different address, its tooltip identifies that address. Deleting the device removes its saved readings.
+
+An empty or partial SNMP walk does not erase a saved SSID or ether1 speed. If other ports respond but ether1 has no new speed, the inventory keeps ether1's last measured speed and collection time. A reported registration-client count of zero is valid and is retained too. Failed probes cannot replace saved readings with empty defaults. Fields that have never been reported remain unavailable.
+
+Open **Towers → a tower → a device's Downtime history button** (clock icon in Actions). The same button is available when opening tower devices from the NOC Screen. Each row shows the date and local 24-hour clock time the device went down, when it came back online, and its total downtime in minutes and seconds. The latest 100 completed outages are shown, newest first, plus any confirmed ongoing outage marked **Still down**. The view refreshes every 15 seconds and remains available while the device is offline; it does not require a device API login.
+
+An outage is confirmed after the configured failure threshold. Its start is the first failed monitoring check and its end is the first successful recovery check, so accuracy depends on the device's polling interval. Brief failures below the threshold are not recorded as outages. Completed records remain saved after recovery and telemetry cleanup. An ongoing duration is shown only while monitoring readings are fresh and the device is enabled; stopping monitoring does not establish continued downtime. History uses the existing tower access scope and is readable with Towers, NOC Screen or Monitoring access.
+
 ## Standard metrics
 
 | Metric | MIB / OID |
@@ -72,13 +84,25 @@ The Connection column reports SNMP. Missing readings show **Checking…** during
 
 On MikroTik, `trap-community=public` controls outgoing traps. Polling requires SNMP enabled, a `public` community with `read-access=yes` and UDP 161 access from AirLink. The software cannot obtain measurements from a device that does not answer SNMP. See the [RouterOS SNMP reference](https://help.mikrotik.com/docs/spaces/ROS/pages/8978519/SNMP).
 
-## MikroTik switch Ethernet ports
+## Wireless client connection history
+
+Click a device's registration-client count to view known clients, including disconnected clients. Each MAC retains its first-seen row position across refreshes, reconnects and service restarts; newly observed clients append to the end (MAC order within each new batch). Up means the latest successful check reported the client. Down requires a complete registration list that no longer contains it. Failed, stale, partial or truncated checks show Unknown for clients whose status cannot be confirmed. Device outages do not prove an individual wireless disconnection. Last seen, SSID and signal remain visible, and down rows turn red. Hover over status for its transition time or last confirmed state.
+
+History is stored with the device's telemetry snapshot, separately from raw monitoring samples. It retains up to 4,096 distinct MAC addresses per device and reports when that limit is reached. Address edits preserve history but leave old-address clients unconfirmed until seen at the new address. Polls collect at most 256 registration entries; incomplete lists never mark absent clients down. These statuses require a supported registration source; vendor identity or a client count alone cannot supply individual client history.
+
+## Ruijie / Reyee RG-EST450G
+
+Manual Ruijie/Reyee selection and automatic detection use the same tower view. The table displays the actual names and measured speeds of active Ethernet interfaces from IF-MIB, including ports whose names are not `ether1`. SSID and signal have separate readings in the same column; registration counts retain the usual client-list action. Last known readings remain visible during outages with their original collection times.
+
+The [official Reyee MIB package](https://www.ruijie.com/en-global/resources/preview/reyee-mib/) documents standard interface tables. Its instruction manual specifies the generic Net-SNMP sysObjectID `1.3.6.1.4.1.8072.3.2.10`; that OID alone cannot identify Reyee. An explicit `RG-EST450G` model in sysDescr can identify this bridge, as can the Ruijie/Reyee brand. The package reviewed does not document SSID, RSSI or wireless registration OIDs. AirLink does not yet have a verified wireless collector for this model, so those fields remain unavailable until a supported source supplies them. Display tests use synthetic fixtures; physical RG-EST450G validation is pending device access.
+
+## Device Ethernet ports
 
 In **Towers → devices → Add/Edit**, choose **MikroTik** and **MikroTik switch — SNMP v2c / public**, or a saved SNMPv2c profile with the switch's community. Enable SNMP polling on the switch and allow AirLink to reach UDP 161. The switch preset uses v2c only; existing radio profiles remain available.
 
-Use the **Ethernet ports** action beside a MikroTik device to see every Ethernet interface reported by the bounded IF-MIB walk (up to 256 rows per table), including down and disabled ports and Ethernet SFP interfaces. Bridges, VLANs and wireless interfaces are excluded. Names come from ifName/ifDescr, type from ifType, disabled state from ifAdminStatus, and link state from ifOperStatus. Link up means connected; link down does not prove a port has never been used. Missing status stays unknown.
+Click the **Ethernet speed** (or **ether1 speed**) reading in a device row to see every Ethernet interface reported by the bounded IF-MIB walk (up to 256 rows per table), including down and disabled ports and Ethernet SFP interfaces. This works across vendors, including Ruijie/Reyee, Ubiquiti and Mimosa, with SNMPv1, v2c or v3 profiles. The cell remains clickable when its speed is unavailable. Devices without an SNMP profile show setup guidance. The existing MikroTik switch management action opens the same list. Bridges, VLANs and wireless interfaces are excluded. Names come from ifName/ifDescr, type from ifType, disabled state from ifAdminStatus, and link state from ifOperStatus. Link up means connected; link down does not prove a port has never been used. Missing status stays unknown.
 
-Receive/transmit Mbps are from the switch's perspective and averaged over two polls. Counter64 is preferred, with existing conservative Counter32 fallback; first samples, counter resets/wraps, reboots and ambiguous deltas show unavailable. Missing rates are never substituted with zero. Stale, disabled or failed SNMP readings do not appear as current traffic. The view refreshes stored readings every 15 seconds without triggering extra switch polls and uses existing tower read permissions. No API credentials or switch configuration writes are required.
+Receive/transmit Mbps are from the device's perspective and averaged over two polls. Counter64 is preferred, with existing conservative Counter32 fallback; first samples, counter resets/wraps, reboots and ambiguous deltas show unavailable. Missing rates are never substituted with zero. Stale, disabled or failed SNMP readings do not appear as current traffic. The view refreshes stored readings every 5 seconds without triggering extra device polls and uses existing tower read permissions. No API credentials or switch configuration writes are required.
 
 References: [IF-MIB, RFC 2863](https://www.rfc-editor.org/info/rfc2863/) and [MikroTik SwOS CRS3xx/CSS3xx SNMP support](https://help.mikrotik.com/docs/spaces/SWOS/pages/76415036/CRS3xx%20and%20CSS3xx%20series%20Manual). Real switch firmware may expose fewer fields; unavailable data stays unavailable.
 

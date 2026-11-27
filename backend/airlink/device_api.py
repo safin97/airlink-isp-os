@@ -5,7 +5,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 import httpx
 from .vendor_identity import identify_vendor
-from .wireless_clients import public_clients, ssids, username_map
+from .wireless_clients import public_clients, ssids, username_map, mac_address
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -79,9 +79,11 @@ def resource_values(resource):
 
 async def routeros(client, base, credentials, inventory=False):
     auth = httpx.BasicAuth(credentials['api_username'], credentials['api_password'])
+    read_status = {}
     async def read(path, payload=None):
         status, raw = await request(client, 'GET' if payload is None else 'POST', base + '/rest/' + path,
                                     auth=auth, **({} if payload is None else {'json': payload}))
+        read_status[path] = status
         if status in (401, 403):
             raise PermissionError('Device API credentials rejected')
         if status != 200:
@@ -101,20 +103,42 @@ async def routeros(client, base, credentials, inventory=False):
                 links.append({'name': str(port.get('name', port['.id']))[:120], 'speed_mbps': speed})
     strength = None
     wireless_values = {}
+    registration_complete = True
+    registered = {}
+    registered_macs = set()
+    largest_reported_count = 0
     for path, field in (('interface/wireless/registration-table', 'signal-strength'),
                         ('interface/wifi/registration-table', 'signal'),
                         ('interface/wifiwave2/registration-table', 'signal')):
         data = await read(path)
+        if inventory and not isinstance(data, list):
+            # A missing radio API is normal; a failed existing API is not an
+            # empty registration table and cannot prove disconnection.
+            registration_complete &= read_status.get(path) == 404
         if inventory and isinstance(data, list):
+            largest_reported_count = max(largest_reported_count, len(data))
+            registered_macs.update(mac for row in data if isinstance(row, dict)
+                                   for mac in [mac_address(row.get('mac-address'))] if mac)
             radios = await read(path.rsplit('/', 1)[0] + '?.proplist=name,ssid,configuration.ssid')
             names = {str(row.get('name', '')): row.get('ssid') or row.get('configuration.ssid')
                      for row in radios if isinstance(row, dict)} if isinstance(radios, list) else {}
-            wireless_values['wireless_ssids'] = ssids(names.values())
-            wireless_values['wireless_registrations'] = public_clients([
+            wireless_values['wireless_ssids'] = ssids([*wireless_values.get('wireless_ssids', []), *names.values()])
+            clients = public_clients([
                 {'mac_address': row.get('mac-address'), 'interface': row.get('interface'),
                  'ssid': row.get('ssid') or names.get(str(row.get('interface', ''))),
                  'signal_dbm': signal(row.get(field))} for row in data[:256] if isinstance(row, dict)])
             wireless_values['wireless_registration_source'] = 'RouterOS API'
+            registration_complete &= len(data) == len(clients)
+            for row in clients:
+                registered[row['mac_address']] = row
+            # wifi/wifiwave2 may expose the same clients. Merge by MAC and keep
+            # polling all radio families so a second radio is never ignored.
+            wireless_values['wireless_clients'] = max(len(registered_macs), largest_reported_count)
+            wireless_values['wireless_registrations'] = list(registered.values())[:256]
+            signals = [row['signal_dbm'] for row in registered.values() if row['signal_dbm'] is not None]
+            if signals:
+                wireless_values['weakest_signal_dbm'] = min(signals)
+            continue
         if isinstance(data, list) and data:
             # More than one station cannot be attributed to this customer's link.
             strength = signal(data[0].get(field)) if len(data) == 1 and isinstance(data[0], dict) else None
@@ -129,6 +153,8 @@ async def routeros(client, base, credentials, inventory=False):
     result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API',
               'detected_vendor': 'mikrotik', 'vendor_detection_source': 'API'}
     if inventory:
+        if 'wireless_registrations' in wireless_values:
+            wireless_values['wireless_registrations_complete'] = registration_complete and len(registered) <= 256
         result.update(wireless_values)
         if result.get('wireless_registrations'):
             try:
@@ -187,6 +213,7 @@ def airos_values(data, inventory=False):
                  'ssid': wireless.get('essid') or wireless.get('ssid'),
                  'signal_dbm': signal(row.get('signal'))} for row in stations[:256] if isinstance(row, dict)])
             result['wireless_registration_source'] = 'airOS API'
+            result['wireless_registrations_complete'] = len(stations) == len(result['wireless_registrations'])
             result['wireless_clients'] = len(stations)
         for key, raw in (('cpu_percent', numeric(host.get('cpuload'), 0, 100)),
                          ('uptime_seconds', numeric(host.get('uptime'))),

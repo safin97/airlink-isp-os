@@ -7,7 +7,7 @@ from alembic.operations import Operations
 from sqlalchemy import select, inspect
 from airlink import payments, sas4
 from airlink.db import SessionLocal, engine
-from airlink.models import User, PaymentGateway, SharedPaymentGateway, RechargePayment, UserSectionEdits
+from airlink.models import User, PaymentGateway, SharedPaymentGateway, PaymentGatewayAccess, RechargePayment, UserSectionEdits
 from test_api import user
 from test_payments import CREDENTIALS, setup_checkout, encrypted
 from test_sas4 import SETTINGS
@@ -157,11 +157,15 @@ def test_migration_preserves_one_owner_bank_and_does_not_guess_between_multiple(
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     with engine.begin() as connection:
+        # Rehearse this older migration against its original schema; the later
+        # access policy table references the shared gateway on PostgreSQL.
+        PaymentGatewayAccess.__table__.drop(connection)
         migration.op = Operations(MigrationContext.configure(connection))
         migration.downgrade()
         migration.upgrade()
         columns = {c['name'] for c in inspect(connection).get_columns('shared_payment_gateways')}
         assert columns == {c.name for c in SharedPaymentGateway.__table__.columns}
+        PaymentGatewayAccess.__table__.create(connection)
     with SessionLocal() as db:
         assert db.get(SharedPaymentGateway, 'fib').user_id == owner_id
         assert db.get(SharedPaymentGateway, 'fastpay') is None

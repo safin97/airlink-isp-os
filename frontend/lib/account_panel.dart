@@ -10,7 +10,7 @@ import 'customer_device_access.dart';
 import 'customer_telegram.dart';
 import 'telegram_account.dart';
 import 'telegram_settings.dart';
-import 'whatsapp.dart';
+import 'twilio_whatsapp.dart';
 
 Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (user['role'] == 'owner') 'Account profile': Icons.person_outline,
@@ -28,7 +28,7 @@ Map<String, IconData> accountPagesFor(Map<String, dynamic> user) => {
   if (hasSection(user, 'telegram_account'))
     'Telegram account lookup': Icons.person_search_outlined,
   if (hasSection(user, 'whatsapp'))
-    'WhatsApp notifications': Icons.chat_outlined,
+    'Twilio WhatsApp messaging': Icons.chat_outlined,
 };
 
 class AccountPanel extends StatefulWidget {
@@ -130,7 +130,9 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
               'Telegram account lookup' => TelegramAccountSettings(
                 api: widget.api,
               ),
-              'WhatsApp notifications' => WhatsAppSettings(api: widget.api),
+              'Twilio WhatsApp messaging' => TwilioWhatsAppSettings(
+                api: widget.api,
+              ),
               _ => profile(),
             },
           ],

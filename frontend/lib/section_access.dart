@@ -30,7 +30,7 @@ const administrativeSections = <String, String>{
   'telegram_bot': 'Customer Telegram bot',
   'telegram_account': 'Telegram account lookup',
   'telegram_notifications': 'Telegram notifications',
-  'whatsapp': 'WhatsApp notifications',
+  'whatsapp': 'Twilio WhatsApp messaging',
   'pc_updates': 'PC and GPU updates',
   'snmp_sharing': 'SNMP visibility sharing',
 };
@@ -332,7 +332,7 @@ const featureRoutes = <String, String>{
   '/payments/gateways': 'payment_gateways',
   '/client-portal': 'client_portal',
   '/integrations/telegram-account': 'telegram_account',
-  '/integrations/whatsapp': 'whatsapp',
+  '/integrations/twilio-whatsapp': 'whatsapp',
   '/system/pc-updates': 'pc_updates',
   '/users': 'managers',
   '/snmp-profile-visibility': 'snmp_sharing',

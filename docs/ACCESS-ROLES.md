@@ -13,7 +13,7 @@ The role editor includes the existing operational sections, Settings, Software U
 - Card System, Device login, Towers API, Customer device access and Device API access
 - TTLock and Deye configuration and sharing
 - Payment setup and Client portal settings
-- Customer Telegram bot, Telegram account lookup, Telegram notifications and WhatsApp notifications
+- Customer Telegram bot, Telegram account lookup, Telegram notifications and Twilio WhatsApp messaging
 - Backups and restore, VPN, PC and GPU updates, and SNMP visibility sharing
 
 ## FIB and FastPay
@@ -21,6 +21,8 @@ The role editor includes the existing operational sections, Settings, Software U
 The owner configures the shared merchant accounts once. To allow a manager to recharge with FIB, grant **View + Edit** for **ISP Card** and **FIB Bank recharge**. The manager still needs SAS4 card permission and an available matching card. FastPay uses ISP Card permission and the configured shared FastPay merchant. See [PAYMENTS.md](PAYMENTS.md).
 
 Payment setup is a separate, optional administrative grant. It is not required for checkout. A manager explicitly granted Payment setup Edit may configure the shared merchant account; revoking that permission makes a merchant selected under that manager unavailable for new payments. Existing payments retain their credential snapshot.
+
+Payment setup also controls which AirLink managers can use each configured FIB/FastPay account. When **Selected managers** is enabled, both the provider assignment and the existing recharge grants are required for new payments. An empty selection allows owners only. Assigning a provider does not grant Payment setup access or expose merchant credentials. Removing a provider assignment affects new payments; existing orders continue their original verification and fulfillment checks.
 
 ## Feature dependencies and account isolation
 

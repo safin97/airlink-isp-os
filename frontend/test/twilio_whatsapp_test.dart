@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:airlink_isp_os/api.dart';
-import 'package:airlink_isp_os/whatsapp.dart';
+import 'package:airlink_isp_os/twilio_whatsapp.dart';
 import 'package:airlink_isp_os/account_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,14 +9,13 @@ import 'package:http/testing.dart';
 
 void main() {
   final defaults = <String, dynamic>{
-    'phone_number_id': '123456789',
-    'business_account_id': '987654321',
-    'api_version': 'v27.0',
-    'language': 'en_US',
+    'account_sid': 'AC11111111111111111111111111111111',
+    'from_number': '+15551234567',
+    'messaging_service_sid': '',
     'timezone': 'Asia/Baghdad',
-    'recharge_template': 'airlink_recharge',
-    'expiry_3days_template': 'airlink_expiry_3days',
-    'expired_template': 'airlink_expired',
+    'recharge_content_sid': 'HX11111111111111111111111111111111',
+    'expiry_3days_content_sid': 'HX22222222222222222222222222222222',
+    'expired_content_sid': 'HX33333333333333333333333333333333',
     'recharge': false,
     'expiry_3days': false,
     'expired': false,
@@ -28,7 +27,7 @@ void main() {
   Future<void> mount(WidgetTester tester, Widget child) async {
     await tester.binding.setSurfaceSize(const Size(1000, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    if (child is WhatsAppSettings) {
+    if (child is TwilioWhatsAppSettings) {
       child.api.user ??= {};
       child.api.user!.putIfAbsent('role', () => 'owner');
     }
@@ -43,12 +42,12 @@ void main() {
   test('WhatsApp account settings appear only for owners', () {
     expect(
       accountPagesFor({'role': 'owner'}),
-      contains('WhatsApp notifications'),
+      contains('Twilio WhatsApp messaging'),
     );
     for (final role in ['manager', 'technician', 'viewer']) {
       expect(
         accountPagesFor({'role': role}),
-        isNot(contains('WhatsApp notifications')),
+        isNot(contains('Twilio WhatsApp messaging')),
       );
     }
   });
@@ -68,11 +67,11 @@ void main() {
           return http.Response(jsonEncode(data), 200);
         }),
       )..user = {'role': 'owner'};
-      await mount(tester, WhatsAppSettings(api: api));
+      await mount(tester, TwilioWhatsAppSettings(api: api));
       expect(writes, isEmpty);
-      expect(find.text('System user access token'), findsOneWidget);
+      expect(find.text('Twilio Auth Token'), findsOneWidget);
       expect(
-        tester.widget<TextField>(find.byType(TextField).at(2)).obscureText,
+        tester.widget<TextField>(find.byType(TextField).at(3)).obscureText,
         isTrue,
       );
       for (final title in whatsappKinds.values) {
@@ -82,11 +81,11 @@ void main() {
         await tester.pumpAndSettle();
       }
       expect(writes, isEmpty);
-      await tester.ensureVisible(find.text('Save WhatsApp settings'));
-      await tester.tap(find.text('Save WhatsApp settings'));
+      await tester.ensureVisible(find.text('Save Twilio WhatsApp settings'));
+      await tester.tap(find.text('Save Twilio WhatsApp settings'));
       await tester.pumpAndSettle();
       expect(writes, hasLength(1));
-      expect(writes.single['access_token'], '');
+      expect(writes.single['auth_token'], '');
       for (final kind in whatsappKinds.keys) {
         expect(writes.single[kind], isTrue);
       }
@@ -113,7 +112,7 @@ void main() {
           );
         }),
       );
-      await mount(tester, WhatsAppSettings(api: api));
+      await mount(tester, TwilioWhatsAppSettings(api: api));
       expect(checks, 0);
       final button = find.widgetWithText(
         OutlinedButton,
@@ -125,13 +124,16 @@ void main() {
       expect(checks, 1);
       expect(
         find.text(
-          'Connection and all three templates verified. No message was sent.',
+          'Twilio account and WhatsApp templates checked. No message was sent.',
         ),
         findsOneWidget,
       );
-      final phone = find.widgetWithText(TextField, 'WhatsApp phone number ID');
+      final phone = find.widgetWithText(
+        TextField,
+        'Twilio WhatsApp sender number',
+      );
       await tester.ensureVisible(phone);
-      await tester.enterText(phone, '222222222');
+      await tester.enterText(phone, '+15559999999');
       await tester.pumpAndSettle();
       expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
       expect(checks, 1);
@@ -205,4 +207,58 @@ void main() {
     );
     expect(find.textContaining('Customer access changed.'), findsOneWidget);
   });
+  testWidgets(
+    'WhatsApp readers can inspect settings and customer history without editing',
+    (tester) async {
+      final api =
+          Api(
+              client: MockClient((request) async {
+                expect(request.method, 'GET');
+                return http.Response(
+                  jsonEncode(
+                    request.url.path.endsWith('/users/7')
+                        ? {
+                            'configured': true,
+                            'enabled': true,
+                            'phone': '9647501234567',
+                            'events': [],
+                          }
+                        : defaults,
+                  ),
+                  200,
+                );
+              }),
+            )
+            ..user = {
+              'role': 'manager',
+              'sections': ['whatsapp', 'isp_card'],
+              'editable_sections': [],
+              'deletable_sections': [],
+            };
+      await mount(tester, TwilioWhatsAppSettings(api: api));
+      for (final field in tester.widgetList<TextField>(
+        find.byType(TextField),
+      )) {
+        expect(field.enabled, isFalse);
+      }
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(
+                FilledButton,
+                'Save Twilio WhatsApp settings',
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: CustomerWhatsApp(api: api, customerId: 7)),
+      );
+      await tester.pumpAndSettle();
+      final toggle = tester.widget<SwitchListTile>(find.byType(SwitchListTile));
+      expect(toggle.value, isTrue);
+      expect(toggle.onChanged, isNull);
+    },
+  );
 }

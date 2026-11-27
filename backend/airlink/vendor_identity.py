@@ -29,6 +29,9 @@ def identify_vendor(object_id='', description='', family=None):
         elif re.search(r'(?<![a-z0-9])tenda(?![a-z0-9])', text): family = 'tenda'
         elif re.search(r'(?<![a-z0-9])(?:tp[-\s]?link|tplinkwifi|tplinklogin)(?![a-z0-9])', text): family = 'tplink'
         elif re.search(r'(?<![a-z0-9])(?:ruijie|reyee)(?![a-z0-9])', text): family = 'ruijie'
+        # Reyee agents may use Net-SNMP's generic sysObjectID. Identify this
+        # bridge only when its model is explicitly present in the description.
+        elif re.search(r'(?<![a-z0-9])rg-est450g(?![a-z0-9])', text): family = 'ruijie'
         elif re.search(r'(?<![a-z0-9])hikvision(?![a-z0-9])', text): family = 'hikvision'
     if family == 'ubiquiti':
         if re.search(r'\b(?:[a-z]+-)?[25]ac(?:\b|[-\d])|\b(?:airmax|rocket|nanobeam|powerbeam|litebeam|nanostation)\s+ac\b', text):

@@ -11,84 +11,85 @@ import 'package:airlink_isp_os/section_access.dart';
 
 void main() {
   for (final role in ['manager', 'technician', 'viewer']) {
-    testWidgets('$role cannot open administrative pages without explicit grants', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(1440, 1400);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final reads = <String>[];
-      final api =
-          Api(
-              client: MockClient((request) async {
-                reads.add(request.url.path);
-                return http.Response(
-                  jsonEncode(request.url.path == '/api/dashboard' ? {} : []),
-                  200,
-                );
-              }),
-            )
-            ..user = {
-              'username': 'staff',
-              'role': role,
-              'access_policy_configured': true,
-              'sections': operationalSections.keys.toList(),
-              'editable_sections': operationalSections.keys.toList(),
-              'deletable_sections': operationalSections.keys.toList(),
-            };
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Operations(api: api, logout: () async {}),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.widgetWithText(ListTile, 'My account'));
-      await tester.tap(find.widgetWithText(ListTile, 'My account'));
-      await tester.pumpAndSettle();
-      for (final label in [
-        'Towers API',
-        'Device login',
-        'Account profile',
-        'Customer device access',
-        'Payment setup',
-        'Telegram bot token',
-        'Telegram account lookup',
-      ]) {
-        expect(find.widgetWithText(ListTile, label), findsNothing);
-      }
-      expect(find.text('Current password'), findsOneWidget);
-      expect(reads, isNot(contains('/api/payments/gateways')));
-      expect(reads, isNot(contains('/api/towers-api-profiles')));
-      expect(
-        reads,
-        isNot(contains('/api/integrations/sas4/device-login-profiles')),
-      );
-      expect(reads, isNot(contains('/api/integrations/sas4/device-access')));
-      // A direct request for an owner account page falls back to Change password.
-      for (final page in [
-        'Account profile',
-        'Customer device access',
-        'Payment setup',
-        'Telegram bot token',
-        'Telegram account lookup',
-      ]) {
+    testWidgets(
+      '$role cannot open administrative pages without explicit grants',
+      (tester) async {
+        tester.view.physicalSize = const Size(1440, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final reads = <String>[];
+        final api =
+            Api(
+                client: MockClient((request) async {
+                  reads.add(request.url.path);
+                  return http.Response(
+                    jsonEncode(request.url.path == '/api/dashboard' ? {} : []),
+                    200,
+                  );
+                }),
+              )
+              ..user = {
+                'username': 'staff',
+                'role': role,
+                'access_policy_configured': true,
+                'sections': operationalSections.keys.toList(),
+                'editable_sections': operationalSections.keys.toList(),
+                'deletable_sections': operationalSections.keys.toList(),
+              };
         await tester.pumpWidget(
           MaterialApp(
-            home: Scaffold(
-              body: AccountPanel(api: api, page: page),
-            ),
+            home: Operations(api: api, logout: () async {}),
           ),
         );
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.widgetWithText(ListTile, 'My account'));
+        await tester.tap(find.widgetWithText(ListTile, 'My account'));
+        await tester.pumpAndSettle();
+        for (final label in [
+          'Towers API',
+          'Device login',
+          'Account profile',
+          'Customer device access',
+          'Payment setup',
+          'Telegram bot token',
+          'Telegram account lookup',
+        ]) {
+          expect(find.widgetWithText(ListTile, label), findsNothing);
+        }
         expect(find.text('Current password'), findsOneWidget);
-        expect(find.text('FIB client ID'), findsNothing);
-        expect(find.text('Automatic detection'), findsNothing);
-        expect(find.text('Role: $role'), findsNothing);
-      }
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-    });
+        expect(reads, isNot(contains('/api/payments/gateways')));
+        expect(reads, isNot(contains('/api/towers-api-profiles')));
+        expect(
+          reads,
+          isNot(contains('/api/integrations/sas4/device-login-profiles')),
+        );
+        expect(reads, isNot(contains('/api/integrations/sas4/device-access')));
+        // A direct request for an owner account page falls back to Change password.
+        for (final page in [
+          'Account profile',
+          'Customer device access',
+          'Payment setup',
+          'Telegram bot token',
+          'Telegram account lookup',
+        ]) {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: AccountPanel(api: api, page: page),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('Current password'), findsOneWidget);
+          expect(find.text('FIB client ID'), findsNothing);
+          expect(find.text('Automatic detection'), findsNothing);
+          expect(find.text('Role: $role'), findsNothing);
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
   }
 
   testWidgets('My account shows one selected page and keeps SAS4 separate', (
@@ -220,6 +221,7 @@ void main() {
     expect(reads, [
       '/api/integrations/sas4/device-access',
       '/api/payments/gateways',
+      '/api/payments/gateways/managers',
     ]);
 
     await openPage('Towers');

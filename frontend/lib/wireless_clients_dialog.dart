@@ -59,13 +59,23 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = (data?['clients'] as List?) ?? [];
+    final rows = ((data?['clients'] as List?) ?? [])
+        .map(
+          (row) => error == null ? row : {...row as Map, 'status': 'unknown'},
+        )
+        .toList();
+    String localTime(dynamic value) {
+      final time = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+      if (time == null) return '—';
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${time.year}-${two(time.month)}-${two(time.day)} '
+          '${two(time.hour)}:${two(time.minute)}:${two(time.second)}';
+    }
+
     return AlertDialog(
-      title: Text(
-        '${tr('Connected wireless clients')} — ${widget.device['name']}',
-      ),
+      title: Text('${tr('Wireless clients')} — ${widget.device['name']}'),
       content: SizedBox(
-        width: 760,
+        width: 1080,
         height: 360,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -85,6 +95,14 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
               const SizedBox(height: 12),
               if (rows.isNotEmpty)
                 const AppText(
+                  'Clients keep their row order. Down means a complete registration check confirmed disconnection. Unknown means the current status could not be confirmed.',
+                ),
+              if (data!['history_limited'] == true)
+                const AppText(
+                  'Client history limit reached; some new clients are not shown.',
+                ),
+              if (rows.isNotEmpty)
+                const AppText(
                   'PPPoE usernames require a unique MAC match in active sessions. Unmatched clients show Unavailable.',
                 ),
               if (rows.isNotEmpty &&
@@ -102,9 +120,10 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                 ),
               if (rows.isNotEmpty) ...[
                 if (data!['total'] is num &&
-                    (data!['total'] as num) > rows.length)
+                    (data!['total'] as num) >
+                        rows.where((row) => row['status'] == 'up').length)
                   Text(
-                    '${tr('Showing')} ${rows.length} ${tr('of')} ${data!['total']}',
+                    '${rows.where((row) => row['status'] == 'up').length} confirmed up · ${rows.length} known clients',
                   ),
                 Expanded(
                   child: SingleChildScrollView(
@@ -117,12 +136,20 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                             'PPPoE username',
                             'SSID',
                             'Signal',
+                            'Status',
+                            'Last seen',
                           ])
                             DataColumn(label: AppText(label)),
                         ],
                         rows: rows
                             .map(
                               (row) => DataRow(
+                                key: ValueKey(row['mac_address']),
+                                color: row['status'] == 'down'
+                                    ? WidgetStatePropertyAll(
+                                        Colors.red.withValues(alpha: .12),
+                                      )
+                                    : null,
                                 cells: [
                                   DataCell(
                                     SelectableText(row['mac_address'] ?? '—'),
@@ -150,6 +177,28 @@ class _WirelessClientsDialogState extends State<WirelessClientsDialog> {
                                           : '${row['signal_dbm']} dBm',
                                     ),
                                   ),
+                                  DataCell(
+                                    Tooltip(
+                                      message: row['status'] == 'unknown'
+                                          ? 'Last confirmed: ${row['last_status'] ?? 'unknown'}'
+                                          : 'Since ${localTime(row['status_since'])}',
+                                      child: Text(
+                                        row['status'] == 'up'
+                                            ? 'Up'
+                                            : row['status'] == 'down'
+                                            ? 'Down'
+                                            : 'Unknown',
+                                        style: TextStyle(
+                                          color: row['status'] == 'up'
+                                              ? Colors.green
+                                              : row['status'] == 'down'
+                                              ? Colors.red
+                                              : Colors.orange,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(Text(localTime(row['last_seen']))),
                                 ],
                               ),
                             )

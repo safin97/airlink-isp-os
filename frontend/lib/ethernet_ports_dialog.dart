@@ -103,7 +103,16 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('${widget.device['ip_address'] ?? ''} · MikroTik · SNMPv2c'),
+              Text(
+                [
+                  widget.device['ip_address'] ?? '',
+                  widget.device['vendor_label'] ??
+                      widget.device['vendor'] ??
+                      '',
+                  if (data?['snmp_version'] != null)
+                    'SNMPv${data!['snmp_version']}',
+                ].where((value) => value.toString().isNotEmpty).join(' · '),
+              ),
               if (busy) const LinearProgressIndicator(),
               if (error != null)
                 Text(
@@ -112,7 +121,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
                 ),
               if (data != null && data!['supported'] != true)
                 const Text(
-                  'Select MikroTik switch and an SNMPv2c profile in Edit device. Enable SNMP on the switch with the matching community.',
+                  'Assign an SNMP profile in Edit device and enable matching SNMP access on the device to see all reported Ethernet ports.',
                 ),
               if (data?['supported'] == true) ...[
                 Text('SNMP: ${data!['snmp_status']}'),
@@ -179,7 +188,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
                   ),
                 const SizedBox(height: 12),
                 Text(
-                  'Traffic is averaged between monitoring polls (${data!['poll_interval']} seconds), from the switch’s perspective. Two valid samples are required. This view refreshes every 15 seconds.',
+                  'Traffic is averaged between monitoring polls (${data!['poll_interval']} seconds), from the device’s perspective. Two valid samples are required. This view refreshes every 5 seconds.',
                 ),
                 if (data!['collected_at'] != null)
                   Text('Last sample: ${data!['collected_at']}'),

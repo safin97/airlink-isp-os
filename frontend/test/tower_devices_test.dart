@@ -16,6 +16,18 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final fixtures = {
+        '/api/devices/2/outages': [
+          {
+            'started_at': '2026-11-27T08:30:00Z',
+            'ended_at': null,
+            'duration_seconds': 7205,
+          },
+          {
+            'started_at': '2026-11-26T10:00:00Z',
+            'ended_at': '2026-11-26T10:12:00Z',
+            'duration_seconds': 720,
+          },
+        ],
         '/api/devices/1/ethernet-ports': {
           'supported': true,
           'snmp_status': 'connected',
@@ -63,7 +75,7 @@ void main() {
           {'id': 'south', 'name': 'South', 'status': 'online'},
           {'id': 'empty', 'name': 'Empty tower', 'status': 'unknown'},
         ],
-        '/api/devices': [
+        '/api/devices': <Map<String, dynamic>>[
           {
             'id': '1',
             'name': 'North online',
@@ -154,9 +166,9 @@ void main() {
       expect(find.byTooltip('Manage switch'), findsOneWidget);
       expect(find.byKey(const ValueKey('manage-switch-2')), findsNothing);
       expect(find.byKey(const ValueKey('manage-switch-3')), findsNothing);
-      final manage = find.byKey(const ValueKey('manage-switch-1'));
-      await tester.ensureVisible(manage);
-      await tester.tap(manage);
+      final ethernet = find.byKey(const ValueKey('ethernet-ports-1'));
+      await tester.ensureVisible(ethernet);
+      await tester.tap(ethernet);
       await tester.pumpAndSettle();
       expect(
         find.text('3 ports · 1 running · 2 not running · 0 unknown'),
@@ -202,8 +214,99 @@ void main() {
       expect(find.text('1d 1h 1m'), findsOneWidget);
       expect(find.text('Downtime'), findsOneWidget);
       expect(find.text('0d 2h 0m'), findsOneWidget);
+      final history = find.byKey(const ValueKey('downtime-history-2'));
+      await tester.ensureVisible(history);
+      await tester.tap(history);
+      await tester.pumpAndSettle();
+      expect(find.text('North offline · 192.0.2.2'), findsOneWidget);
+      expect(find.text('Went down'), findsOneWidget);
+      expect(find.text('Still down'), findsOneWidget);
+      expect(find.text('120 min 5 sec'), findsOneWidget);
+      expect(find.text('12 min 0 sec'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
       expect(find.text('Failed'), findsNothing);
       expect(find.text('Waiting for poll'), findsNothing);
+      final onlineDevice =
+          (fixtures['/api/devices'] as List).first as Map<String, dynamic>;
+      final savedTelemetry = Map<String, dynamic>.from(
+        onlineDevice['telemetry'],
+      );
+      onlineDevice.addAll({
+        'status': 'offline',
+        'downtime_seconds': 65,
+        'telemetry_stale_fields': savedTelemetry.keys.toList(),
+        'telemetry_at': '2026-11-27T09:00:00Z',
+        'telemetry_field_addresses': {'ethernet_links': '192.0.2.250'},
+      });
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.text('AirLink North'), findsOneWidget);
+      expect(find.text('ether1: 1000 Mbps'), findsOneWidget);
+      expect(find.text('1d 1h 1m'), findsOneWidget); // Frozen reported uptime.
+      expect(find.text('Last known readings'), findsOneWidget);
+      expect(
+        find.byTooltip(
+          RegExp('Recorded from 192.0.2.250 before the address changed'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('wireless-clients-1')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<DataTable>(find.byType(DataTable))
+            .rows
+            .first
+            .color
+            ?.resolve({}),
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(const ValueKey('wireless-clients-1')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        find.byTooltip(RegExp('Last known reading.*Uptime', dotAll: true)),
+        findsOneWidget,
+      );
+      onlineDevice.addAll({
+        'status': 'online',
+        'downtime_seconds': null,
+        'telemetry_stale_fields': [],
+        'telemetry': {
+          ...savedTelemetry,
+          'wireless_ssids': ['North changed'],
+          'uptime_seconds': 60,
+        },
+      });
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+      expect(find.text('North changed'), findsOneWidget);
+      expect(find.text('AirLink North'), findsNothing);
+      expect(find.text('0d 0h 1m'), findsOneWidget);
+      expect(find.text('Last known readings'), findsNothing);
+      expect(
+        tester.widget<DataTable>(find.byType(DataTable)).rows.first.color,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(const ValueKey('wireless-clients-1')),
+            )
+            .onPressed,
+        isNotNull,
+      );
       for (final name in ['North online', 'North offline', 'North unknown']) {
         expect(find.text(name), findsNothing);
       }

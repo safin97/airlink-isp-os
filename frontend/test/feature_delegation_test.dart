@@ -91,6 +91,9 @@ void main() {
         Api(
             client: MockClient((request) async {
               requests.add(request);
+              if (request.url.path.endsWith('/gateways/managers')) {
+                return http.Response('[]', 200);
+              }
               return http.Response(
                 jsonEncode([
                   {
@@ -126,7 +129,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(requests.map((r) => r.method), ['GET']);
+    expect(requests.map((r) => r.method), ['GET', 'GET']);
+    expect(requests.map((r) => r.url.path), [
+      '/api/payments/gateways',
+      '/api/payments/gateways/managers',
+    ]);
     expect(find.text('FIB client ID'), findsOneWidget);
     for (final button in tester.widgetList<FilledButton>(
       find.byType(FilledButton),

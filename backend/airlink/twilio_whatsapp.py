@@ -1,5 +1,5 @@
+"""Twilio WhatsApp service notifications with customer consent and durable delivery state."""
 from .section_access import has_capability
-"""Owner-selected WhatsApp Cloud API notifications; never performs a recharge."""
 import asyncio
 import hashlib
 import json
@@ -10,37 +10,34 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select, delete
 from . import customer_telegram as customers
 from .db import get_db, SessionLocal
-from .models import (WhatsAppSettings as Settings, WhatsAppCustomer as Customer,
-                     WhatsAppEvent as Event, SAS4UserConnection, User, now, uid, audit)
+from .models import (TwilioWhatsAppSettings as Settings, TwilioWhatsAppCustomer as Customer,
+                     TwilioWhatsAppEvent as Event, SAS4UserConnection, User, now, uid, audit)
 from .security import owner, cipher, aware
 
-router = APIRouter(prefix='/api/integrations/whatsapp', tags=['WhatsApp'])
+router = APIRouter(prefix='/api/integrations/twilio-whatsapp', tags=['Twilio WhatsApp'])
 KINDS = ('recharge', 'expiry_3days', 'expired')
 METHODS = {'card', 'credit', 'extend', 'fib', 'fastpay'}
-DEFAULTS = {'api_version': 'v27.0', 'phone_number_id': '', 'business_account_id': '',
-            'language': 'en_US', 'timezone': 'Asia/Baghdad',
-            **{kind: False for kind in KINDS},
-            **{kind + '_template': 'airlink_' + kind for kind in KINDS}}
+DEFAULTS = {'account_sid': '', 'from_number': '', 'messaging_service_sid': '', 'timezone': 'Asia/Baghdad',
+            **{kind: False for kind in KINDS}, **{kind + '_content_sid': '' for kind in KINDS}}
 
 
 class SettingsInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    api_version: str = Field(default='v27.0', pattern=r'^v[0-9]{1,3}\.0$')
-    phone_number_id: str = Field(pattern=r'^[0-9]{5,32}$')
-    business_account_id: str = Field(pattern=r'^[0-9]{5,32}$')
-    access_token: str = Field(default='', max_length=4096)
-    language: str = Field(default='en_US', pattern=r'^[a-z]{2,3}(?:_[A-Z]{2})?$')
+    account_sid: str = Field(pattern=r'^AC[0-9a-fA-F]{32}$')
+    auth_token: str = Field(default='', max_length=128)
+    from_number: str = Field(default='', pattern=r'^(?:\+[1-9][0-9]{7,14})?$')
+    messaging_service_sid: str = Field(default='', pattern=r'^(?:MG[0-9a-fA-F]{32})?$')
     timezone: str = Field(default='Asia/Baghdad', max_length=64)
     recharge: bool = False
     expiry_3days: bool = False
     expired: bool = False
-    recharge_template: str = Field(default='airlink_recharge', pattern=r'^[a-z0-9_]{1,512}$')
-    expiry_3days_template: str = Field(default='airlink_expiry_3days', pattern=r'^[a-z0-9_]{1,512}$')
-    expired_template: str = Field(default='airlink_expired', pattern=r'^[a-z0-9_]{1,512}$')
+    recharge_content_sid: str = Field(pattern=r'^HX[0-9a-fA-F]{32}$')
+    expiry_3days_content_sid: str = Field(pattern=r'^HX[0-9a-fA-F]{32}$')
+    expired_content_sid: str = Field(pattern=r'^HX[0-9a-fA-F]{32}$')
 
     @field_validator('timezone')
     @classmethod
@@ -51,25 +48,31 @@ class SettingsInput(BaseModel):
             raise ValueError('Invalid timezone') from None
         return value
 
-    @field_validator('access_token')
+    @field_validator('auth_token')
     @classmethod
     def valid_token(cls, value):
-        if value and (len(value) < 20 or not re.fullmatch(r'[A-Za-z0-9_.|\-]+', value)):
-            raise ValueError('Invalid access token')
+        if value and not re.fullmatch(r'[0-9a-fA-F]{32}', value):
+            raise ValueError('Invalid Twilio Auth Token')
         return value
+
+    @model_validator(mode='after')
+    def valid_sender(self):
+        if bool(self.from_number) == bool(self.messaging_service_sid):
+            raise ValueError('Choose a Twilio phone number or a Messaging Service SID')
+        return self
 
 
 @contextmanager
 def locked():
     from .api import cache
     from redis.exceptions import RedisError
-    lock = cache.lock('whatsapp:operations', timeout=300, blocking=False)
+    lock = cache.lock('twilio_whatsapp:operations', timeout=300, blocking=False)
     try:
         acquired = lock.acquire(blocking=False)
     except RedisError:
-        raise HTTPException(503, 'WhatsApp operation protection is unavailable.') from None
+        raise HTTPException(503, 'Twilio WhatsApp operation protection is unavailable.') from None
     if not acquired:
-        raise HTTPException(409, 'WhatsApp is busy. Try again shortly.')
+        raise HTTPException(409, 'Twilio WhatsApp is busy. Try again shortly.')
     try:
         yield
     finally:
@@ -108,11 +111,11 @@ def configure(data: SettingsInput, user=Depends(owner), db=Depends(get_db)):
         connection = db.get(SAS4UserConnection, user.id)
         if not connection:
             raise HTTPException(409, 'Connect your owner SAS4 account first.')
-        if not data.access_token and (not row or row.user_id != user.id):
-            raise HTTPException(422, 'Enter the WhatsApp system user access token.')
-        config = data.model_dump(exclude={'access_token'})
+        if not data.auth_token and (not row or row.user_id != user.id or row.config.get('account_sid') != data.account_sid):
+            raise HTTPException(422, 'Enter your Twilio Auth Token.')
+        config = data.model_dump(exclude={'auth_token'})
         same = bool(row and row.user_id == user.id and row.sas4_username == connection.username
-                    and not data.access_token and all(row.config.get(k) == v for k, v in config.items() if k not in KINDS))
+                    and not data.auth_token and all(row.config.get(k) == v for k, v in config.items() if k not in KINDS))
         if any(config[k] for k in KINDS) and not (same and row.verified_at):
             raise HTTPException(409, 'Save with notifications off, then check the connection and templates before enabling notifications.')
         if row is None:
@@ -121,12 +124,13 @@ def configure(data: SettingsInput, user=Depends(owner), db=Depends(get_db)):
         if not same:
             row.verified_at = None
             row.version = uid()
+            row.retry_at = None
         row.user_id, row.sas4_username = user.id, connection.username
         row.config = config
-        if data.access_token:
-            row.encrypted_token = cipher().encrypt(data.access_token.encode()).decode()
+        if data.auth_token:
+            row.encrypted_token = cipher().encrypt(data.auth_token.encode()).decode()
         row.last_error = None
-        audit(db, user, 'whatsapp.configure')
+        audit(db, user, 'twilio_whatsapp.configure')
         db.commit()
         return status(user, db)
 
@@ -138,10 +142,10 @@ def disconnect(user=Depends(owner), db=Depends(get_db)):
         if row:
             db.delete(row)
         for event in db.scalars(select(Event).where(Event.status == 'pending')):
-            event.status, event.detail = 'cancelled', 'WhatsApp was disconnected.'
+            event.status, event.detail = 'cancelled', 'Twilio WhatsApp was disconnected.'
         # A new sender requires new customer enrollment.
         db.execute(delete(Customer))
-        audit(db, user, 'whatsapp.disconnect')
+        audit(db, user, 'twilio_whatsapp.disconnect')
         db.commit()
     return {'disconnected': True}
 
@@ -151,34 +155,40 @@ class CloudError(Exception):
         self.detail, self.retry_after, self.ambiguous = detail, retry_after, ambiguous
 
 
-def cloud(row, method, path, *, body=None, params=None):
-    """Fixed provider origin; never return/log provider bodies or bearer tokens."""
+def cloud(row, method, path, *, body=None, params=None, messaging=False, content=False):
+    """Twilio-only origins, Basic authentication, form-encoded WhatsApp; redact errors."""
+    origin = ('https://content.twilio.com/v1/' if content else
+              'https://messaging.twilio.com/v1/' if messaging else 'https://api.twilio.com/2010-04-01/')
     try:
+        token = cipher().decrypt(row.encrypted_token.encode()).decode()
         with httpx.Client(timeout=httpx.Timeout(20, connect=5), follow_redirects=False, trust_env=False) as client:
-            response = client.request(method, 'https://graph.facebook.com/' + row.config['api_version'] + '/' + path,
-                headers={'Authorization': 'Bearer ' + cipher().decrypt(row.encrypted_token.encode()).decode()},
-                json=body, params=params)
+            response = client.request(method, origin + path,
+                auth=(row.config['account_sid'], token), data=body, params=params)
     except httpx.HTTPError:
-        raise CloudError('WhatsApp response was not confirmed. Check WhatsApp Manager before sending again.', ambiguous=method == 'POST') from None
-    try:
-        data = response.json()
-    except ValueError:
-        data = {}
-    error = data.get('error', {}) if isinstance(data, dict) else {}
-    code = error.get('code') if isinstance(error, dict) else None
-    if response.status_code == 429 or code in (4, 17, 32, 613, 80007, 130429, 131048, 131056):
+        raise CloudError('Twilio response was not confirmed. Check Twilio Messaging logs before sending again.', ambiguous=method == 'POST') from None
+    except Exception:
+        raise CloudError('Twilio credentials cannot be read. Save the Auth Token again.') from None
+    if response.status_code == 429:
         try:
             wait = max(60, min(86400, int(response.headers.get('Retry-After', '300'))))
         except ValueError:
             wait = 300
-        raise CloudError('WhatsApp requested a cooldown. Delivery is queued.', retry_after=wait)
-    if not response.is_success or error:
-        detail = ('WhatsApp access token is invalid or expired. Update the connection.' if code == 190 else
-                  'WhatsApp rejected the notification. Check template approval, language, account permissions and recipient in WhatsApp Manager.')
+        raise CloudError('Twilio requested a cooldown. WhatsApp delivery is queued.', retry_after=wait)
+    if not response.is_success:
+        detail = ('Twilio authentication failed. Check the Account SID and Auth Token.' if response.status_code in (401, 403) else
+                  'Twilio rejected the request. Check the WhatsApp sender, recipient, template approval and Messaging logs in Twilio Console.')
         raise CloudError(detail, ambiguous=method == 'POST' and response.status_code >= 500)
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
     if not isinstance(data, dict):
-        raise CloudError('WhatsApp returned an unexpected response.', ambiguous=method == 'POST')
+        raise CloudError('Twilio returned an unexpected response.', ambiguous=method == 'POST')
     return data
+
+
+def account_path(row):
+    return 'Accounts/' + row.config['account_sid']
 
 
 @router.post('/check')
@@ -186,36 +196,43 @@ def check(user=Depends(owner), db=Depends(get_db)):
     with locked():
         row = configured(db)
         if not row:
-            raise HTTPException(409, 'Save your WhatsApp and owner SAS4 settings first.')
+            raise HTTPException(409, 'Save Twilio WhatsApp and your SAS4 connection first.')
         if row.retry_at and aware(row.retry_at) > now():
-            raise HTTPException(429, 'WhatsApp requested a cooldown. Try after the displayed time.')
+            raise HTTPException(429, 'Twilio requested a cooldown. Try after the displayed time.')
         try:
-            phone = cloud(row, 'GET', row.config['phone_number_id'], params={'fields': 'id,display_phone_number'})
-            if phone.get('id') != row.config['phone_number_id']:
-                raise CloudError('WhatsApp did not verify this phone number ID.')
+            account = cloud(row, 'GET', account_path(row) + '.json')
+            if account.get('sid') != row.config['account_sid'] or account.get('status') != 'active':
+                raise CloudError('Twilio did not confirm an active account for this Account SID.')
+            service = row.config.get('messaging_service_sid')
+            if service:
+                sender = cloud(row, 'GET', 'Services/' + service, messaging=True)
+                if sender.get('sid') != service or sender.get('account_sid') != row.config['account_sid']:
+                    raise CloudError('Twilio did not verify this Messaging Service. Check its account and WhatsApp sender pool.')
             for kind in KINDS:
-                data = cloud(row, 'GET', row.config['business_account_id'] + '/message_templates',
-                    params={'name': row.config[kind + '_template'], 'fields': 'name,status,language,components,parameter_format', 'limit': 100})
-                templates = data.get('data')
-                if not isinstance(templates, list):
-                    raise CloudError('WhatsApp did not return the approved template list.')
-                template = next((t for t in templates if isinstance(t, dict) and t.get('name') == row.config[kind + '_template']
-                                 and t.get('language') == row.config['language'] and t.get('status') == 'APPROVED'), None)
+                sid = row.config[kind + '_content_sid']
+                template = cloud(row, 'GET', 'Content/' + sid, content=True)
+                approval = cloud(row, 'GET', 'Content/' + sid + '/ApprovalRequests', content=True)
+                state = approval.get('whatsapp')
+                types = template.get('types')
+                text = types.get('twilio/text') if isinstance(types, dict) else None
                 count = 3 if kind == 'recharge' else 2
-                components = template.get('components', []) if template else []
-                bodies = [c for c in components if c.get('type', '').upper() == 'BODY']
-                if (not template or template.get('parameter_format', 'POSITIONAL') != 'POSITIONAL'
-                        or len(bodies) != 1 or set(re.findall(r'\{\{(.*?)\}\}', bodies[0].get('text', ''))) != {str(n) for n in range(1, count + 1)}
-                        or any(c.get('type', '').upper() not in ('BODY', 'FOOTER') for c in components)):
-                    raise CloudError('Check ' + kind + ' template: approved language, body-only positional variables ' + ('1–3.' if count == 3 else '1–2.'))
-            row.verified_at, row.last_error = now(), None
+                expected = {str(n) for n in range(1, count + 1)}
+                if (template.get('sid') != sid or template.get('account_sid') != row.config['account_sid']
+                        or not isinstance(state, dict) or str(state.get('status')).lower() != 'approved'
+                        or not isinstance(text, dict) or set(types) != {'twilio/text'}
+                        or not isinstance(text.get('body'), str)
+                        or {v.strip() for v in re.findall(r'\{\{(.*?)\}\}', text['body'])} != expected
+                        or not isinstance(template.get('variables'), dict) or set(template['variables']) != expected):
+                    raise CloudError('Check the ' + kind + ' Content SID: use an approved WhatsApp text template in this Twilio account with variables '
+                                     + ('1–3.' if count == 3 else '1–2.'))
+            row.verified_at, row.last_error, row.retry_at = now(), None, None
         except CloudError as exc:
             row.verified_at, row.last_error = None, exc.detail
             if exc.retry_after:
                 row.retry_at = now() + timedelta(seconds=exc.retry_after)
             db.commit()
             raise HTTPException(502, exc.detail) from None
-        audit(db, user, 'whatsapp.check')
+        audit(db, user, 'twilio_whatsapp.check')
         db.commit()
         return status(user, db)
 
@@ -249,7 +266,7 @@ def configure_customer(customer_id: int, data: CustomerInput, user=Depends(custo
     with locked():
         row = configured(db)
         if not row:
-            raise HTTPException(409, 'An owner must configure WhatsApp first.')
+            raise HTTPException(409, 'An owner must configure Twilio WhatsApp first.')
         record = customers.record_for(db, user, customer_id)
         # The selected owner's SAS4 scope must refer to the same customer.
         sender_record = customers.record_for(db, db.get(User, row.user_id), customer_id)
@@ -262,7 +279,7 @@ def configure_customer(customer_id: int, data: CustomerInput, user=Depends(custo
         pref.version, pref.next_check, pref.last_error = uid(), now(), None
         pref.consent_at = now() if data.enabled else None
         db.add(pref)
-        audit(db, user, 'whatsapp.customer.enable' if data.enabled else 'whatsapp.customer.disable', str(customer_id))
+        audit(db, user, 'twilio_whatsapp.customer.enable' if data.enabled else 'twilio_whatsapp.customer.disable', str(customer_id))
         db.commit()
         return customer_status(customer_id, user, db)
 
@@ -272,7 +289,7 @@ def payload(event):
 
 
 def queue(db, row, pref, actor, kind, key, record, expiration, reference=''):
-    event_id = hashlib.sha256(f'whatsapp:{row.user_id}:{pref.customer_id}:{record["username"]}:{kind}:{key}'.encode()).hexdigest()
+    event_id = hashlib.sha256(f'twilio_whatsapp:{row.user_id}:{pref.customer_id}:{record["username"]}:{kind}:{key}'.encode()).hexdigest()
     if db.get(Event, event_id):
         return
     connection = db.get(SAS4UserConnection, actor.id)
@@ -307,7 +324,7 @@ def activation(db, actor, customer_id, method, transaction_id, receipt=None):
             enqueue(db, actor, customer_id, method, transaction_id, receipt)
             db.flush()
     except Exception:
-        audit(db, actor, 'whatsapp.queue_failed', str(customer_id))
+        audit(db, actor, 'twilio_whatsapp.queue_failed', str(customer_id))
 
 
 def expiry_kind(expiry):
@@ -387,10 +404,17 @@ def deliver(db, event):
         values = [data['username'], expiry.astimezone(ZoneInfo(row.config['timezone'])).strftime('%Y-%m-%d %H:%M')]
         if event.kind == 'recharge':
             values.append(data['reference'])
-        body = {'messaging_product': 'whatsapp', 'recipient_type': 'individual',
-                'to': customers.normalized_phone(record['phone']), 'type': 'template',
-                'template': {'name': row.config[event.kind + '_template'], 'language': {'code': row.config['language']},
-                    'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': ' '.join(str(v).split())[:160]} for v in values]}]}}
+        variables = {str(index): ' '.join(str(value).split()) for index, value in enumerate(values, 1)}
+        if any(not value for value in variables.values()):
+            return cancel(db, event, 'A required WhatsApp template value is missing.')
+        body = {'To': 'whatsapp:+' + customers.normalized_phone(record['phone']),
+                'ContentSid': row.config[event.kind + '_content_sid'],
+                'ContentVariables': json.dumps(variables, ensure_ascii=False), 'ValidityPeriod': '3600'}
+        if row.config.get('messaging_service_sid'):
+            body['MessagingServiceSid'] = row.config['messaging_service_sid']
+        else:
+            body['From'] = 'whatsapp:' + row.config['from_number']
+
     except Exception:
         event.attempts += 1
         event.status = 'failed' if event.attempts >= 5 else 'pending'
@@ -398,16 +422,26 @@ def deliver(db, event):
         db.commit()
         return
     # Persist before the HTTP request. A timeout/crash must not duplicate a receipt.
-    event.status, event.detail = 'unconfirmed', 'WhatsApp submission may have started; automatic repeat is disabled.'
+    event.status, event.detail = 'unconfirmed', 'Twilio WhatsApp submission may have started; automatic repeat is disabled.'
     event.attempts += 1
     db.commit()
     try:
-        response = cloud(row, 'POST', row.config['phone_number_id'] + '/messages', body=body)
-        messages = response.get('messages')
-        if not isinstance(messages, list) or not messages or not isinstance(messages[0].get('id'), str):
-            raise CloudError('WhatsApp did not confirm acceptance. Check WhatsApp Manager.', ambiguous=True)
-        event.status, event.accepted_at, event.message_id = 'accepted', now(), messages[0]['id'][:256]
-        event.detail, row.last_error = 'WhatsApp accepted the message; delivery to the phone is not confirmed here.', None
+        response = cloud(row, 'POST', account_path(row) + '/Messages.json', body=body)
+        message_id = response.get('sid')
+        if (not isinstance(message_id, str) or not re.fullmatch(r'SM[0-9a-fA-F]{32}', message_id)
+                or response.get('account_sid') != row.config['account_sid']):
+            raise CloudError('Twilio did not confirm WhatsApp acceptance. Check Twilio Messaging logs.', ambiguous=True)
+        event.message_id = message_id
+        if response.get('status') in ('failed', 'undelivered', 'canceled'):
+            raise CloudError('Twilio could not deliver the WhatsApp. Review its Messaging logs; no automatic resend.')
+        if response.get('status') not in ('accepted', 'queued', 'sending', 'sent', 'delivered', 'read') or response.get('error_code') is not None:
+            raise CloudError('Twilio returned an unconfirmed WhatsApp state. Review its Messaging logs; no automatic resend.', ambiguous=True)
+        event.status, event.accepted_at = ('delivered' if response['status'] in ('delivered', 'read') else 'accepted'), now()
+        event.next_attempt = now() + timedelta(minutes=1)
+        event.detail = ('Twilio reports WhatsApp delivery.' if event.status == 'delivered' else
+                        'Twilio accepted the WhatsApp; delivery to the phone is pending confirmation.')
+        row.last_error = None
+
     except CloudError as exc:
         event.detail, row.last_error = exc.detail, exc.detail
         if exc.retry_after:
@@ -417,7 +451,36 @@ def deliver(db, event):
         elif not exc.ambiguous:
             event.status = 'failed'
     except Exception:
-        event.detail = 'WhatsApp response was not confirmed. Check WhatsApp Manager; no automatic retry.'
+        event.detail = 'Twilio WhatsApp response was not confirmed. Check Twilio Messaging logs; no automatic retry.'
+    db.commit()
+
+
+def refresh_delivery(db, row, event):
+    """Read receipts from Twilio without requiring an incoming webhook or resending."""
+    if (not row or row.user_id != event.user_id or row.version != event.version
+            or not re.fullmatch(r'SM[0-9a-fA-F]{32}', event.message_id or '')):
+        event.next_attempt = now() + timedelta(days=2)
+        db.commit()
+        return
+    if row.retry_at and aware(row.retry_at) > now():
+        event.next_attempt = row.retry_at
+        db.commit()
+        return
+    event.next_attempt = now() + timedelta(minutes=5)
+    try:
+        data = cloud(row, 'GET', account_path(row) + '/Messages/' + event.message_id + '.json')
+        if data.get('sid') != event.message_id or data.get('account_sid') != row.config['account_sid']:
+            raise CloudError('Twilio could not verify the WhatsApp delivery receipt.')
+        if data.get('status') in ('delivered', 'read'):
+            event.status, event.detail = 'delivered', 'Twilio reports WhatsApp delivery.'
+        elif data.get('status') in ('failed', 'undelivered', 'canceled'):
+            event.status, event.detail = 'failed', 'Twilio reports that the WhatsApp was not delivered. Review its Messaging logs; no automatic resend.'
+        elif data.get('status') == 'sent':
+            event.detail = 'Twilio sent the WhatsApp to the carrier; phone delivery is not yet confirmed.'
+    except CloudError as exc:
+        event.detail = 'WhatsApp was accepted; delivery status is currently unavailable. Check Twilio Messaging logs.'
+        if exc.retry_after:
+            row.retry_at = event.next_attempt = now() + timedelta(seconds=exc.retry_after)
     db.commit()
 
 
@@ -429,6 +492,10 @@ def tick():
         event = db.scalar(select(Event).where(Event.status == 'pending', Event.next_attempt <= now()).order_by(Event.next_attempt).limit(1))
         if event:
             deliver(db, event)
+        receipt = db.scalar(select(Event).where(Event.status == 'accepted', Event.next_attempt <= now(),
+            Event.created_at >= now() - timedelta(days=1)).order_by(Event.next_attempt).limit(1))
+        if receipt:
+            refresh_delivery(db, row, receipt)
         db.execute(delete(Event).where(Event.created_at < now() - timedelta(days=90), Event.status != 'pending')
                    .execution_options(synchronize_session=False))
         db.commit()

@@ -4,22 +4,21 @@ from datetime import timedelta
 import httpx
 import pytest
 from sqlalchemy import select
-from airlink import whatsapp as wa, customer_telegram as ct, sas4, payments
+from airlink import twilio_whatsapp as wa, customer_telegram as ct, sas4, payments
 from airlink.db import SessionLocal
 from airlink.models import User, SAS4UserConnection, RechargePayment, now
 from test_api import user
 from test_sas4 import SETTINGS as SAS_SETTINGS
 
-PATH = '/api/integrations/whatsapp'
-TOKEN = 'PRIVATE_WHATSAPP_ACCESS_TOKEN_1234567890'
-CONFIG = {**wa.DEFAULTS, 'phone_number_id': '123456789', 'business_account_id': '987654321', 'access_token': TOKEN}
+PATH = '/api/integrations/twilio-whatsapp'
+ACCOUNT = 'AC' + '1' * 32
+TOKEN = 'a' * 32
+MESSAGE = 'SM' + 'b' * 32
+SENDER = '+15551234567'
+CONTENT = {kind: 'HX' + str(index) * 32 for index, kind in enumerate(wa.KINDS, 1)}
+CONFIG = {**wa.DEFAULTS, 'account_sid': ACCOUNT, 'from_number': SENDER, 'auth_token': TOKEN,
+          **{kind + '_content_sid': sid for kind, sid in CONTENT.items()}}
 real_cloud = wa.cloud
-
-
-def templates(kind):
-    return {'data': [{'name': 'airlink_' + kind, 'status': 'APPROVED', 'language': 'en_US',
-                     'parameter_format': 'POSITIONAL', 'components': [{'type': 'BODY',
-                     'text': 'Account {{1}}, expiry {{2}}' + (', transaction {{3}}' if kind == 'recharge' else '')}]}]}
 
 
 @pytest.fixture
@@ -29,17 +28,26 @@ def setup(client, owner, monkeypatch):
               'expiration': (now() + timedelta(hours=71)).isoformat(), 'password': 'PRIVATE_PASSWORD'}
     monkeypatch.setattr(ct, 'record_for', lambda db, actor, cid: dict(record))
     calls = []
-    def cloud(row, method, path, *, body=None, params=None):
+    def cloud(row, method, path, *, body=None, params=None, messaging=False, content=False):
         calls.append((method, path, body, params))
-        if path.endswith('/messages'):
-            return {'messages': [{'id': 'wamid.example'}]}
-        if path.endswith('/message_templates'):
-            return templates(params['name'].removeprefix('airlink_'))
-        return {'id': '123456789', 'display_phone_number': '+964 750 123 4567'}
+        if method == 'POST':
+            return {'sid': MESSAGE, 'account_sid': ACCOUNT, 'status': 'queued', 'error_code': None}
+        if content:
+            sid = path.split('/')[1]
+            if path.endswith('/ApprovalRequests'):
+                return {'whatsapp': {'status': 'approved'}}
+            kind = next(kind for kind, value in CONTENT.items() if value == sid)
+            count = 3 if kind == 'recharge' else 2
+            return {'sid': sid, 'account_sid': ACCOUNT, 'language': 'ar',
+                    'variables': {str(n): 'Example' for n in range(1, count + 1)},
+                    'types': {'twilio/text': {'body': ' '.join('{{' + str(n) + '}}' for n in range(1, count + 1))}}}
+        if messaging:
+            return {'sid': path.split('/')[-1], 'account_sid': ACCOUNT}
+        return {'sid': ACCOUNT, 'status': 'active'}
     monkeypatch.setattr(wa, 'cloud', cloud)
     assert client.put(PATH, headers=owner, json=CONFIG).status_code == 200
     assert client.post(PATH + '/check', headers=owner).status_code == 200
-    enabled = {**CONFIG, 'access_token': '', **{kind: True for kind in wa.KINDS}}
+    enabled = {**CONFIG, 'auth_token': '', **{kind: True for kind in wa.KINDS}}
     assert client.put(PATH, headers=owner, json=enabled).status_code == 200
     assert client.put(PATH + '/users/7', headers=owner, json={'enabled': True}).status_code == 200
     return record, calls, enabled
@@ -65,12 +73,12 @@ def sent(setup):
     return [call for call in setup[1] if call[0] == 'POST']
 
 
-def test_setup_checks_templates_without_sending_and_encrypts_token(client, owner, setup):
+def test_setup_checks_sender_without_sending_and_encrypts_token(client, owner, setup):
     data = client.get(PATH, headers=owner)
     assert data.status_code == 200 and data.json()['verified_at']
-    assert TOKEN not in data.text and 'access_token' not in data.json()
+    assert TOKEN not in data.text and 'auth_token' not in data.json()
     assert not sent(setup)
-    assert len(setup[1]) == 4
+    assert len(setup[1]) == 7
     with SessionLocal() as db:
         row = db.get(wa.Settings, 1)
         assert TOKEN not in row.encrypted_token
@@ -78,16 +86,19 @@ def test_setup_checks_templates_without_sending_and_encrypts_token(client, owner
 
 
 @pytest.mark.parametrize('method', ['card', 'credit', 'extend', 'fib', 'fastpay'])
-def test_confirmed_recharges_once_with_correct_recipient_and_template(client, owner, setup, method):
+def test_confirmed_recharges_once_with_correct_recipient_and_text(client, owner, setup, method):
     event = enqueue(setup[0], method)
     assert enqueue(setup[0], method).id == event.id
     assert deliver(event.id)[0] == 'accepted'
     assert deliver(event.id)[0] == 'accepted'
     assert len(sent(setup)) == 1
     body = sent(setup)[0][2]
-    assert body['to'] == '9647501234567' and body['type'] == 'template'
-    assert body['template']['name'] == 'airlink_recharge'
-    assert [v['text'] for v in body['template']['components'][0]['parameters']][::2] == ['customer', 'transaction-1']
+    assert body['To'] == 'whatsapp:+9647501234567' and body['From'] == 'whatsapp:' + SENDER
+    assert 'MessagingServiceSid' not in body
+    assert body['ContentSid'] == CONTENT['recharge']
+    assert json.loads(body['ContentVariables'])['1'] == 'customer'
+    assert json.loads(body['ContentVariables'])['3'] == 'transaction-1'
+    assert 'Body' not in body
     assert 'PRIVATE' not in json.dumps(body)
     with SessionLocal() as db:
         assert 'customer' not in db.get(wa.Event, event.id).encrypted_payload
@@ -154,12 +165,12 @@ def test_phone_change_requires_new_permission_and_hides_old_history(client, owne
         assert not db.scalar(select(wa.Customer)).enabled
 
 
-def test_meta_cooldown_pauses_without_duplicate_send(client, owner, setup, monkeypatch):
+def test_twilio_cooldown_pauses_without_duplicate_send(client, owner, setup, monkeypatch):
     event = enqueue(setup[0])
     attempts = []
     def limited(*args, **kwargs):
         attempts.append(1)
-        raise wa.CloudError('WhatsApp requested a cooldown.', retry_after=300)
+        raise wa.CloudError('Twilio WhatsApp requested a cooldown.', retry_after=300)
     monkeypatch.setattr(wa, 'cloud', limited)
     assert deliver(event.id)[0] == 'pending'
     assert deliver(event.id)[0] == 'pending'
@@ -189,7 +200,7 @@ def test_sas4_failure_before_send_retries_and_queue_failure_does_not_break_recha
     assert deliver(event.id)[0] == 'pending'
     assert not sent(setup)
     monkeypatch.setattr(wa, 'enqueue', failed)
-    # Confirmed recharge notification entrypoint must absorb a WhatsApp failure.
+    # Confirmed recharge notification entrypoint must absorb a Twilio WhatsApp failure.
     enqueue(setup[0], reference='another-transaction')
 
 
@@ -202,21 +213,24 @@ def test_permissions_and_no_secret_echo(client, owner, setup):
         assert client.post(PATH + '/check', headers=headers).status_code == 403
         assert client.delete(PATH, headers=headers).status_code == 403
     assert client.get(PATH + '/users/7', headers=viewer).status_code == 403
-    response = client.put(PATH, headers=owner, json={**CONFIG, 'access_token': TOKEN + '\n', 'timezone': 'INVALID'})
+    response = client.put(PATH, headers=owner, json={**CONFIG, 'auth_token': TOKEN + '\n', 'timezone': 'INVALID'})
     assert response.status_code == 422 and TOKEN not in response.text
 
 
-@pytest.mark.parametrize('bad', ['unapproved', 'language', 'variables', 'header', 'named'])
-def test_bad_templates_not_verified(client, owner, setup, monkeypatch, bad):
-    def cloud(row, method, path, *, params=None, **kwargs):
-        if not path.endswith('/message_templates'): return {'id': '123456789'}
-        result = templates('recharge')
-        t = result['data'][0]
-        if bad == 'unapproved': t['status'] = 'PENDING'
-        if bad == 'language': t['language'] = 'ar'
-        if bad == 'variables': t['components'][0]['text'] = '{{1}} {{2}}'
-        if bad == 'header': t['components'].append({'type': 'HEADER', 'text': 'Header'})
-        if bad == 'named': t['parameter_format'] = 'NAMED'
+@pytest.mark.parametrize('bad', ['inactive', 'account', 'unapproved', 'template_account', 'variables', 'rich_template'])
+def test_bad_account_or_templates_not_verified(client, owner, setup, monkeypatch, bad):
+    original = wa.cloud
+    def cloud(row, method, path, **kwargs):
+        result = original(row, method, path, **kwargs)
+        if path.startswith('Accounts/'):
+            if bad == 'inactive': result['status'] = 'suspended'
+            if bad == 'account': result['sid'] = 'AC' + '2' * 32
+        elif path.endswith('/ApprovalRequests'):
+            if bad == 'unapproved': result['whatsapp']['status'] = 'pending'
+        elif kwargs.get('content'):
+            if bad == 'template_account': result['account_sid'] = 'AC' + '2' * 32
+            if bad == 'variables': result['variables'] = {'1': 'Example'}
+            if bad == 'rich_template': result['types']['twilio/card'] = {'title': 'Card'}
         return result
     monkeypatch.setattr(wa, 'cloud', cloud)
     result = client.post(PATH + '/check', headers=owner)
@@ -227,7 +241,7 @@ def test_bad_templates_not_verified(client, owner, setup, monkeypatch, bad):
 
 def test_changed_config_requires_recheck_disconnect_cancels_pending(client, owner, setup):
     event = enqueue(setup[0])
-    assert client.put(PATH, headers=owner, json={**setup[2], 'phone_number_id': '11111111'}).status_code == 409
+    assert client.put(PATH, headers=owner, json={**setup[2], 'from_number': '+15559999999'}).status_code == 409
     assert client.delete(PATH, headers=owner).status_code == 200
     with SessionLocal() as db:
         assert db.get(wa.Settings, 1) is None
@@ -275,31 +289,31 @@ def test_actual_confirmed_recharge_hooks_queue_from_managers(client, owner, setu
     assert len(sent(setup)) == 1
 
 
-@pytest.mark.parametrize('response,status,code,ambiguous,retry', [
-    ({'messages':[{'id':'wamid.good'}]},200,None,False,False),
-    ({'error':{'code':190,'message':TOKEN}},400,190,False,False),
-    ({'error':{'code':130429,'message':TOKEN}},400,130429,False,True),
-    ({'error':{'message':TOKEN}},503,None,True,False),
-])
-def test_cloud_transport_fixed_origin_redacted_errors(client, owner, setup, monkeypatch, response, status, code, ambiguous, retry):
+@pytest.mark.parametrize('status,ambiguous,retry', [(201,False,False), (401,False,False), (429,False,True), (503,True,False)])
+def test_cloud_transport_fixed_origin_redacted_errors(client, owner, setup, monkeypatch, status, ambiguous, retry):
+    import base64
+    from urllib.parse import parse_qs
     captured = []
     real_client = httpx.Client
+    response = {'sid': MESSAGE, 'account_sid': ACCOUNT, 'status': 'queued'} if status == 201 else {'message': TOKEN}
     def handler(request):
         captured.append(request)
         return httpx.Response(status, json=response, headers={'Retry-After':'120'})
     monkeypatch.setattr(wa.httpx, 'Client', lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(handler)))
     with SessionLocal() as db:
         row = db.get(wa.Settings, 1)
-        if status == 200:
-            assert real_cloud(row, 'POST', '123456789/messages', body={'test':True}) == response
+        if status == 201:
+            assert real_cloud(row, 'POST', wa.account_path(row) + '/Messages.json', body={'To': 'whatsapp:+9647501234567', 'ContentSid': CONTENT['recharge']}) == response
         else:
             with pytest.raises(wa.CloudError) as caught:
-                real_cloud(row, 'POST', '123456789/messages', body={'test':True})
+                real_cloud(row, 'POST', wa.account_path(row) + '/Messages.json', body={'To': 'whatsapp:+9647501234567', 'ContentSid': CONTENT['recharge']})
             assert TOKEN not in caught.value.detail
             assert caught.value.ambiguous == ambiguous
             assert bool(caught.value.retry_after) == retry
-    assert captured[0].url.host == 'graph.facebook.com'
-    assert captured[0].headers['authorization'] == 'Bearer ' + TOKEN
+    assert captured[0].url.host == 'api.twilio.com'
+    assert captured[0].url.path == '/2010-04-01/Accounts/' + ACCOUNT + '/Messages.json'
+    assert captured[0].headers['authorization'] == 'Basic ' + base64.b64encode((ACCOUNT + ':' + TOKEN).encode()).decode()
+    assert parse_qs(captured[0].content.decode()) == {'To': ['whatsapp:+9647501234567'], 'ContentSid': [CONTENT['recharge']]}
     assert TOKEN not in str(captured[0].url)
 
 
@@ -311,7 +325,7 @@ def test_saving_unchanged_settings_preserves_pending_receipt(client, owner, setu
 
 def test_background_worker_scans_sends_once_and_obeys_shared_lock(client, owner, setup):
     from airlink import api
-    lock = api.cache.lock('whatsapp:operations', timeout=300, blocking=False)
+    lock = api.cache.lock('twilio_whatsapp:operations', timeout=300, blocking=False)
     assert lock.acquire(blocking=False)
     with pytest.raises(wa.HTTPException) as caught:
         wa.tick()
@@ -338,3 +352,118 @@ def test_transport_timeout_leaves_send_unconfirmed(client, owner, setup, monkeyp
     assert status == 'unconfirmed' and 'PRIVATE' not in detail
     deliver(event.id)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('status,expected', [('delivered', 'delivered'), ('read', 'delivered'), ('sent', 'accepted'), ('undelivered', 'failed'), ('failed', 'failed')])
+def test_delivery_receipts_do_not_resend(client, owner, setup, monkeypatch, status, expected):
+    event = enqueue(setup[0])
+    assert deliver(event.id)[0] == 'accepted'
+    reads = []
+    def receipt(row, method, path, **kwargs):
+        assert method == 'GET' and path.endswith('/Messages/' + MESSAGE + '.json')
+        reads.append(path)
+        return {'sid': MESSAGE, 'account_sid': ACCOUNT, 'status': status, 'error_message': TOKEN}
+    monkeypatch.setattr(wa, 'cloud', receipt)
+    with SessionLocal() as db:
+        event = db.get(wa.Event, event.id)
+        wa.refresh_delivery(db, db.get(wa.Settings, 1), event)
+        assert event.status == expected and TOKEN not in event.detail
+        wa.deliver(db, event)
+    assert len(reads) == 1 and len(sent(setup)) == 1
+
+
+def test_receipt_after_sender_change_never_uses_new_credentials(client, owner, setup, monkeypatch):
+    event = enqueue(setup[0]); deliver(event.id)
+    with SessionLocal() as db:
+        row = db.get(wa.Settings, 1)
+        row.version = 'changed'
+        monkeypatch.setattr(wa, 'cloud', lambda *a, **k: pytest.fail('Do not use another sender configuration'))
+        event = db.get(wa.Event, event.id)
+        wa.refresh_delivery(db, row, event)
+        assert event.status == 'accepted'
+
+
+def test_messaging_service_sender_and_unicode_variables(client, owner, setup):
+    service = 'MG' + 'c' * 32
+    config = {**CONFIG, 'from_number': '', 'messaging_service_sid': service}
+    assert client.put(PATH, headers=owner, json=config).status_code == 200
+    assert client.post(PATH + '/check', headers=owner).status_code == 200
+    config.update(auth_token='', recharge=True)
+    assert client.put(PATH, headers=owner, json=config).status_code == 200
+    setup[0]['username'] = 'سڵاو\nکڕیار'
+    assert client.put(PATH + '/users/7', headers=owner, json={'enabled': True}).status_code == 200
+    event = enqueue(setup[0]); assert deliver(event.id)[0] == 'accepted'
+    body = sent(setup)[0][2]
+    assert body['MessagingServiceSid'] == service and 'From' not in body and 'Body' not in body
+    assert json.loads(body['ContentVariables'])['1'] == 'سڵاو کڕیار'
+    assert body['To'] == 'whatsapp:+9647501234567'
+
+
+@pytest.mark.parametrize('changes', [
+    {'account_sid': 'https://malicious.invalid'}, {'auth_token': 'secret\n'},
+    {'from_number': 'whatsapp:+15551234567'}, {'messaging_service_sid': 'MG' + 'c' * 32},
+    {'from_number': ''}, {'recharge_content_sid': 'not-an-HX-SID'},
+    {'expiry_3days_content_sid': ''}, {'expired_content_sid': 'https://malicious.invalid'},
+    {'recharge_message': 'No free-form fallback'},
+])
+def test_invalid_settings_redacted(client, owner, setup, changes):
+    result = client.put(PATH, headers=owner, json={**CONFIG, **changes})
+    assert result.status_code == 422 and TOKEN not in result.text
+    assert not sent(setup)
+
+
+def test_account_change_requires_new_token_and_notifications_start_off(client, owner, setup):
+    assert client.put(PATH, headers=owner, json={**CONFIG, 'account_sid': 'AC'+'2'*32, 'auth_token': ''}).status_code == 422
+    assert client.put(PATH, headers=owner, json={**CONFIG, 'recharge': True}).status_code == 409
+    assert client.get('/api/integrations/whatsapp', headers=owner).status_code == 404
+
+
+@pytest.mark.parametrize('response,expected', [
+    ({'sid': 'wrong', 'account_sid': ACCOUNT, 'status': 'queued'}, 'unconfirmed'),
+    ({'sid': MESSAGE, 'account_sid': 'AC'+'2'*32, 'status': 'queued'}, 'unconfirmed'),
+    ({'sid': MESSAGE, 'account_sid': ACCOUNT, 'status': 'failed'}, 'failed'),
+    ({'sid': MESSAGE, 'account_sid': ACCOUNT, 'status': 'unrecognized'}, 'unconfirmed'),
+])
+def test_unconfirmed_or_failed_provider_submission_not_repeated(client, owner, setup, monkeypatch, response, expected):
+    event = enqueue(setup[0]); calls = []
+    def send(*args, **kwargs):
+        calls.append(1)
+        return response
+    monkeypatch.setattr(wa, 'cloud', send)
+    assert deliver(event.id)[0] == expected
+    deliver(event.id)
+    assert calls == [1]
+
+
+def test_whatsapp_delegation_and_immediate_revocation(client, owner, setup):
+    mid, manager = user(client, owner, 'manager', name='twilio-whatsapp-manager')
+    client.put('/api/integrations/sas4', headers=manager, json=SAS_SETTINGS)
+    policy = {'sections': ['isp_card', 'whatsapp'], 'editable_sections': ['isp_card'], 'deletable_sections': []}
+    assert client.put('/api/users/' + mid + '/sections', headers=owner, json=policy).status_code == 200
+    assert client.get(PATH, headers=manager).status_code == 200
+    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 403
+    policy['editable_sections'].append('whatsapp')
+    assert client.put('/api/users/' + mid + '/sections', headers=owner, json=policy).status_code == 200
+    assert client.put(PATH, headers=manager, json=CONFIG).status_code == 200
+    assert client.post(PATH + '/check', headers=manager).status_code == 200
+    assert client.delete(PATH, headers=manager).status_code == 403
+    policy['editable_sections'] = ['isp_card']
+    assert client.put('/api/users/' + mid + '/sections', headers=owner, json=policy).status_code == 200
+    assert client.get(PATH, headers=owner).json()['account_ready'] is False
+
+
+@pytest.mark.parametrize('option,path,host', [
+    ('content', 'Content/' + CONTENT['recharge'] + '/ApprovalRequests', 'content.twilio.com'),
+    ('messaging', 'Services/MG' + 'c' * 32, 'messaging.twilio.com'),
+])
+def test_provider_checks_use_fixed_twilio_origins(client, owner, setup, monkeypatch, option, path, host):
+    requests = []
+    real_client = httpx.Client
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={'checked': True})
+    monkeypatch.setattr(wa.httpx, 'Client', lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(handler)))
+    with SessionLocal() as db:
+        assert real_cloud(db.get(wa.Settings, 1), 'GET', path, **{option: True}) == {'checked': True}
+    assert requests[0].url.host == host and requests[0].url.path == '/v1/' + path
+    assert requests[0].method == 'GET' and TOKEN not in str(requests[0].url)

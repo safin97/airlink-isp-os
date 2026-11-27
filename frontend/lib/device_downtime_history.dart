@@ -3,6 +3,33 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'api.dart';
 
+class DeviceDowntimeHistoryDialog extends StatelessWidget {
+  const DeviceDowntimeHistoryDialog({
+    super.key,
+    required this.api,
+    required this.device,
+  });
+  final Api api;
+  final Map<String, dynamic> device;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${device['name']} · ${device['ip_address']}'),
+    content: SizedBox(
+      width: 800,
+      child: SingleChildScrollView(
+        child: DeviceDowntimeHistory(api: api, deviceId: device['id']),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+    ],
+  );
+}
+
 class DeviceDowntimeHistory extends StatefulWidget {
   const DeviceDowntimeHistory({
     super.key,
@@ -60,7 +87,7 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
     }
     try {
       final result = await widget.api.request(
-        '/devices/${Uri.encodeComponent(widget.deviceId)}/outages?limit=100',
+        '/devices/${Uri.encodeComponent(widget.deviceId)}/outages?limit=100&include_current=true',
       );
       if (mounted &&
           request == generation &&
@@ -95,7 +122,7 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
   String duration(dynamic value) {
     if (value is! num) return 'Unavailable';
     final seconds = value.toInt();
-    return '${seconds ~/ 86400}d ${(seconds % 86400) ~/ 3600}h ${(seconds % 3600) ~/ 60}m ${seconds % 60}s';
+    return '${seconds ~/ 60} min ${seconds % 60} sec';
   }
 
   @override
@@ -118,7 +145,7 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
         ],
       ),
       const Text(
-        'Completed outages are saved when the device comes back online. Latest 100 outages; times are local.',
+        'Each confirmed outage shows when the device went down and how long it lasted. Latest 100 completed outages plus any ongoing outage; times use your local clock (24-hour).',
       ),
       if (busy) const LinearProgressIndicator(),
       if (error != null)
@@ -129,23 +156,29 @@ class _DeviceDowntimeHistoryState extends State<DeviceDowntimeHistory> {
       if (!busy && error == null && outages.isEmpty)
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 12),
-          child: Text('No completed outages recorded yet.'),
+          child: Text('No confirmed outages recorded yet.'),
         ),
       if (outages.isNotEmpty)
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
             columns: const [
-              DataColumn(label: Text('Offline since')),
+              DataColumn(label: Text('Went down')),
               DataColumn(label: Text('Back online')),
-              DataColumn(label: Text('Downtime')),
+              DataColumn(label: Text('Downtime (minutes)')),
             ],
             rows: outages
                 .map(
                   (outage) => DataRow(
                     cells: [
                       DataCell(Text(timestamp(outage['started_at']))),
-                      DataCell(Text(timestamp(outage['ended_at']))),
+                      DataCell(
+                        Text(
+                          outage['ended_at'] == null
+                              ? 'Still down'
+                              : timestamp(outage['ended_at']),
+                        ),
+                      ),
                       DataCell(Text(duration(outage['duration_seconds']))),
                     ],
                   ),

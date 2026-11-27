@@ -84,6 +84,8 @@ def test_routeros_inventory_resources_and_ap_signal(client, vendor):
             return httpx.Response(200, json={'cpu-load':'18', 'free-memory':'256', 'total-memory':'1024',
                 'uptime':'1w2d3h4m5s', 'version':'7.20', 'board-name':'RouterBoard'})
         if path == '/rest/ppp/active': return httpx.Response(404)
+        if path in ('/rest/interface/wifi/registration-table', '/rest/interface/wifiwave2/registration-table'):
+            return httpx.Response(404)
         raise AssertionError(path)
     values = asyncio.run(device_api.collect_api('192.168.88.1', {
         'api_username':'monitor','api_password':'test','protocol':'https','port':8443},
@@ -146,10 +148,16 @@ def test_inventory_poll_and_freshness(client, owner, monkeypatch, failure):
             metric.collected_at = now() - timedelta(minutes=15)
             db.commit()
         stale = client.get('/api/devices', headers=owner).json()[0]
-        assert stale['api_status'] == 'stale' and stale['telemetry'] == {'ethernet_links': []}
+        assert stale['api_status'] == 'stale' and stale['telemetry'] == result['telemetry']
+        assert set(stale['telemetry_stale_fields']) == set(stale['telemetry'])
     client.put('/api/towers/' + tid, headers=owner, json=settings(api_password='changed-secret'))
     pending = client.get('/api/devices', headers=owner).json()[0]
-    assert pending['api_status'] == 'pending' and pending['telemetry'] == {'ethernet_links': []}
+    assert pending['api_status'] == 'pending'
+    if failure:
+        assert pending['telemetry'] == {'ethernet_links': []}
+    else:
+        assert pending['telemetry'] == result['telemetry']
+        assert set(pending['telemetry_stale_fields']) == set(result['telemetry'])
 
 
 def test_inflight_results_dropped_when_tower_credentials_change(client, owner, monkeypatch):

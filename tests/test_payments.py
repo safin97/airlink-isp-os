@@ -63,11 +63,11 @@ def test_gateway_credentials_are_encrypted_and_scoped(client, owner):
     _, manager = user(client, owner, 'manager', 'other-merchant')
     assert client.get('/api/payments/gateways', headers=manager).status_code == 403
     assert client.get('/api/payments/methods', headers=manager).json() == [
-        {'provider': 'fib', 'configured': True, 'environment': 'sandbox'},
-        {'provider': 'fastpay', 'configured': False, 'environment': 'sandbox'}]
+        {'provider': 'fib', 'configured': True, 'allowed': True, 'environment': 'sandbox'},
+        {'provider': 'fastpay', 'configured': False, 'allowed': True, 'environment': 'sandbox'}]
     assert client.get('/api/payments/methods', headers=owner).json() == [
-        {'provider': 'fib', 'configured': True, 'environment': 'sandbox'},
-        {'provider': 'fastpay', 'configured': False, 'environment': 'sandbox'}]
+        {'provider': 'fib', 'configured': True, 'allowed': True, 'environment': 'sandbox'},
+        {'provider': 'fastpay', 'configured': False, 'allowed': True, 'environment': 'sandbox'}]
     _, viewer = user(client, owner, 'viewer', 'payment-viewer')
     assert client.get('/api/payments/gateways', headers=viewer).status_code == 403
     assert client.put('/api/payments/gateways/fib', headers=owner, json={'merchant_id': 'new-id', 'environment': 'sandbox'}).status_code == 422

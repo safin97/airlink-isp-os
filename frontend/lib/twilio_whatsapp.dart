@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'api.dart';
 
-const whatsappPath = '/integrations/whatsapp';
+const whatsappPath = '/integrations/twilio-whatsapp';
 const whatsappKinds = {
   'recharge': 'After a successful recharge',
   'expiry_3days': 'Three days before expiry',
@@ -16,7 +16,7 @@ Widget whatsappHistory(dynamic events) => Column(
   children: [
     const SizedBox(height: 16),
     const Text(
-      'Recent WhatsApp notifications',
+      'Recent Twilio WhatsApp messaging',
       style: TextStyle(fontWeight: FontWeight.bold),
     ),
     if (events is! List || events.isEmpty) const Text('No notifications yet.'),
@@ -34,24 +34,23 @@ Widget whatsappHistory(dynamic events) => Column(
   ],
 );
 
-class WhatsAppSettings extends StatefulWidget {
-  const WhatsAppSettings({super.key, required this.api});
+class TwilioWhatsAppSettings extends StatefulWidget {
+  const TwilioWhatsAppSettings({super.key, required this.api});
   final Api api;
   @override
-  State<WhatsAppSettings> createState() => _WhatsAppSettingsState();
+  State<TwilioWhatsAppSettings> createState() => _TwilioWhatsAppSettingsState();
 }
 
-class _WhatsAppSettingsState extends State<WhatsAppSettings> {
+class _TwilioWhatsAppSettingsState extends State<TwilioWhatsAppSettings> {
   final fields = <String, TextEditingController>{
     for (final key in [
-      'phone_number_id',
-      'business_account_id',
-      'api_version',
-      'language',
+      'account_sid',
+      'from_number',
+      'messaging_service_sid',
       'timezone',
-      'recharge_template',
-      'expiry_3days_template',
-      'expired_template',
+      'recharge_content_sid',
+      'expiry_3days_content_sid',
+      'expired_content_sid',
     ])
       key: TextEditingController(),
   };
@@ -135,19 +134,22 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
     }
   }
 
-  Widget field(String key, String label, {String? help}) => Padding(
-    padding: const EdgeInsets.only(top: 14),
-    child: TextField(
-      controller: fields[key],
-      enabled: !busy,
-      onChanged: (_) => setState(() => dirty = true),
-      decoration: InputDecoration(
-        labelText: label,
-        helperText: help,
-        helperMaxLines: 4,
-      ),
-    ),
-  );
+  Widget field(String key, String label, {String? help, int lines = 1}) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: TextField(
+          controller: fields[key],
+          minLines: lines,
+          maxLines: lines == 1 ? 1 : 6,
+          enabled: !busy && canEditSection(widget.api.user ?? {}, 'whatsapp'),
+          onChanged: (_) => setState(() => dirty = true),
+          decoration: InputDecoration(
+            labelText: label,
+            helperText: help,
+            helperMaxLines: 4,
+          ),
+        ),
+      );
 
   Future<void> save() async {
     await widget.api.request(
@@ -155,12 +157,12 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
       method: 'PUT',
       body: {
         for (final entry in fields.entries) entry.key: entry.value.text.trim(),
-        'access_token': token.text.trim(),
+        'auth_token': token.text.trim(),
         ...enabled,
       },
     );
     await load();
-    if (mounted) message = 'WhatsApp settings saved.';
+    if (mounted) message = 'Twilio WhatsApp settings saved.';
   }
 
   @override
@@ -168,15 +170,15 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'WhatsApp Business Cloud API',
+        'Twilio WhatsApp messaging',
         style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
       ),
       const SizedBox(height: 8),
       const Text(
-        'Send WhatsApp messages to ISP card customers after recharge, three days before expiry, and when service expires. These are WhatsApp messages, not SMS.',
+        'Send WhatsApp to ISP card customers after recharge, three days before expiry, and when service expires.',
       ),
       const Text(
-        '1. Save your Meta account details with notifications off.\n2. Check connection and approved templates.\n3. Enable the notifications below and save.\n4. Open each ISP card customer → Customer WhatsApp to record permission and enable messages.',
+        '1. Save your Twilio details with notifications off.\n2. Check the connection and templates.\n3. Enable the notifications below and save.\n4. Open each ISP card customer → Customer WhatsApp to record permission and enable messages.',
       ),
       if (busy) const LinearProgressIndicator(),
       if (error != null)
@@ -187,7 +189,7 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
       if (message != null) Text(message!),
       if (data['token_saved'] == true && data['selected_owner'] != true)
         const Text(
-          'Another owner is selected. Enter your own access token to select your owner SAS4 account.',
+          'Another account is selected. Enter your own Twilio Auth Token to select your SAS4 account.',
         ),
       Text(
         data['verified_at'] != null
@@ -200,51 +202,55 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
         Text('Provider cooldown until: ${data['retry_at']}'),
       if (data['last_error'] != null) Text('${data['last_error']}'),
       field(
-        'phone_number_id',
-        'WhatsApp phone number ID',
-        help: 'Meta ID, not your telephone number.',
+        'account_sid',
+        'Twilio Account SID',
+        help: 'Starts with AC. Use the account that owns your WhatsApp sender.',
       ),
-      field('business_account_id', 'WhatsApp Business Account ID'),
+      field(
+        'from_number',
+        'Twilio WhatsApp sender number',
+        help:
+            'Use a WhatsApp-enabled sender in Twilio Console, for example +15551234567. Leave blank for a Messaging Service.',
+      ),
+      field(
+        'messaging_service_sid',
+        'Messaging Service SID (optional)',
+        help:
+            'Starts with MG. Use this instead of a phone number, with a WhatsApp sender in its pool.',
+      ),
       const SizedBox(height: 14),
       TextField(
         controller: token,
-        enabled: !busy,
+        enabled: !busy && canEditSection(widget.api.user ?? {}, 'whatsapp'),
         obscureText: true,
         autocorrect: false,
         enableSuggestions: false,
         onChanged: (_) => setState(() => dirty = true),
         decoration: InputDecoration(
-          labelText: 'System user access token',
+          labelText: 'Twilio Auth Token',
           helperText: data['token_saved'] == true
               ? 'Leave blank to keep your saved token.'
-              : 'Use a token with WhatsApp messaging and management permissions.',
+              : 'Find the Auth Token in Twilio Console. It is stored encrypted.',
         ),
-      ),
-      field('api_version', 'Meta Graph API version'),
-      field(
-        'language',
-        'Approved template language code',
-        help:
-            'For example en_US or ar. Must match the approved template exactly.',
       ),
       field('timezone', 'SAS4 expiry timezone'),
       const SizedBox(height: 20),
       const Text(
-        'Create and approve these templates in WhatsApp Manager. Use a text body with numbered variables only; no header or buttons. An optional static footer is supported. Meta messaging charges and limits apply.',
+        'Create and approve three text templates in Twilio Content Template Builder, then paste their HX Content SIDs below. The template controls the message text and language. Your Twilio sender must be enabled for WhatsApp; provider messaging charges apply.',
       ),
       for (final entry in whatsappKinds.entries) ...[
         field(
-          '${entry.key}_template',
-          '${entry.value} · template name',
+          '${entry.key}_content_sid',
+          '${entry.value} · Content SID',
           help: entry.key == 'recharge'
-              ? '{{1}} = customer account, {{2}} = new expiry, {{3}} = transaction reference.'
-              : '{{1}} = customer account, {{2}} = service expiry.',
+              ? 'HX… template: {{1}} = account, {{2}} = expiry, {{3}} = transaction reference.'
+              : 'HX… template: {{1}} = account, {{2}} = service expiry.',
         ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(entry.value),
           value: enabled[entry.key]!,
-          onChanged: busy
+          onChanged: busy || !canEditSection(widget.api.user ?? {}, 'whatsapp')
               ? null
               : (value) => setState(() {
                   enabled[entry.key] = value;
@@ -258,11 +264,18 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
         runSpacing: 12,
         children: [
           FilledButton(
-            onPressed: !canEditSection(widget.api.user ?? {}, 'whatsapp') || busy ? null : () => run(save),
-            child: const Text('Save WhatsApp settings'),
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'whatsapp') || busy
+                ? null
+                : () => run(save),
+            child: const Text('Save Twilio WhatsApp settings'),
           ),
           OutlinedButton(
-            onPressed: !canEditSection(widget.api.user ?? {}, 'whatsapp') || busy || dirty || data['token_saved'] != true
+            onPressed:
+                !canEditSection(widget.api.user ?? {}, 'whatsapp') ||
+                    busy ||
+                    dirty ||
+                    data['token_saved'] != true
                 ? null
                 : () => run(() async {
                     await widget.api.request(
@@ -272,7 +285,7 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
                     await load();
                     if (mounted) {
                       message =
-                          'Connection and all three templates verified. No message was sent.';
+                          'Twilio account and WhatsApp templates checked. No message was sent.';
                     }
                   }),
             child: const Text('Check connection and templates'),
@@ -282,7 +295,10 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
             child: const Text('Refresh status'),
           ),
           TextButton(
-            onPressed: !canDeleteSection(widget.api.user ?? {}, 'whatsapp') || busy || data['token_saved'] != true
+            onPressed:
+                !canDeleteSection(widget.api.user ?? {}, 'whatsapp') ||
+                    busy ||
+                    data['token_saved'] != true
                 ? null
                 : () async {
                     final confirmed = await showDialog<bool>(
@@ -290,7 +306,7 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
                       builder: (context) => AlertDialog(
                         title: const Text('Disconnect WhatsApp?'),
                         content: const Text(
-                          'Stops queued notifications, removes the saved token and clears customer enrollments. You will need to enable customers again after reconnecting.',
+                          'Stops queued notifications, removes the saved Auth Token and clears customer enrollments. You will need to enable customers again after reconnecting.',
                         ),
                         actions: [
                           TextButton(
@@ -320,7 +336,7 @@ class _WhatsAppSettingsState extends State<WhatsAppSettings> {
       ),
       if (dirty)
         const Text(
-          'Save changes before checking the connection. Turn notifications off before changing credentials or templates.',
+          'Save changes before checking the connection. Turn notifications off before changing credentials, sender or Content SIDs.',
         ),
       whatsappHistory(data['events']),
     ],
@@ -415,12 +431,10 @@ class _CustomerWhatsAppState extends State<CustomerWhatsApp> {
             ),
           Text('Saved customer phone: ${data['phone'] ?? 'No valid phone'}'),
           if (data['configured'] != true)
-            const Text(
-              'An owner must set up My account → WhatsApp notifications first.',
-            ),
+            const Text('Set up My account → Twilio WhatsApp messaging first.'),
           const SizedBox(height: 12),
           const Text(
-            'Enable only after the customer agrees to receive service notifications. Messages use the phone saved in ISP card. Turn this off when the customer asks to stop. A changed phone or customer account requires permission again.',
+            'Enable only after the customer agrees to receive service notifications on WhatsApp. Confirm permission again when switching from the previous Meta integration. Messages use the phone saved in ISP card. Turn this off when the customer asks to stop. A changed phone or customer account requires permission again.',
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -430,7 +444,11 @@ class _CustomerWhatsAppState extends State<CustomerWhatsApp> {
             ),
             value: data['enabled'] == true,
             onChanged:
-                busy || data['configured'] != true || data['phone'] == null
+                busy ||
+                    !canEditSection(widget.api.user ?? {}, 'whatsapp') ||
+                    !canEditSection(widget.api.user ?? {}, 'isp_card') ||
+                    data['configured'] != true ||
+                    data['phone'] == null
                 ? null
                 : (value) => run(enabled: value),
           ),

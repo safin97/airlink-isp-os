@@ -897,8 +897,10 @@ class _Sas4RechargeState extends State<Sas4Recharge> with LanguageRebuild {
                       ),
                     if (bank && gateways[method]?['configured'] != true)
                       AppText(
-                        widget.api.user?['role'] == 'owner'
-                            ? 'Configure this bank for all users in My account → Payment setup.'
+                        gateways[method]?['allowed'] == false
+                            ? 'This payment account is not assigned to you. Ask the owner for access.'
+                            : widget.api.user?['role'] == 'owner'
+                            ? 'Configure this bank and manager access in Payment setup.'
                             : 'This bank is not available yet. Ask the owner to complete Payment setup. You do not need bank credentials.',
                       ),
                     if (bank && gateways[method]?['configured'] == true) ...[

@@ -133,7 +133,7 @@ FEATURE_ROUTES = {
     '/api/payments/gateways': 'payment_gateways',
     '/api/client-portal': 'client_portal',
     '/api/integrations/telegram-account': 'telegram_account',
-    '/api/integrations/whatsapp': 'whatsapp',
+    '/api/integrations/twilio-whatsapp': 'whatsapp',
     '/api/system/pc-updates': 'pc_updates',
     '/api/users': 'managers', '/api/snmp-profile-visibility': 'snmp_sharing',
     '/api/integrations/telegram': 'telegram_notifications',
@@ -242,7 +242,9 @@ def enforce_request(user, method, path, body=None):
         return require(('towers',) if method != 'GET' else ('towers', 'noc'))
     if path.startswith('/api/devices/') and path.endswith('/wireless-clients'):
         return require(('towers', 'noc'))
-    if path.startswith('/api/devices/') and path.endswith(('/metrics', '/interfaces', '/outages')):
+    if path.startswith('/api/devices/') and path.endswith('/outages'):
+        return require(('towers', 'noc', 'monitoring'))
+    if path.startswith('/api/devices/') and path.endswith(('/metrics', '/interfaces')):
         return require(('monitoring',))
     resource = path.removeprefix('/api/').split('/')[0]
     if resource in ('roles', 'access-roles'):

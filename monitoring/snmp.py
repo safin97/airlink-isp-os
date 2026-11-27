@@ -84,8 +84,12 @@ def authentication(credentials):
                        privProtocol={'AES128': USM_PRIV_CFB128_AES, 'DES': USM_PRIV_CBC56_DES}[credentials.get('priv_protocol', 'AES128')])
 
 
+class TableRows(dict):
+    complete = False
+
+
 async def read_table(engine, auth, target, oid, textual=False):
-    rows = {}
+    rows = TableRows()
     # v2 GETBULK avoids one round trip per interface on RouterOS. Older agents
     # that reject bulk requests retain the GETNEXT compatibility path.
     modes = (True, False) if getattr(auth, 'message_processing_model', None) == 1 else (False,)
@@ -117,6 +121,7 @@ async def read_table(engine, auth, target, oid, textual=False):
             if len(rows) >= 256:
                 break
         await iterator.aclose()
+        rows.complete = not failed and len(rows) < 256
         if rows or not failed:
             break
     return rows
@@ -182,6 +187,8 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
         values["interfaces"] = interfaces
         family = "ubiquiti" if vendor in ("ubiquiti", "ubiquiti_m5", "ubiquiti_ac") else vendor
         wireless = {}
+        registration_rows = None
+        counts_complete = False
         if family == 'mimosa':
             total = (await read_table(engine, auth, target, MIMOSA_TOTAL_RX)).get('0')
             if isinstance(total, (int, float)) and -1500 <= total < 0:
@@ -205,6 +212,10 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
             if link_only and name == 'signal_dbm' and wireless.get('station_signal_dbm'):
                 continue
             table = await read_table(engine, auth, target, oid)
+            if name == 'signal_dbm' and family == 'mikrotik':
+                registration_rows = table
+            if name == 'client_count':
+                counts_complete = getattr(table, 'complete', False)
             table = {index: value for index, value in table.items() if
                      (name in ("signal_dbm", "noise_dbm") and -150 <= value < 0) or
                      (name == "frequency_mhz" and 1 <= value <= 65535) or
@@ -225,7 +236,7 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
                 names.update(await read_table(engine, auth, target,
                     '1.3.6.1.4.1.14988.1.1.1.3.1.4', textual=True))
             values['wireless_ssids'] = ssids(names.values())
-            registrations = wireless.get('signal_dbm', {}) if family == 'mikrotik' else (
+            registrations = (registration_rows if registration_rows is not None else {}) if family == 'mikrotik' else (
                 await read_table(engine, auth, target, '1.3.6.1.4.1.41112.1.4.7.1.3')
                 if family == 'ubiquiti' else {})
             clients = []
@@ -243,6 +254,11 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
             if clients or values.get('wireless_clients') == 0:
                 values['wireless_registrations'] = clients
                 values['wireless_registration_source'] = 'SNMP'
+                total = values.get('wireless_clients')
+                values['wireless_registrations_complete'] = bool(
+                    getattr(registrations, 'complete', False) and len(clients) == len(registrations)
+                    and (total is None or total == len(clients))
+                    and (clients or (total == 0 and counts_complete)))
             if clients and 'wireless_clients' not in values:
                 values['wireless_clients'] = len(clients)
         return values

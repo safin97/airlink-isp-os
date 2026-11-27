@@ -16,4 +16,5 @@ test-results/
 .release-secrets/
 .local/
 .tools/
+**/.gradle/
 qemu-preview/
