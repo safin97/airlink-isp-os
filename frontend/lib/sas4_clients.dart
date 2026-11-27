@@ -39,6 +39,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
   Map<String, dynamic>? dashboard;
   bool viewingDashboard = true;
   bool onlineOnly = false;
+  int usersPerPage = 10;
   String currentSearch = '';
   bool get canConnect =>
       widget.api.user?['role'] == 'owner' ||
@@ -112,7 +113,7 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     try {
       final path = viewingDashboard
           ? '/integrations/sas4/dashboard'
-          : '/integrations/sas4/${onlineOnly ? 'online' : 'clients'}?page=$page&search=${Uri.encodeQueryComponent(currentSearch)}';
+          : '/integrations/sas4/${onlineOnly ? 'online' : 'clients'}?page=$page&search=${Uri.encodeQueryComponent(currentSearch)}${onlineOnly ? '&count=$usersPerPage' : ''}';
       final data = Map<String, dynamic>.from(await widget.api.request(path));
       if (!mounted || version != requestVersion) return;
       final previous = viewingDashboard ? dashboard : result;
@@ -338,7 +339,18 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
     required bool ethernet,
     bool ssid = false,
   }) {
-    final links = (row['ethernet_links'] as List?) ?? [];
+    final vendor = row['detected_vendor'] ?? row['vendor'];
+    final port = switch (vendor) {
+      'mikrotik' || 'mikrotik_switch' || 'mikrotik_ccr' => 'ether1',
+      'ubiquiti' || 'ubiquiti_m5' || 'ubiquiti_ac' => 'eth0',
+      _ => null,
+    };
+    final links = ((row['ethernet_links'] as List?) ?? [])
+        .where(
+          (link) =>
+              port == null || link['name']?.toString().toLowerCase() == port,
+        )
+        .toList();
     String speed(num mbps) {
       final amount = mbps >= 1000 ? mbps / 1000 : mbps;
       return '${amount.toString().replaceFirst(RegExp(r'\.0$'), '')} ${mbps >= 1000 ? 'Gbps' : 'Mbps'}';
@@ -571,6 +583,29 @@ class _Sas4ClientsState extends State<Sas4Clients> with LanguageRebuild {
                 icon: const Icon(Icons.refresh, size: 16),
                 label: const AppText('Refresh users'),
               ),
+              if (onlineOnly)
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<int>(
+                    key: const ValueKey('online-users-page-size'),
+                    initialValue: usersPerPage,
+                    decoration: const InputDecoration(
+                      labelText: 'Users per page',
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final count in [10, 25, 50, 100])
+                        DropdownMenuItem(value: count, child: Text('$count')),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (count) {
+                            if (count == null || count == usersPerPage) return;
+                            setState(() => usersPerPage = count);
+                            fetch();
+                          },
+                  ),
+                ),
             ],
           ),
         ],

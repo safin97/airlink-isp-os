@@ -12,6 +12,9 @@ void main() {
     (vendor: 'mikrotik_switch', add: false, profile: 'private'),
     (vendor: 'mikrotik_switch', add: false, profile: null),
     (vendor: 'mikrotik_switch', add: true, profile: null),
+    (vendor: 'mikrotik_ccr', add: false, profile: 'private'),
+    (vendor: 'mikrotik_ccr', add: false, profile: null),
+    (vendor: 'mikrotik_ccr', add: true, profile: null),
     (vendor: 'ubiquiti_ac', add: false, profile: 'private'),
     (vendor: 'mimosa', add: false, profile: 'private'),
     (vendor: 'mimosa', add: false, profile: null),
@@ -118,7 +121,11 @@ void main() {
             ('Tower', 'North'),
             (
               'Vendor',
-              vendor == 'mikrotik_switch' ? 'MikroTik switch' : 'Mimosa',
+              switch (vendor) {
+                'mikrotik_switch' => 'MikroTik switch',
+                'mikrotik_ccr' => 'MikroTik CCR',
+                _ => 'Mimosa',
+              },
             ),
           ]) {
             final dropdown = find.byWidgetPredicate(

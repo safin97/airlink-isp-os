@@ -22,7 +22,7 @@ from . import device_management, device_access, online_device, snmp_visibility, 
 from . import ttlock, ttlock_mobile, ttlock_bridge, towers_device_access, file_restore, download_backups, mega_backups, deye, customer_telegram, telegram_account, recharge_telegram, twilio_whatsapp
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
-from . import card_system, client_portal, device_telemetry
+from . import card_system, client_portal, device_telemetry, ethernet_history
 from . import system_terminal, remote_ssh
 from .models import DeviceTelemetrySnapshot
 from .customer_probes import service as customer_probe_service
@@ -30,7 +30,7 @@ from .customer_collector import service as customer_collector_service
 from .registration_usernames import service as registration_username_service
 from .wireless_clients import registration_state
 from . import snmp_discovery
-from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment, DeviceEthernetDisplay
+from .schemas import SNMPDiscoveryInput, SNMPPublicProfileInput, DeviceSNMPAssignment, DeviceEthernetDisplay, DeviceEthernetResolve
 from .system_stats import service as system_stats_service
 from .vendor_identity import VENDOR_LABELS
 from .config import settings
@@ -1006,6 +1006,7 @@ def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends
     # Ethernet interface tables are standard across vendors and SNMP versions.
     supported = version in ('1', '2', '2c', '3')
     fresh = supported and status == 'connected'
+    source, connection_status = 'SNMP', status
     ports = []
     # Use the latest poll only: failed polls must not reuse old link states or rates.
     values = metric.values if metric and device.last_poll and supported else {}
@@ -1019,14 +1020,73 @@ def device_ethernet_ports(device_id: str, user=Depends(current_user), db=Depends
                       'speed_mbps': port.get('speed_mbps') if fresh and state == 'connected' else None,
                       'rx_bps': port.get('rx_bps') if fresh else None,
                       'tx_bps': port.get('tx_bps') if fresh else None})
+    api_values = metric.values if metric and device.last_poll else {}
+    api_ports = api_values.get('ethernet_port_states')
+    if isinstance(api_ports, list) and (not fresh or not ports):
+        supported = True
+        fresh = bool(device.enabled and api_values.get('api_up') and
+                     (now() - aware(metric.collected_at)).total_seconds() <= device.poll_interval * 3 + 30)
+        source = 'API'
+        connection_status = 'connected' if fresh else 'stale'
+        values = api_values
+        ports = []
+        for port in api_ports:
+            if not isinstance(port, dict) or port.get('type') != 6:
+                continue
+            state = ('disabled' if port.get('admin_status') == 2 else
+                     {1: 'connected', 2: 'disconnected'}.get(port.get('status'), 'unknown')) if fresh else 'unknown'
+            ports.append({'name': port.get('name', ''), 'state': state,
+                          'speed_mbps': port.get('speed_mbps') if fresh and state == 'connected' else None,
+                          'rx_bps': None, 'tx_bps': None})
+    usage = ethernet_history.remember(snapshot.fields if snapshot else {}, api_values,
+                                      metric.collected_at if metric else None, device.ip_address)
+    usage_matches_device = usage.get('address') == device.ip_address
+    usage_fresh = bool(fresh and usage_matches_device and metric and
+                       usage.get('observed_at') == aware(metric.collected_at).isoformat())
+    can_edit = user.role == 'owner' or (
+        (user.role == 'manager' or section_access.role_policy(user, db) is not None)
+        and 'towers' in section_access.editable(user, db))
+    for port in ports:
+        history = usage.get('ports', {}).get(port['name'], {})
+        port.update(usage_status=ethernet_history.status(history) if usage_fresh else 'unknown',
+                    down_since=history.get('down_since'), resolved_at=history.get('resolved_at'),
+                    can_resolve=bool(can_edit and usage_matches_device and history.get('down_since')
+                                     and not history.get('resolved_at')))
     return {'supported': supported, 'snmp_status': status, 'snmp_version': version,
+            'source': source, 'connection_status': connection_status,
             'speed_port': device.ethernet_speed_port,
             'speed_port_choices': device_telemetry.port_choices(device, metric, snapshot),
-            'can_select_speed_port': user.role == 'owner' or (
-                (user.role == 'manager' or section_access.role_policy(user, db) is not None)
-                and 'towers' in section_access.editable(user, db)),
+            'can_select_speed_port': can_edit,
             'collected_at': metric.collected_at if values else None,
             'poll_interval': device.poll_interval, 'ports': ports}
+
+
+@app.post('/api/devices/{device_id}/ethernet-ports/resolve')
+def resolve_ethernet_port(device_id: str, data: DeviceEthernetResolve,
+                          user=Depends(current_user), db=Depends(get_db)):
+    device = check_device(db, user, device_id)
+    check_tower(db, user, device.tower_id, write=True)
+    section_access.require_any(user, ['towers'], db, write=True)
+    snapshot = db.scalar(select(DeviceTelemetrySnapshot).where(
+        DeviceTelemetrySnapshot.device_id == device.id).with_for_update().execution_options(populate_existing=True))
+    metric = db.scalar(select(Metric).where(Metric.device_id == device_id)
+                       .order_by(Metric.collected_at.desc(), Metric.id.desc()).limit(1))
+    fields = dict(snapshot.fields) if snapshot else {}
+    usage = ethernet_history.remember(fields, metric.values if metric and device.last_poll else {},
+                                      metric.collected_at if metric else None, device.ip_address)
+    port = usage.get('ports', {}).get(data.port, {})
+    if (usage.get('address') != device.ip_address or not port.get('used') or
+            port.get('down_since') != data.down_since):
+        raise HTTPException(409, 'This port outage changed. Refresh the port list before resolving it.')
+    port['resolved_at'] = port.get('resolved_at') or now().isoformat()
+    fields[ethernet_history.KEY] = usage
+    fields['ethernet_port_counts'] = ethernet_history.counts_entry(usage)
+    if snapshot:
+        snapshot.fields = fields
+    else:
+        db.add(DeviceTelemetrySnapshot(device_id=device.id, fields=fields))
+    commit(db, user, 'device.ethernet_outage.resolve', f'{device.id}:{data.port}')
+    return {'port': data.port, 'resolved_at': port['resolved_at']}
 
 
 @app.put('/api/devices/{device_id}/ethernet-display')

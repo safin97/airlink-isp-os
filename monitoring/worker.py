@@ -68,7 +68,8 @@ async def poll(device_id, semaphore):
                 if api_config['enabled']:
                     try:
                         api_values = await asyncio.wait_for(collect_api(device.ip_address, api_config,
-                            vendor=values.get('detected_vendor', device.vendor), inventory=True,
+                            vendor=(device.vendor if device.vendor == 'mikrotik_ccr'
+                                    else values.get('detected_vendor', device.vendor)), inventory=True,
                             timeout=device.connection_timeout), timeout=30)
                         detected = merge_vendor(values.get('detected_vendor'), api_values.get('detected_vendor'))
                         if detected != 'generic':

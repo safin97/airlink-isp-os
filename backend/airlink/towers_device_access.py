@@ -70,8 +70,8 @@ def login(device_id: str, data: LoginInput, user=Depends(access), db=Depends(get
     config, source = profiles.selected_configuration(db, user, data.profile_id)
     # Resolve the address from authorized inventory, never from the request body.
     config = {**config, 'transport': config.get('transport', 'web'),
-              'tower_panel': device.vendor in ('mikrotik', 'mikrotik_switch'),
-              'vendor_hint': 'mikrotik' if device.vendor == 'mikrotik_switch' else device.vendor}
+              'tower_panel': device.vendor in ('mikrotik', 'mikrotik_switch', 'mikrotik_ccr'),
+              'vendor_hint': 'mikrotik' if device.vendor in ('mikrotik_switch', 'mikrotik_ccr') else device.vendor}
     try:
         result = asyncio.run(online_device.collect(device.ip_address, config))
     except PermissionError:
@@ -94,7 +94,7 @@ def save_settings(device_id: str, data: tower_routeros.Change, user=Depends(acce
     from .device_management import ManagementError
     section_access.require_any(user, ('towers',), write=True)
     device = api.check_device(db, user, device_id)
-    if device.vendor not in ('mikrotik', 'mikrotik_switch'):
+    if device.vendor not in ('mikrotik', 'mikrotik_switch', 'mikrotik_ccr'):
         raise HTTPException(422, 'Select a MikroTik device to edit RouterOS settings.')
     config, _ = profiles.selected_configuration(db, user, data.profile_id)
     try:

@@ -67,7 +67,7 @@ async def public_vendor(address, config):
 async def probe(address, config):
     from .online_device_auto import detect_and_connect
     from .device_management import ManagementError
-    from .client_telemetry import snmp_readings
+    from .client_telemetry import snmp_readings, customer_ethernet_links
     from monitoring import snmp
     result = {'ethernet_links': [], 'signal_dbm': None, 'ssid': None,
               'telemetry_status': 'credentials_required', 'telemetry_source': None,
@@ -81,13 +81,13 @@ async def probe(address, config):
         try:
             values = await asyncio.wait_for(
                 snmp.collect(address, credentials, 0, vendor='auto', link_only=True), 12)
-            readings = snmp_readings(values)
             vendor = values.get('detected_vendor', 'generic')
             source = 'SNMP'
             if vendor == 'generic':
                 vendor = await public_vendor(address, config)
                 if vendor != 'generic':
                     source = 'Public device page'
+            readings = snmp_readings(values, vendor)
             return {**result, **readings, 'telemetry_status': 'available',
                     'telemetry_source': 'SNMP v' + ('2' if credentials['version'] == '2c' else '1'),
                     'snmp_version': credentials['version'], 'detected_vendor': vendor,
@@ -113,7 +113,6 @@ async def probe(address, config):
             'telemetry_only': True, 'background': True}), PROBE_BUDGET)
         links = [{'name': p['name'], 'speed_mbps': p['speed_mbps']} for p in data.get('ethernet', [])
                  if p.get('speed_mbps') and p.get('status') == 'link-ok']
-        primary = [p for p in links if p['name'].casefold() == 'ether1']
         wireless = data.get('wireless', [])
         signals = [r['signal_dbm'] for r in wireless if r.get('signal_dbm') is not None]
         ssids = {r['ssid'] for r in wireless if r.get('ssid')}
@@ -121,7 +120,7 @@ async def probe(address, config):
         connection = data.get('connection', {})
         source = {'routeros': 'RouterOS API', 'routeros_tls': 'RouterOS API-SSL', 'airos_ssh': 'Ubiquiti SSH'}.get(
             connection.get('transport'), data.get('vendor', 'Device') + ' ' + connection.get('protocol', 'https').upper())
-        result.update(ethernet_links=primary or links, signal_dbm=signals[0] if len(signals) == 1 else None,
+        result.update(ethernet_links=customer_ethernet_links(links, vendor), signal_dbm=signals[0] if len(signals) == 1 else None,
                       ssid=next(iter(ssids)) if len(ssids) == 1 else None, telemetry_status='available',
                       telemetry_source=source, detected_vendor=vendor, vendor_label=VENDOR_LABELS.get(vendor, 'Unknown / Generic'),
                       vendor_detection_source='API', device_reachable=True)

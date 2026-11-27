@@ -59,6 +59,12 @@ def test_background_ready_before_opening_pages_and_new_login(client, owner, monk
     assert result['total'] == 10 and len(result['clients']) == 3
     assert result['clients'][0]['username'] == 'customer-07'
     assert result['collection_status'] == 'available'
+    for count in (10, 25, 50, 100):
+        sized = client.get(f'/api/integrations/sas4/online?count={count}', headers=owner).json()
+        assert sized['per_page'] == count and len(sized['clients']) == 10
+        assert sized['last_page'] == 1
+    for count in (0, 101):
+        assert client.get(f'/api/integrations/sas4/online?count={count}', headers=owner).status_code == 422
     assert 'matches' not in result and 'secret' not in str(result)
     filtered = client.get('/api/integrations/sas4/online?search=customer-08', headers=owner).json()
     assert filtered['total'] == 1 and filtered['clients'][0]['session_id'] == 8

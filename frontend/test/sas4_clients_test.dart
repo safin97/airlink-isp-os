@@ -9,6 +9,134 @@ import 'package:airlink_isp_os/sas4_clients.dart';
 import 'package:airlink_isp_os/sas4_connection.dart';
 
 void main() {
+  testWidgets('Online users page size preserves search and refresh size', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1800, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final requests = <Uri>[];
+    final api = Api(
+      client: MockClient((request) async {
+        if (request.url.path == '/api/integrations/sas4') {
+          return http.Response('{"configured":true}', 200);
+        }
+        requests.add(request.url);
+        return http.Response(
+          jsonEncode({
+            'clients': [],
+            'total': 100,
+            'page': int.parse(request.url.queryParameters['page']!),
+            'last_page': 10,
+            'collection_status': 'available',
+          }),
+          200,
+        );
+      }),
+    )..user = {'role': 'owner'};
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Sas4Clients(api: api, showDashboard: false, showOnline: true),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(requests.last.queryParameters['count'], '10');
+    await tester.enterText(find.byType(TextField), 'Ali');
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(requests.last.queryParameters['page'], '2');
+    await tester.tap(find.byKey(const ValueKey('online-users-page-size')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('50').last);
+    await tester.pumpAndSettle();
+    expect(requests.last.queryParameters, {
+      'page': '1',
+      'search': 'Ali',
+      'count': '50',
+    });
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(requests.last.queryParameters['count'], '50');
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(requests.last.queryParameters, {
+      'page': '2',
+      'search': 'Ali',
+      'count': '50',
+    });
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'Online users speed selects only the vendor port, including retained readings',
+    (tester) async {
+      tester.view.physicalSize = const Size(2400, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var hasPrimary = true;
+      final api = Api(
+        client: MockClient((request) async {
+          if (request.url.path == '/api/integrations/sas4') {
+            return http.Response('{"configured":true}', 200);
+          }
+          return http.Response(
+            jsonEncode({
+              'clients': [
+                for (final vendor in ['mikrotik', 'ubiquiti_ac'])
+                  {
+                    'username': vendor,
+                    'online': true,
+                    'detected_vendor': vendor,
+                    'telemetry_status': 'available',
+                    'telemetry_refreshing': true,
+                    'ethernet_links': [
+                      if (hasPrimary || vendor != 'mikrotik')
+                        {'name': 'ether1', 'speed_mbps': 1000},
+                      {'name': 'ether2', 'speed_mbps': 10},
+                      if (hasPrimary || vendor == 'mikrotik')
+                        {'name': 'eth0', 'speed_mbps': 100},
+                      {'name': 'eth1', 'speed_mbps': 10},
+                    ],
+                  },
+              ],
+              'total': 2,
+              'page': 1,
+              'last_page': 1,
+              'collection_status': 'available',
+            }),
+            200,
+          );
+        }),
+      )..user = {'role': 'owner'};
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Sas4Clients(api: api, showDashboard: false, showOnline: true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('ether1: 1 Gbps'), findsOneWidget);
+      expect(find.text('eth0: 100 Mbps'), findsOneWidget);
+      expect(find.textContaining('ether2:'), findsNothing);
+      expect(find.textContaining('eth1:'), findsNothing);
+      hasPrimary = false;
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('ether1:'), findsNothing);
+      expect(find.textContaining('eth0:'), findsNothing);
+      expect(find.textContaining('ether2:'), findsNothing);
+      expect(find.textContaining('eth1:'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('background warmup, stale results and recovery are explicit', (
     tester,
   ) async {

@@ -172,13 +172,13 @@ void main() {
       await tester.tap(ethernet);
       await tester.pumpAndSettle();
       expect(
-        find.text('3 ports · 1 running · 2 not running · 0 unknown'),
+        find.text('3 ports · 1 running · 2 down · 0 unknown'),
         findsOneWidget,
       );
       expect(find.text('24.000 Mbps'), findsOneWidget);
       expect(find.text('Running'), findsOneWidget);
-      expect(find.text('Not running · Link down'), findsOneWidget);
-      expect(find.text('Not running · Disabled'), findsOneWidget);
+      expect(find.text('Down'), findsOneWidget);
+      expect(find.text('Down · Disabled'), findsOneWidget);
       expect(find.text('Receive traffic (RX)'), findsOneWidget);
       expect(find.text('Transmit traffic (TX)'), findsOneWidget);
       expect(find.text('ether1'), findsOneWidget);
@@ -312,8 +312,9 @@ void main() {
             .onPressed,
         isNotNull,
       );
-      for (final name in ['North online', 'North offline', 'North unknown']) {
-        expect(find.text(name), findsNothing);
+      expect(find.text('North online'), findsNothing);
+      for (final name in ['North offline', 'North unknown']) {
+        expect(find.text(name), findsOneWidget);
       }
       expect(find.text('North stranger'), findsNothing);
       await tester.enterText(find.byType(TextField), 'North offline');

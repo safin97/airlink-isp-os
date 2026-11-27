@@ -27,6 +27,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
   bool dirty = false;
   String? selectedPort;
   String? saveError;
+  String? resolveError;
   bool saved = false;
   int selectionRevision = 0;
   Timer? timer;
@@ -66,7 +67,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && revision == selectionRevision) {
         setState(() {
           error = e.toString();
           data = null;
@@ -108,6 +109,27 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
     }
   }
 
+  Future<void> resolvePort(Map port) async {
+    selectionRevision++;
+    setState(() {
+      saving = true;
+      resolveError = null;
+    });
+    try {
+      await widget.api.request(
+        '/devices/${Uri.encodeComponent(widget.device['id'].toString())}/ethernet-ports/resolve',
+        method: 'POST',
+        body: {'port': port['name'], 'down_since': port['down_since']},
+      );
+      await widget.onChanged?.call();
+    } catch (e) {
+      if (mounted) setState(() => resolveError = e.toString());
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+    if (mounted) await load(quiet: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final ports = (data?['ports'] as List?) ?? [];
@@ -117,24 +139,37 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
     }.toList()..sort();
     const labels = {
       'connected': 'Running',
-      'disconnected': 'Not running · Link down',
-      'disabled': 'Not running · Disabled',
-      'testing': 'Not running · Testing',
-      'dormant': 'Not running · Dormant',
-      'not_present': 'Not running · Not present',
-      'lower_layer_down': 'Not running · Lower layer down',
+      'disconnected': 'Down',
+      'disabled': 'Down · Disabled',
+      'testing': 'Unknown · Testing',
+      'dormant': 'Down · Dormant',
+      'not_present': 'Down · Not present',
+      'lower_layer_down': 'Down · Lower layer down',
       'unknown': 'Unknown',
     };
-    final running = ports.where((p) => p['state'] == 'connected').length;
-    final notRunning = ports
-        .where(
-          (p) =>
-              labels.containsKey(p['state']) &&
-              p['state'] != 'connected' &&
-              p['state'] != 'unknown',
-        )
-        .length;
-    final unknown = ports.length - running - notRunning;
+    String status(Map port) =>
+        port['usage_status'] as String? ??
+        switch (port['state']) {
+          'connected' => 'running',
+          'disconnected' ||
+          'disabled' ||
+          'dormant' ||
+          'not_present' ||
+          'lower_layer_down' => 'down',
+          _ => 'unknown',
+        };
+    String label(Map port) => switch (status(port)) {
+      'running' => 'Running',
+      'unused' => 'Unused',
+      'resolved' => 'Resolved',
+      'down' => labels[port['state']] ?? 'Down',
+      _ => port['state'] == 'testing' ? 'Unknown · Testing' : 'Unknown',
+    };
+    final running = ports.where((p) => status(p) == 'running').length;
+    final down = ports.where((p) => status(p) == 'down').length;
+    final unused = ports.where((p) => status(p) == 'unused').length;
+    final resolved = ports.where((p) => status(p) == 'resolved').length;
+    final unknown = ports.length - running - down - unused - resolved;
     return AlertDialog(
       title: Text('Ethernet ports — ${widget.device['name']}'),
       content: SizedBox(
@@ -158,6 +193,11 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
               if (error != null)
                 Text(
                   error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              if (resolveError != null)
+                Text(
+                  resolveError!,
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               if (data?['can_select_speed_port'] == true) ...[
@@ -204,20 +244,23 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
               ],
               if (data != null && data!['supported'] != true)
                 const Text(
-                  'Assign an SNMP profile in Edit device and enable matching SNMP access on the device to see all reported Ethernet ports.',
+                  'Enable SNMP or supported tower API monitoring to see reported Ethernet ports.',
                 ),
               if (data?['supported'] == true) ...[
-                Text('SNMP: ${data!['snmp_status']}'),
                 Text(
-                  '${ports.length} ports · $running running · $notRunning not running · $unknown unknown',
+                  '${data!['source'] ?? 'SNMP'}: ${data!['connection_status'] ?? data!['snmp_status']}',
+                ),
+                Text(
+                  '${ports.length} ports · $running running · $down down · $unknown unknown'
+                  '${unused > 0 ? ' · $unused unused' : ''}${resolved > 0 ? ' · $resolved resolved' : ''}',
                 ),
                 const Text(
-                  'All reported Ethernet and SFP ports, including disconnected and disabled ports.',
+                  'Down means a previously running port disconnected. Unused ports are excluded. If you moved the cable to another port or switch, mark the old port resolved. It is monitored again when it next runs. Refreshes every 5 seconds after device polling.',
                 ),
                 const SizedBox(height: 8),
                 if (ports.isEmpty)
                   const Text(
-                    'No Ethernet ports reported yet. Check SNMP access and wait for the next poll.',
+                    'No Ethernet ports reported yet. Check monitoring access and wait for the next poll.',
                   ),
                 if (ports.isNotEmpty)
                   SingleChildScrollView(
@@ -226,6 +269,7 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
                       columns: const [
                         DataColumn(label: Text('Port')),
                         DataColumn(label: Text('Status')),
+                        DataColumn(label: Text('Outage')),
                         DataColumn(label: Text('Link speed')),
                         DataColumn(label: Text('Receive traffic (RX)')),
                         DataColumn(label: Text('Transmit traffic (TX)')),
@@ -242,17 +286,30 @@ class _EthernetPortsDialogState extends State<EthernetPortsDialog> {
                                       Icon(
                                         Icons.circle,
                                         size: 10,
-                                        color: switch (p['state']) {
-                                          'connected' => Colors.green,
-                                          'disconnected' => Colors.orange,
-                                          'disabled' => Colors.red,
+                                        color: switch (status(p)) {
+                                          'running' => Colors.green,
+                                          'down' => Colors.red,
+                                          'resolved' => Colors.blue,
                                           _ => Colors.grey,
                                         },
                                       ),
                                       const SizedBox(width: 6),
-                                      Text(labels[p['state']] ?? 'Unknown'),
+                                      Text(label(p)),
                                     ],
                                   ),
+                                ),
+                                DataCell(
+                                  p['can_resolve'] == true
+                                      ? TextButton(
+                                          key: ValueKey(
+                                            'resolve-ethernet-${p['name']}',
+                                          ),
+                                          onPressed: saving
+                                              ? null
+                                              : () => resolvePort(p),
+                                          child: const Text('Mark resolved'),
+                                        )
+                                      : const Text('—'),
                                 ),
                                 DataCell(
                                   Text(

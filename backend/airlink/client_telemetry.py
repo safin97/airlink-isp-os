@@ -12,18 +12,26 @@ def number(value, low, high):
             and math.isfinite(value) and low <= value <= high)
 
 
-def snmp_readings(values):
+def customer_ethernet_links(links, vendor):
+    port = ('ether1' if vendor in ('mikrotik', 'mikrotik_switch', 'mikrotik_ccr') else
+            'eth0' if vendor in ('ubiquiti', 'ubiquiti_m5', 'ubiquiti_ac') else None)
+    if port:
+        return [link for link in links if str(link.get('name', '')).casefold() == port]
+    primary = [link for link in links if str(link.get('name', '')).casefold() == 'ether1']
+    return primary or links
+
+
+def snmp_readings(values, vendor=None):
     links = []
     for index, port in values.get('interfaces', {}).items():
         speed = port.get('speed_mbps')
         if port.get('type') == 6 and port.get('status') == 1 and number(speed, .001, 1e9):
             links.append({'name': str(port.get('name', index))[:120], 'speed_mbps': speed})
-    ether1 = [port for port in links if port['name'].casefold() == 'ether1']
     wireless = values.get('wireless', {})
     signals = wireless.get('station_signal_dbm') or wireless.get('signal_dbm', {})
     strength = next(iter(signals.values())) if len(signals) == 1 else None
     ssids = {value for value in wireless.get('ssid', {}).values() if isinstance(value, str) and value}
-    return {'ethernet_links': ether1 or links,
+    return {'ethernet_links': customer_ethernet_links(links, vendor or values.get('detected_vendor')),
             'signal_dbm': strength if number(strength, -150, -.001) else None,
             'ssid': next(iter(ssids)) if len(ssids) == 1 else None}
 
@@ -63,5 +71,5 @@ def attach_telemetry(db, user, result):
         row['telemetry_status'] = 'available'
         row['device_reachable'] = True
         row['telemetry_source'] = 'SNMP'
-        row.update(snmp_readings(metric.values))
+        row.update(snmp_readings(metric.values, vendor))
     return result

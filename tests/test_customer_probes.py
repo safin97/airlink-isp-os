@@ -229,6 +229,32 @@ def test_refresh_retains_readings_until_replaced_and_keeps_session_isolation(mon
     assert updated['telemetry_stale_fields'] == []
 
 
+@pytest.mark.parametrize('vendor,port', [
+    ('mikrotik', 'ether1'), ('mikrotik_switch', 'ether1'), ('mikrotik_ccr', 'ether1'),
+    ('ubiquiti', 'eth0'), ('ubiquiti_m5', 'eth0'), ('ubiquiti_ac', 'eth0'),
+])
+@pytest.mark.parametrize('source', ['api', 'snmp', 'public_brand'])
+@pytest.mark.parametrize('has_port', [True, False])
+def test_customer_speed_uses_only_vendor_port(monkeypatch, vendor, port, source, has_port):
+    from airlink import online_device_auto
+    ports = [name for name in ('ether1', 'ether2', 'eth0', 'eth1') if has_port or name != port]
+    config = {**LOGIN_CONFIG, 'snmp_candidates': []}
+    if source == 'api':
+        monkeypatch.setattr(online_device_auto, 'detect_and_connect', AsyncMock(return_value={
+            'vendor': vendor, 'detected_vendor': vendor,
+            'ethernet': [{'name': name, 'status': 'link-ok', 'speed_mbps': 1000} for name in ports]}))
+    else:
+        config['snmp_candidates'] = [{'version': '2c', 'community': 'test'}]
+        monkeypatch.setattr(snmp, 'collect', AsyncMock(return_value={
+            'detected_vendor': 'generic' if source == 'public_brand' else vendor,
+            'interfaces': {str(i): {'name': name, 'type': 6, 'status': 1, 'speed_mbps': 1000}
+                           for i, name in enumerate(ports)}}))
+        if source == 'public_brand':
+            monkeypatch.setattr(probes, 'detect_vendor', AsyncMock(return_value=vendor))
+    result = asyncio.run(probes.probe('192.0.2.1', config))
+    assert result['ethernet_links'] == ([{'name': port, 'speed_mbps': 1000}] if has_port else [])
+
+
 def test_authenticated_readings_do_not_use_snmp_or_ping(monkeypatch):
     from airlink import online_device_auto
     collect = AsyncMock(return_value={'vendor':'MikroTik', 'detected_vendor':'mikrotik',

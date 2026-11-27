@@ -128,7 +128,7 @@ async def read_table(engine, auth, target, oid, textual=False):
 
 
 async def collect(address, credentials, retries, vendor="generic", link_only=False, timeout=1):
-    if vendor == 'mikrotik_switch':
+    if vendor in ('mikrotik_switch', 'mikrotik_ccr'):
         vendor = 'mikrotik'
     auth = authentication(credentials)
     engine = SnmpEngine()
@@ -185,6 +185,8 @@ async def collect(address, credentials, retries, vendor="generic", link_only=Fal
                     interface[direction + "_octets"] = table[index]
             interfaces[index] = interface
         values["interfaces"] = interfaces
+        values['ethernet_ports_complete'] = all(
+            getattr(tables[name], 'complete', False) for name in ('if_type', 'if_status'))
         family = "ubiquiti" if vendor in ("ubiquiti", "ubiquiti_m5", "ubiquiti_ac") else vendor
         wireless = {}
         registration_rows = None

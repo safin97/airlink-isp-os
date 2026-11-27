@@ -1308,9 +1308,26 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       x == null ? 'Unavailable' : '$x$suffix';
 
   Widget wirelessClientCount(Map<String, dynamic> device) {
+    if (device['vendor'] == 'mikrotik_ccr') {
+      final count = device['telemetry']?['ppp_active_count'];
+      if (count is! num) {
+        return ethernetPortCount(
+          device,
+          unavailable: 'PPP active: Unavailable',
+        );
+      }
+      return Tooltip(
+        message:
+            'Active PPP sessions\n${telemetryNote(device, 'ppp_active_count')}',
+        child: Text(
+          'PPP active: ${count.toInt()}',
+          key: ValueKey('ppp-active-${device['id']}'),
+        ),
+      );
+    }
     final count = device['telemetry']?['wireless_clients'];
     final counts = device['registration_counts'] as Map?;
-    if (count is! num && counts == null) return const AppText('Unavailable');
+    if (count is! num && counts == null) return ethernetPortCount(device);
     final label = counts == null
         ? (count as num).toInt().toString()
         : 'Online: ${counts['online']}\nOffline: ${counts['offline']}'
@@ -1327,6 +1344,34 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
           builder: (_) => WirelessClientsDialog(api: api, device: device),
         ),
         child: Text(label),
+      ),
+    );
+  }
+
+  Widget ethernetPortCount(
+    Map<String, dynamic> device, {
+    String unavailable = 'Unavailable',
+  }) {
+    final counts = device['telemetry']?['ethernet_port_counts'] as Map?;
+    if (counts == null) return Text(unavailable);
+    return Tooltip(
+      message:
+          'Down counts previously running ports with unresolved disconnections. Unused and resolved ports are excluded. Click to review or resolve a port.\n'
+          '${telemetryNote(device, 'ethernet_port_counts')}',
+      child: TextButton(
+        key: ValueKey('ethernet-count-${device['id']}'),
+        onPressed: () => showDialog<void>(
+          context: context,
+          builder: (_) => EthernetPortsDialog(
+            api: api,
+            device: device,
+            onChanged: () => reload(quiet: true),
+          ),
+        ),
+        child: Text(
+          'Ethernet\nRunning: ${counts['online']} · Down: ${counts['offline']}'
+          '${(counts['unknown'] as num? ?? 0) > 0 ? '\nUnknown: ${counts['unknown']}' : ''}',
+        ),
       ),
     );
   }
@@ -1396,6 +1441,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
   Widget deviceReading(Map<String, dynamic> device, String field) {
     final data = Map<String, dynamic>.from(device['telemetry'] ?? {});
     String reading = 'Unavailable';
+    var ssidFallback = false;
     var speedField = 'ethernet_links';
     String number(num value) => value == value.roundToDouble()
         ? value.toInt().toString()
@@ -1476,8 +1522,18 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
             .join(' · ');
       }
     } else if (field == 'wireless') {
-      final names = (data['wireless_ssids'] as List?) ?? [];
-      if (names.isNotEmpty) reading = names.join(' · ');
+      final names = ((data['wireless_ssids'] as List?) ?? [])
+          .whereType<String>()
+          .where((name) => name.trim().isNotEmpty);
+      if (names.isNotEmpty) {
+        reading = names.join(' · ');
+      } else {
+        final name = (device['name'] as String? ?? '').trim();
+        if (name.isNotEmpty) {
+          reading = name;
+          ssidFallback = true;
+        }
+      }
     } else if (field == 'uptime_seconds' && data[field] is num) {
       final seconds = (data[field] as num).toInt();
       reading =
@@ -1496,12 +1552,15 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
       if (data['telemetry_source'] != null) data['telemetry_source'],
       if (data['device_model'] != null) data['device_model'],
       if (data['firmware_version'] != null) data['firmware_version'],
-      telemetryNote(device, switch (field) {
-        'wireless' => 'wireless_ssids',
-        'mimosa_ethernet_speed' => speedField,
-        'signal_dbm' when data['signal_dbm'] == null => 'weakest_signal_dbm',
-        _ => field,
-      }),
+      if (ssidFallback)
+        'Device name shown because no wireless SSID is available.'
+      else
+        telemetryNote(device, switch (field) {
+          'wireless' => 'wireless_ssids',
+          'mimosa_ethernet_speed' => speedField,
+          'signal_dbm' when data['signal_dbm'] == null => 'weakest_signal_dbm',
+          _ => field,
+        }),
     ].join('\n');
     return Tooltip(
       message: details,
@@ -2214,6 +2273,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
                                     [
                                       'mikrotik',
                                       'mikrotik_switch',
+                                      'mikrotik_ccr',
                                     ].contains(row['vendor']) &&
                                     (owner ||
                                         role == 'manager' ||
@@ -2934,6 +2994,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
               Option('generic', 'Auto detect (SNMP / API)'),
               Option('mikrotik', 'MikroTik'),
               Option('mikrotik_switch', 'MikroTik switch'),
+              Option('mikrotik_ccr', 'MikroTik CCR'),
               Option('ubiquiti', 'Ubiquiti (other airMAX)'),
               Option('ubiquiti_m5', 'Ubiquiti airMAX M5'),
               Option('ubiquiti_ac', 'Ubiquiti airMAX AC'),
@@ -3692,6 +3753,7 @@ class _ResourceDialogState extends State<ResourceDialog> with LanguageRebuild {
     final preset = switch (values['vendor']) {
       'mimosa' => publicV2cProfile,
       'mikrotik_switch' => publicV2cProfile,
+      'mikrotik_ccr' => publicV2cProfile,
       _ => null,
     };
     if (preset != null &&

@@ -1,14 +1,29 @@
 """Last known display readings. Never substitute these for live monitoring samples."""
 import math
+from sqlalchemy import select
+from . import ethernet_history
 from .models import DeviceTelemetrySnapshot
 from .security import aware
 from .wireless_clients import HISTORY_KEY, remember_clients
 
 FIELDS = ('cpu_percent', 'memory_percent', 'uptime_seconds', 'ethernet_links',
           'signal_dbm', 'weakest_signal_dbm', 'wireless_clients', 'radio_frequencies_mhz',
-          'wireless_ssids', 'firmware_version', 'device_model', 'telemetry_source')
+          'wireless_ssids', 'firmware_version', 'device_model', 'telemetry_source', 'ppp_active_count',
+          'ethernet_port_counts')
 PORT_HISTORY_KEY = '_ethernet_port_history'
 AUTO_PORT_KEY = '_ethernet_auto'
+
+
+def count_ethernet_ports(ports):
+    counts = {'online': 0, 'offline': 0, 'unknown': 0}
+    for port in ports:
+        if not isinstance(port, dict) or port.get('type') != 6:
+            continue  # Physical Ethernet/SFP only, not radios, VLANs or bridges.
+        state = ('offline' if port.get('admin_status') == 2 else
+                 'online' if port.get('status') == 1 else
+                 'offline' if port.get('status') in (2, 5, 6, 7) else 'unknown')
+        counts[state] += 1
+    return counts if sum(counts.values()) else None
 
 
 def automatic_port(ports, observed, previous=None):
@@ -58,6 +73,17 @@ def readings(values, vendor, previous=None):
     if states and not any(states) and values.get('api_status') != 'connected':
         return {}
     result = {key: values[key] for key in FIELDS if key in values and values[key] is not None}
+    if (isinstance(values.get('interfaces'), dict) and values.get('snmp_up') is not False
+            and values.get('ethernet_ports_complete') is not False):
+        counts = count_ethernet_ports(values['interfaces'].values())
+        if counts:
+            result['ethernet_port_counts'] = counts
+    if 'ethernet_port_counts' in result:
+        counts = result['ethernet_port_counts']
+        if (not isinstance(counts, dict) or any(
+                isinstance(counts.get(key), bool) or not isinstance(counts.get(key), int) or counts[key] < 0
+                for key in ('online', 'offline', 'unknown'))):
+            result.pop('ethernet_port_counts')
     if 'interfaces' in values and 'ethernet_links' not in result:
         result['ethernet_links'] = [{'name': port.get('name', index), 'speed_mbps': port['speed_mbps']}
             for index, port in values['interfaces'].items()
@@ -82,6 +108,10 @@ def readings(values, vendor, previous=None):
         count = result['wireless_clients']
         if isinstance(count, bool) or not isinstance(count, (int, float)) or not math.isfinite(count) or count < 0:
             result.pop('wireless_clients')
+    if 'ppp_active_count' in result:
+        count = result['ppp_active_count']
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            result.pop('ppp_active_count')
     if 'ethernet_links' in result:
         links = result['ethernet_links']
         links = [port for port in links if isinstance(port, dict)
@@ -101,15 +131,19 @@ def readings(values, vendor, previous=None):
 
 
 def remember(db, device, values, timestamp):
-    snapshot = db.get(DeviceTelemetrySnapshot, device.id)
+    # Serialize snapshot updates with port-outage acknowledgements.
+    snapshot = db.scalar(select(DeviceTelemetrySnapshot).where(
+        DeviceTelemetrySnapshot.device_id == device.id).with_for_update().execution_options(populate_existing=True))
     # Resetting live monitoring after an edit must not erase display history.
     fields = dict(snapshot.fields) if snapshot else {}
+    ethernet = ethernet_history.remember(fields, values, timestamp, device.ip_address)
     history = remember_clients(fields.get(HISTORY_KEY), values, timestamp, device.ip_address)
     if history:
         fields[HISTORY_KEY] = history
     if values.get('icmp_up') or values.get('snmp_up') or values.get('api_up'):
         vendor = device.vendor if device.vendor != 'generic' else values.get('detected_vendor', 'generic')
         current = readings(values, vendor, fields)
+        current.pop('ethernet_port_counts', None)
         observed = readings(values, vendor)
         ports = port_history(fields, observed, timestamp, device.ip_address)
         if ports:
@@ -120,6 +154,10 @@ def remember(db, device, values, timestamp):
         fields.update({key: {'value': value, 'observed_at': aware(timestamp).isoformat(),
                             'address': device.ip_address}
                        for key, value in current.items()})
+    fields.pop('ethernet_port_counts', None)
+    if ethernet:
+        fields[ethernet_history.KEY] = ethernet
+        fields['ethernet_port_counts'] = ethernet_history.counts_entry(ethernet)
     if snapshot:
         if snapshot.fields != fields:
             snapshot.fields = fields
@@ -129,8 +167,19 @@ def remember(db, device, values, timestamp):
 
 def display(device, metric, snapshot, fresh, vendor):
     fields = dict(snapshot.fields) if snapshot else {}
+    ethernet = ethernet_history.remember(fields, metric.values if metric and device.last_poll else {},
+                                         metric.collected_at if metric else None, device.ip_address)
+    fields.pop(ethernet_history.KEY, None)
+    fields.pop('ethernet_port_counts', None)
     fields.pop(HISTORY_KEY, None)
     current = readings(metric.values, vendor, fields) if metric and device.last_poll else {}
+    current.pop('ethernet_port_counts', None)
+    entry = ethernet_history.counts_entry(ethernet)
+    if entry:
+        fields['ethernet_port_counts'] = entry
+        if (metric and device.last_poll and ethernet_history.observations(metric.values)
+                and entry['observed_at'] == aware(metric.collected_at).isoformat()):
+            current['ethernet_port_counts'] = entry['value']
     observed = readings(metric.values, vendor) if metric and device.last_poll else {}
     ports = port_history(fields, observed, metric.collected_at if metric else None, device.ip_address)
     automatic = automatic_port(ports, observed, fields.pop(AUTO_PORT_KEY, None))

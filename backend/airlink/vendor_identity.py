@@ -2,6 +2,7 @@
 import re
 
 VENDOR_LABELS = {'generic':'Unknown / Generic', 'mikrotik':'MikroTik', 'mikrotik_switch':'MikroTik switch',
+    'mikrotik_ccr':'MikroTik CCR',
     'ubiquiti':'Ubiquiti', 'ubiquiti_m5':'Ubiquiti airMAX M5',
     'ubiquiti_ac':'Ubiquiti airMAX AC', 'mimosa':'Mimosa',
     'tenda':'Tenda', 'tplink':'TP-Link', 'ruijie':'Ruijie / Reyee', 'hikvision':'Hikvision'}

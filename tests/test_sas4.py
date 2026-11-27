@@ -191,13 +191,13 @@ def test_dashboard_and_online_routes_are_scoped_to_signed_in_manager(client, own
     def dashboard(connection, password):
         assert connection.user_id == first_id and password == SETTINGS['password']
         return {'total_users': 120}
-    def online(connection, password, page, search, online):
+    def online(connection, password, page, search, online, count):
         assert connection.user_id == first_id and password == SETTINGS['password']
-        assert online and page == 2 and search == 'Ali'
+        assert online and page == 2 and search == 'Ali' and count == 50
         return {'clients': [], 'total': 0}
     monkeypatch.setattr(sas4, 'fetch_dashboard', dashboard)
     monkeypatch.setattr(sas4, 'fetch_clients', online)
-    for route in ('dashboard', 'online?page=2&search=Ali'):
+    for route in ('dashboard', 'online?page=2&search=Ali&count=50'):
         path = '/api/integrations/sas4/' + route
         assert client.get(path, headers=first).status_code == 200
         assert client.get(path, headers=second).status_code == 409

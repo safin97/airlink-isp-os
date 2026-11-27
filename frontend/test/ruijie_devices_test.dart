@@ -87,8 +87,8 @@ void main() {
       expect(find.text('LAN1'), findsOneWidget);
       expect(find.text('LAN2'), findsOneWidget);
       expect(find.text('LAN3'), findsOneWidget);
-      expect(find.text('Not running · Link down'), findsOneWidget);
-      expect(find.text('Not running · Disabled'), findsOneWidget);
+      expect(find.text('Down'), findsOneWidget);
+      expect(find.text('Down · Disabled'), findsOneWidget);
       expect(find.textContaining('MikroTik'), findsNothing);
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
@@ -130,6 +130,11 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text('Bridge SSID'), findsNothing);
+      expect(find.text('RG-EST450G'), findsOneWidget);
+      expect(
+        find.byTooltip(RegExp('Device name shown because no wireless SSID')),
+        findsOneWidget,
+      );
       expect(find.text('-63 dBm'), findsNothing);
       expect(
         find.byKey(const ValueKey('wireless-clients-reyee')),

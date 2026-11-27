@@ -6,6 +6,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from .vendor_identity import identify_vendor
 from .wireless_clients import public_clients, ssids, username_map, mac_address
+from .device_telemetry import count_ethernet_ports
 
 MAX_RESPONSE = 1024 * 1024
 
@@ -77,7 +78,7 @@ def resource_values(resource):
     return values
 
 
-async def routeros(client, base, credentials, inventory=False):
+async def routeros(client, base, credentials, inventory=False, ppp_active=False):
     auth = httpx.BasicAuth(credentials['api_username'], credentials['api_password'])
     read_status = {}
     async def read(path, payload=None):
@@ -89,7 +90,7 @@ async def routeros(client, base, credentials, inventory=False):
         if status != 200:
             return None
         return json.loads(raw)
-    interfaces = await read('interface/ethernet?.proplist=.id,name')
+    interfaces = await read('interface/ethernet?.proplist=.id,name,running,disabled')
     if not isinstance(interfaces, list):
         raise ValueError('Not a RouterOS REST API')
     links = []
@@ -107,9 +108,9 @@ async def routeros(client, base, credentials, inventory=False):
     registered = {}
     registered_macs = set()
     largest_reported_count = 0
-    for path, field in (('interface/wireless/registration-table', 'signal-strength'),
+    for path, field in (() if ppp_active else (('interface/wireless/registration-table', 'signal-strength'),
                         ('interface/wifi/registration-table', 'signal'),
-                        ('interface/wifiwave2/registration-table', 'signal')):
+                        ('interface/wifiwave2/registration-table', 'signal'))):
         data = await read(path)
         if inventory and not isinstance(data, list):
             # A missing radio API is normal; a failed existing API is not an
@@ -153,6 +154,31 @@ async def routeros(client, base, credentials, inventory=False):
     result = {'ethernet_links': links, 'signal_dbm': strength, 'telemetry_source': 'RouterOS API',
               'detected_vendor': 'mikrotik', 'vendor_detection_source': 'API'}
     if inventory:
+        port_states = [
+            {'type': 6, 'name': str(port.get('name', port.get('.id', '')))[:120],
+             'admin_status': 2 if port.get('disabled') in (True, 'true') else 1,
+             'status': (1 if port.get('running') in (True, 'true') else
+                        2 if port.get('running') in (False, 'false') else None)}
+            for port in interfaces if isinstance(port, dict)]
+        speeds = {port['name']: port['speed_mbps'] for port in links}
+        for port in port_states:
+            if port['name'] in speeds:
+                port['speed_mbps'] = speeds[port['name']]
+        result['ethernet_port_states'] = port_states
+        counts = count_ethernet_ports(port_states)
+        if counts:
+            result['ethernet_port_counts'] = counts
+        if ppp_active:
+            try:
+                # Count sessions, including repeated usernames and non-PPPoE
+                # services. Never query PPP secrets or infer zero on failure.
+                active = await read('ppp/active?.proplist=.id')
+                if isinstance(active, list) and all(
+                        isinstance(row, dict) and isinstance(row.get('.id'), str) and row['.id']
+                        for row in active):
+                    result['ppp_active_count'] = len(active)
+            except (PermissionError, httpx.HTTPError, ValueError, TypeError):
+                pass  # Keep resource/link telemetry when PPP is inaccessible.
         if 'wireless_registrations' in wireless_values:
             wireless_values['wireless_registrations_complete'] = registration_complete and len(registered) <= 256
         result.update(wireless_values)
@@ -205,6 +231,20 @@ def airos_values(data, inventory=False):
               'vendor_detection_source': 'API'}
     if inventory:
         host = data.get('host') if isinstance(data.get('host'), dict) else {}
+        port_states = [
+            {'type': 6, 'name': port['ifname'], 'status': (1 if port['status'].get('plugged') in (1, True, '1') else
+                                  2 if port['status'].get('plugged') in (0, False, '0') else None)}
+            for port in ports if isinstance(port, dict)
+            and isinstance(port.get('ifname'), str) and re.fullmatch(r'eth\d+', port['ifname'])
+            and isinstance(port.get('status'), dict)]
+        speeds = {port['name']: port['speed_mbps'] for port in links}
+        for port in port_states:
+            if port['name'] in speeds:
+                port['speed_mbps'] = speeds[port['name']]
+        result['ethernet_port_states'] = port_states
+        counts = count_ethernet_ports(port_states)
+        if counts:
+            result['ethernet_port_counts'] = counts
         result['wireless_ssids'] = ssids([wireless.get('essid') or wireless.get('ssid')])
         stations = data.get('sta')
         if isinstance(stations, list):
@@ -246,7 +286,8 @@ async def airos(client, base, credentials, inventory=False):
 
 
 async def collect_api(address, credentials, vendor='generic', transport=None, inventory=False, timeout=None):
-    if vendor == 'mikrotik_switch':
+    ppp_active = vendor == 'mikrotik_ccr'
+    if vendor in ('mikrotik_switch', 'mikrotik_ccr'):
         vendor = 'mikrotik'
     host = '[' + address + ']' if ':' in address else address
     schemes = [credentials['protocol']] if credentials.get('protocol') in ('http', 'https') else (['https', 'http'] if credentials.get('protocol') == 'both' or credentials.get('allow_http') else ['https'])
@@ -266,7 +307,7 @@ async def collect_api(address, credentials, vendor='generic', transport=None, in
                         kind = 'ubiquiti'
                 # Authentication is sent only after a supported device is identified.
                 if kind == 'mikrotik':
-                    return await routeros(client, base, credentials, inventory=inventory)
+                    return await routeros(client, base, credentials, inventory=inventory, ppp_active=ppp_active)
                 if kind == 'ubiquiti':
                     return await airos(client, base, credentials, inventory=inventory)
             except PermissionError:

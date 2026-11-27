@@ -390,17 +390,18 @@ def get_online_count(user=Depends(sas4_access), db=Depends(get_db)):
 
 @router.get('/online')
 def get_online_users(page: int = Query(1, ge=1, le=1000000), search: str = Query('', max_length=200),
+                     count: int = Query(7, ge=1, le=100),
                      user=Depends(sas4_access), db=Depends(get_db)):
     connection = db.get(SAS4UserConnection, user.id)
     if not connection:
         raise HTTPException(409, 'Configure the SAS4 connection first')
     from .online_sessions import service as sessions
     if sessions.running:
-        result = sessions.page(db, user, page, search)
+        result = sessions.page(db, user, page, search, count=count)
         return customer_probe_service.enrich(db, user, result, schedule=False)
     try:
         password = cipher().decrypt(connection.encrypted_password.encode()).decode()
-        result = fetch_clients(connection, password, page, search, online=True)
+        result = fetch_clients(connection, password, page, search, count=count, online=True)
         return customer_probe_service.enrich(db, user, result)
     except InvalidToken as exc:
         raise HTTPException(503, 'SAS4 credentials cannot be decrypted. Save the password again.') from exc

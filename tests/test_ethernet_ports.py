@@ -61,6 +61,42 @@ def test_ports_states_freshness_and_scope(client, owner, condition, vendor):
     assert client.get('/api/devices/'+did+'/ethernet-ports').status_code == 401
 
 
+@pytest.mark.parametrize('source', ['snmp', 'api'])
+def test_cable_move_updates_ports_and_automatic_speed(client, owner, source):
+    from test_ethernet_display import create, poll
+    tid = tower(client, owner)
+    did = create(client, owner, tid)
+    if source == 'snmp':
+        profile = client.post('/api/snmp-profiles', headers=owner, json={
+            'name': 'Ports', 'version': '2c', 'community': 'test'}).json()['id']
+        with SessionLocal() as db:
+            db.get(Device, did).snmp_profile_id = profile
+            db.commit()
+    stamp = now() - timedelta(seconds=10)
+    for moved in (False, True):
+        ports = [{'type': 6, 'name': 'ether1', 'status': 2 if moved else 1, 'speed_mbps': 1000},
+                 {'type': 6, 'name': 'ether2', 'status': 1 if moved else 2, 'speed_mbps': 100}]
+        values = ({'snmp_up': True, 'interfaces': {str(i+1): p for i, p in enumerate(ports)}}
+                  if source == 'snmp' else {'api_up': True, 'ethernet_port_states': ports,
+                      'ethernet_links': [{'name': p['name'], 'speed_mbps': p['speed_mbps']}
+                                         for p in ports if p['status'] == 1]})
+        poll(did, values, stamp + timedelta(seconds=int(moved)))
+        result = client.get('/api/devices/' + did + '/ethernet-ports', headers=owner).json()
+        assert result['supported'] is True
+        assert [p['name'] for p in result['ports']] == ['ether1', 'ether2']
+        assert [p['state'] for p in result['ports']] == (
+            ['disconnected', 'connected'] if moved else ['connected', 'disconnected'])
+        row = client.get('/api/devices', headers=owner).json()[0]
+        assert row['ethernet_auto']['name'] == ('ether2' if moved else 'ether1')
+    with SessionLocal() as db:
+        db.get(Device, did).last_poll = now() - timedelta(hours=1)
+        for metric in db.query(Metric).filter(Metric.device_id == did):
+            metric.collected_at = now() - timedelta(hours=1)
+        db.commit()
+    stale = client.get('/api/devices/' + did + '/ethernet-ports', headers=owner).json()
+    assert all(p['state'] == 'unknown' and p['speed_mbps'] is None for p in stale['ports'])
+
+
 @pytest.mark.parametrize('vendor', ['mikrotik', 'mikrotik_switch'])
 def test_snmp_switch_includes_down_disabled_and_unnamed_ports(monkeypatch, vendor):
     tables = {
