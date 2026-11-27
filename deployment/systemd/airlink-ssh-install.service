@@ -1,0 +1,10 @@
+[Unit]
+Description=AirLink OpenSSH component installation
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/airlink/installed
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/airlink/os/console/remote_ssh.py install
+TimeoutStartSec=3600
+UMask=0077

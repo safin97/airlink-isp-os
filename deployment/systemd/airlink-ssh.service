@@ -1,0 +1,21 @@
+[Unit]
+Description=AirLink owner SSH access on port 2742
+After=network.target nftables.service
+Requires=nftables.service
+PartOf=nftables.service
+ConditionPathExists=/etc/airlink/installed
+ConditionPathExists=/etc/airlink/sshd_config
+[Service]
+Type=simple
+RuntimeDirectory=airlink-ssh
+RuntimeDirectoryMode=0755
+ExecStartPre=/usr/bin/install -d -m 0755 /run/sshd
+ExecStartPre=/usr/bin/python3 /opt/airlink/os/console/remote_ssh.py firewall
+ExecStartPre=/usr/sbin/sshd -t -f /etc/airlink/sshd_config
+ExecStart=/usr/sbin/sshd -D -e -f /etc/airlink/sshd_config
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=10
+[Install]
+WantedBy=multi-user.target

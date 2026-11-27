@@ -63,6 +63,20 @@ mega_backups = MegaBackupService(local_root, archive=local_archive, enabled=args
                                 restore_validate=local_restore.validate, restore_apply=local_restore.stage)
 
 def preview_broker(action, payload=None):
+    if action.startswith('ssh.'):
+        if action == 'ssh.password.prepare':
+            return {'prepared': False}
+        reason = 'SSH access runs on the installed AirLink Linux PC. It is unavailable in preview.'
+        if action == 'ssh.status':
+            return {'supported': False, 'server_installed': False, 'enabled': False,
+                    'active': False, 'sources': [], 'port': 2742, 'username': 'airlink-admin',
+                    'install': {'status': 'idle'}, 'reason': reason}
+        raise HTTPException(409, reason)
+    if action.startswith('terminal.'):
+        reason = 'The system terminal runs on the installed AirLink Linux PC. It is unavailable in preview.'
+        if action == 'terminal.status':
+            return {'supported': False, 'reason': reason}
+        raise HTTPException(409, reason)
     if action.startswith('vpn.'):
         reason = 'VPN connections run on the installed AirLink Linux PC. This local preview cannot connect a VPN.'
         if action == 'vpn.status':

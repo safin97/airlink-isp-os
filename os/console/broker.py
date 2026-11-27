@@ -1,4 +1,7 @@
-"""Root Unix socket, peer-credential checked, fixed allowlist; no shell payloads."""
+"""Root Unix socket, peer-credential checked, fixed action dispatch.
+
+The terminal action is an explicit owner-authenticated root shell channel.
+"""
 import json
 import os
 import pwd
@@ -17,6 +20,8 @@ from updates.update import action as update_action, restart_system
 from updates.pc import action as pc_update_action
 from console.gpu import detect as detect_gpus
 from console.driver_health import collect as collect_driver_health
+from console.web_terminal import service as terminal_service
+from console.remote_ssh import action as ssh_action
 from cloud_backups.download import service as download_backup_service
 from cloud_backups.mega_service import service as mega_backup_service
 
@@ -101,6 +106,10 @@ class Handler(socketserver.StreamRequestHandler):
                 result = diagnostics()
             elif name == "system.restart":
                 result = restart_system(payload)
+            elif name.startswith('terminal.'):
+                result = terminal_service.action(name.split('.', 1)[1], payload)
+            elif name.startswith('ssh.'):
+                result = ssh_action(name.split('.', 1)[1], payload)
             elif name.startswith("pc-updates."):
                 result = pc_update_action(name.split('.', 1)[1], payload)
             elif name.startswith("backups.downloads."):

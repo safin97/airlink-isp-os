@@ -7,6 +7,7 @@ import 'api.dart';
 import 'app_language.dart';
 import 'pc_updates.dart';
 import 'driver_health.dart';
+import 'system_terminal.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key, required this.api});
@@ -142,6 +143,11 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             _summary('Storage', resources['storage_percent'], '%'),
             _summary('Update state', update['status'] ?? 'unknown', ''),
           ],
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SystemTerminalButton(api: widget.api),
         ),
         const SizedBox(height: 16),
         DriverHealth(

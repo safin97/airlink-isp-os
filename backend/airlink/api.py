@@ -23,6 +23,7 @@ from . import ttlock, ttlock_mobile, ttlock_bridge, towers_device_access, file_r
 from .deye_monitor import service as deye_monitor_service
 from . import __version__, discovery, sas4, payments, tower_api, section_access, manager_places, access_roles, manager_parents, sas4_reports
 from . import card_system, client_portal, device_telemetry
+from . import system_terminal, remote_ssh
 from .models import DeviceTelemetrySnapshot
 from .customer_probes import service as customer_probe_service
 from .customer_collector import service as customer_collector_service
@@ -100,6 +101,8 @@ app.include_router(card_system.router)
 app.include_router(client_portal.router)
 app.include_router(client_portal.settings_router)
 app.include_router(access_roles.router)
+app.include_router(system_terminal.router)
+app.include_router(remote_ssh.router)
 
 
 @app.middleware("http")
@@ -112,6 +115,9 @@ async def headers(request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def safe_device_login_validation(request, exc):
+    if request.url.path.startswith(('/api/system/terminal', '/api/system/ssh')):
+        return JSONResponse(status_code=422, content={'detail': 'Invalid remote access request'},
+                            headers={'Cache-Control': 'no-store'})
     if request.url.path.startswith('/api/client'):
         return JSONResponse(status_code=422, content={'detail': 'Check the sign-in or recharge details and try again.'})
     if request.url.path.startswith('/api/card-system'):
@@ -326,14 +332,25 @@ def me(user=Depends(current_user)):
 @app.put("/api/auth/password")
 def change_password(data: PasswordChange, credentials=Depends(bearer), user=Depends(current_user), db=Depends(get_db)):
     limited("password-change:" + user.id, limit=8)
+    db.refresh(user, with_for_update=True)
     if not verify_password(data.current_password, user.password_hash):
         raise HTTPException(403, "Current password is incorrect")
     claims = jwt.decode(credentials.credentials, settings.secret, algorithms=["HS256"],
                         audience="airlink-dashboard", issuer="airlink")
+    prepared = broker('ssh.password.prepare', {'owner_id': user.id, 'ssh_password': data.new_password}) if user.role == 'owner' else {}
     user.password_hash = hasher.hash(data.new_password)
     db.execute(update(LoginSession).where(LoginSession.user_id == user.id,
         LoginSession.id != claims['sid']).values(revoked=True))
     commit(db, user, "auth.password_change", user.id)
+    if prepared.get('prepared'):
+        try:
+            broker('ssh.password.finish', {'owner_id': user.id, 'token': prepared['token'],
+                                         'ssh_password': data.new_password})
+        except Exception:
+            # The dashboard password is committed. The SSH account stays locked
+            # if synchronization fails; never silently retain the old credential.
+            return {'ok': True, 'ssh_sync_pending': True,
+                    'message': 'Your login password changed. SSH password synchronization needs attention. Open Settings → SSH remote access and save using your new login password.'}
     return {"ok": True}
 
 

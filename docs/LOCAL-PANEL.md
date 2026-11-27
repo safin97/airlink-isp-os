@@ -12,7 +12,7 @@ The local display opens **PC settings** automatically on installed AirLink syste
 
 The panel locks after five minutes without user input. Each local privileged action rechecks the live owner session; network and update actions also use owner-protected APIs. Local maintenance is serialized against the updater. Closing the panel does not expose a root shell. Recovery remains available from the installer media.
 
-The terminal has its own fixed 15-minute session limit. Opening and closing it are recorded in the `airlink-panel` journal; shell history is not saved. It requires a working local owner login. If the API cannot start, use installer-media Recovery Mode. This terminal feature is local-only and does not add a browser command endpoint. Source changes must be installed on the appliance before the button appears.
+The terminal has its own fixed 15-minute session limit. Opening and closing it are recorded in the `airlink-panel` journal; shell history is not saved. It requires a working local owner login. If the API cannot start, use installer-media Recovery Mode. The dashboard also provides a separate owner-only [browser system terminal](SYSTEM-TERMINAL.md) under Diagnostics. Source changes must be installed on the appliance before either new button appears.
 
 ## Existing installations
 

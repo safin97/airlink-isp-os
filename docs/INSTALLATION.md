@@ -26,7 +26,7 @@ The console shows server addresses and service health. Open `https://SERVER-IP/`
 
 ## Remote access
 
-Use a configured HTTPS DNS name and a trusted certificate, or route access over an administrator-configured VPN. Configure the certificate/key paths in Nginx and run `nginx -t` before reloading. VPN enrollment, DNS records and ACME credentials are site-specific and are not auto-created. Do not expose ports 5432, 6379, 8000 or SNMP management to the internet. The firewall permits inbound web traffic and essential ICMP/DHCP; databases and cache are local only. SSH is not enabled.
+Use a configured HTTPS DNS name and a trusted certificate, or route access over an administrator-configured VPN. Configure the certificate/key paths in Nginx and run `nginx -t` before reloading. VPN enrollment, DNS records and ACME credentials are site-specific and are not auto-created. Do not expose ports 5432, 6379, 8000 or SNMP management to the internet. The firewall permits inbound web traffic and essential ICMP/DHCP; databases and cache are local only. [SSH on port 2742](SSH.md) is disabled by default and can be enabled by the owner for specified client IP addresses or subnets.
 
 ## VM testing
 

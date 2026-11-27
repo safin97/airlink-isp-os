@@ -10,6 +10,53 @@ import 'package:airlink_isp_os/account_panel.dart';
 import 'package:airlink_isp_os/section_access.dart';
 
 void main() {
+  testWidgets('password change reports pending SSH synchronization', (
+    tester,
+  ) async {
+    const notice =
+        'Your login password changed. Save SSH access using your new login password.';
+    final api = Api(
+      client: MockClient(
+        (request) async => http.Response(
+          jsonEncode({'ok': true, 'ssh_sync_pending': true, 'message': notice}),
+          200,
+        ),
+      ),
+    )..user = {'role': 'owner', 'username': 'owner'};
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: AccountPanel(api: api, page: 'Change password'),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'Current-Password-573!',
+    );
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'New-Password-For-Account-492!',
+    );
+    await tester.enterText(
+      find.byType(TextFormField).at(2),
+      'New-Password-For-Account-492!',
+    );
+    await tester.ensureVisible(
+      find.widgetWithText(FilledButton, 'Change password'),
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Change password'));
+    await tester.pumpAndSettle();
+    expect(find.text(notice), findsOneWidget);
+    expect(
+      find.text('Password changed. Your other sessions have been signed out.'),
+      findsNothing,
+    );
+  });
+
   for (final role in ['manager', 'technician', 'viewer']) {
     testWidgets(
       '$role cannot open administrative pages without explicit grants',

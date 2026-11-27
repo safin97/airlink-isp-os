@@ -5,12 +5,13 @@ RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d && chmod +x /usr/sbin
     apt-get update && apt-get install -y --no-install-recommends \
     linux-image-amd64 live-boot live-config live-tools systemd-sysv dbus udev initramfs-tools \
     grub-efi-amd64-bin grub2-common efibootmgr gdisk parted dosfstools e2fsprogs squashfs-tools \
-    network-manager network-manager-l2tp strongswan iproute2 iputils-ping dnsutils nftables curl ca-certificates openssl \
+    network-manager network-manager-l2tp strongswan iproute2 iputils-ping dnsutils nftables curl ca-certificates openssl openssh-server \
     postgresql redis-server nginx python3 python3-venv python3-pip python3-pyqt6 python3-dbus \
     python3-psutil python3-cryptography xserver-xorg xinit openbox xterm fonts-dejavu \
     firmware-linux-free firmware-realtek firmware-iwlwifi pciutils pci.ids sudo less locales rsync procps && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --home-dir /var/lib/airlink --create-home --shell /usr/sbin/nologin airlink && \
+    systemctl mask ssh.service ssh.socket && rm -f /etc/ssh/ssh_host_* && \
     mkdir -p /etc/airlink /var/lib/airlink /var/backups/airlink /opt/airlink && \
     passwd -l root && printf 'en_US.UTF-8 UTF-8\n' > /etc/locale.gen && locale-gen
 FROM foundation AS graphics
@@ -35,6 +36,7 @@ RUN cp /opt/airlink/deployment/systemd/* /etc/systemd/system/ && \
     cp /opt/airlink/deployment/nginx.conf /etc/nginx/sites-available/airlink && \
     rm -f /etc/nginx/sites-enabled/default && ln -s /etc/nginx/sites-available/airlink /etc/nginx/sites-enabled/airlink && \
     cp /opt/airlink/deployment/nftables.conf /etc/nftables.conf && \
+    install -D -m 0644 /opt/airlink/deployment/ssh-nftables.conf /etc/systemd/system/nftables.service.d/airlink-ssh.conf && \
     printf 'bind 127.0.0.1 ::1\nprotected-mode yes\nport 6379\nsupervised systemd\ndaemonize no\ndir /var/lib/redis\n' > /etc/redis/redis.conf && \
     chown redis:redis /etc/redis/redis.conf && \
     printf '[main]\nplugins=keyfile\n[ifupdown]\nmanaged=true\n' > /etc/NetworkManager/NetworkManager.conf && \

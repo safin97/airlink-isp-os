@@ -30,6 +30,10 @@ For real SAS4 data and background monitoring from your VS Code terminal, run `./
 
 Owners can use **Settings → Backups** to [download encrypted backups or restore a file from their PC](docs/DOWNLOAD-BACKUPS.md), and set up [weekly MEGA cloud backups and restore them](docs/MEGA-BACKUPS.md), without a domain. Google Drive backup integration has been removed.
 
+On installed Linux appliances, **Diagnostics → System terminal** opens an [owner-only browser root shell](docs/SYSTEM-TERMINAL.md) after password verification.
+
+**Settings → SSH remote access** configures [PuTTY / SSH access on port 2742](docs/SSH.md) with the owner's AirLink login password, a dedicated SSH username and allowed client IP addresses.
+
 ## Test
 
 ```sh

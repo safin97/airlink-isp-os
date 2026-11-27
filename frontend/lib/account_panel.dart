@@ -69,7 +69,7 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
       message = null;
     });
     try {
-      await widget.api.request(
+      final result = await widget.api.request(
         '/auth/password',
         method: 'PUT',
         body: {
@@ -83,8 +83,9 @@ class _AccountPanelState extends State<AccountPanel> with LanguageRebuild {
       next.clear();
       confirm.clear();
       setState(
-        () => message =
-            'Password changed. Your other sessions have been signed out.',
+        () => message = result['ssh_sync_pending'] == true
+            ? '${result['message']}'
+            : 'Password changed. Your other sessions have been signed out.',
       );
     } catch (e) {
       if (mounted) setState(() => error = e.toString());

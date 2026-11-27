@@ -40,6 +40,7 @@ import 'diagnostics_screen.dart';
 import 'deye_solar.dart';
 import 'ttlock.dart';
 import 'vpn_settings.dart';
+import 'ssh_settings.dart';
 import 'client_portal.dart';
 
 Color get navy => themeColor(0xff071426, 0xfff2f5fa);
@@ -3398,6 +3399,7 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
     if (hasSection(api.user!, 'device_api_access'))
       'Device API logins': Icons.router_outlined,
     if (hasSection(api.user!, 'vpn')) 'VPN': Icons.vpn_key_outlined,
+    if (api.user?['role'] == 'owner') 'SSH remote access': Icons.terminal,
     'Session & permissions': Icons.security_outlined,
   };
 
@@ -3501,6 +3503,8 @@ class _OperationsState extends State<Operations> with LanguageRebuild {
         return hasSection(api.user!, 'vpn')
             ? VpnSettings(api: api)
             : const SizedBox.shrink();
+      case 'SSH remote access':
+        return SshSettings(api: api);
       case 'Audit log':
         return section(
           'Audit trail',
